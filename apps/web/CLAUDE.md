@@ -1,7 +1,7 @@
-# CLAUDE.md
+# CLAUDE.md — web app
 
-> Read `AGENTS.md` first. It is the canonical agent context for this repo.
-> This file adds Claude Code-specific rules that AGENTS.md does not cover.
+> Read [`AGENTS.md`](AGENTS.md) first (web-specific context), and the root [`../../AGENTS.md`](../../AGENTS.md) for monorepo-wide topology.
+> This file adds Claude Code-specific rules for the **web app** only. Root-level Claude rules live at [`../../CLAUDE.md`](../../CLAUDE.md).
 
 ## Hard rules
 

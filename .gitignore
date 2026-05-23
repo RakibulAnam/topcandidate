@@ -1,0 +1,22 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Per-developer Claude Code overrides (project-level .claude/settings.json IS committed)
+**/.claude/settings.local.json
+
+# Catch-all env (each app maintains its own .env.example)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Per-app build / dependency dirs — each app's own .gitignore is authoritative,
+# these are belt-and-braces so a stale checkout can't accidentally commit them.
+**/node_modules/
+**/dist/
+**/build/
+**/.dart_tool/
+**/.vercel/

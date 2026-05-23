@@ -1,10 +1,13 @@
 # bKash Watcher — Companion App Reference
 
 > **Audience: the web app and any AI agent maintaining it.**
-> Paste this file into the root of the web app's repository as
-> `BKASH_WATCHER.md` (or similar). It describes the companion Android app
-> that confirms bKash payments for the web app. The watcher repo lives
-> separately; this document is all the web app needs to know.
+> Long-form narrative reference for the mobile companion. The short, normative
+> spec of the webhook contract lives at
+> [`../../docs/contracts/webhook-confirm-purchase.md`](../../docs/contracts/webhook-confirm-purchase.md) —
+> that is the canonical source of truth; this file is the explanatory companion.
+>
+> Both apps now live in the same monorepo at `topcandidate/`; this file stays
+> here as the watcher's operator-facing reference document.
 
 ---
 

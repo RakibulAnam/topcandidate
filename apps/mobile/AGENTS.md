@@ -1,9 +1,12 @@
-# AGENTS.md — bKash Watcher
+# AGENTS.md — bKash Watcher (mobile app)
 
 > Mandatory reading for any AI agent (Claude Code, Cursor, Copilot, etc.) that
-> edits this repository. This file is the **stable contract** between humans
-> and the AI agents that maintain the codebase. Everything else (spec/, README,
-> code comments) flows from this document.
+> edits the **mobile app**. Read the root [`../../AGENTS.md`](../../AGENTS.md) first for
+> monorepo-wide topology; this file is the mobile-specific guide.
+>
+> This file is the **stable contract** between humans and the AI agents that
+> maintain the mobile codebase. Everything else (spec/, README, code comments)
+> flows from this document.
 
 ---
 

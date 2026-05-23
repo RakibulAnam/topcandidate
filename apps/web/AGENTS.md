@@ -1,7 +1,8 @@
-# AGENTS.md — TOP CANDIDATE
+# AGENTS.md — TOP CANDIDATE (web app)
 
-> Single source of truth for AI agents (Claude Code, Cursor, Antigravity, etc.) working on this repo.
-> Read this before touching code. Updating this file is **part of every change** — see the maintenance protocol below.
+> Single source of truth for AI agents (Claude Code, Cursor, Antigravity, etc.) working on the **web app**.
+> Read the root [`../../AGENTS.md`](../../AGENTS.md) first for monorepo topology; this file is the web-specific guide.
+> Updating this file is **part of every change** — see the maintenance protocol below.
 
 ---
 
@@ -64,7 +65,7 @@ A future mock-interview marketplace is planned but **out of scope** until explic
   client-side, no Gemini call (would burn the 2-call budget).
 - Import map in `index.html` for CDN-loaded modules (lucide-react, @google/genai, docx, etc.) — build also bundles locally
 
-No monorepo, no workspaces. Single Vite app.
+Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion). No npm workspaces, no Turborepo — each app is independently built. See [`../../docs/decisions/0001-adopt-polyglot-monorepo.md`](../../docs/decisions/0001-adopt-polyglot-monorepo.md).
 
 ---
 
