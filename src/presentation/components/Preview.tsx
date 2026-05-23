@@ -26,6 +26,9 @@ import {
   MessageSquare,
   AlertTriangle,
   Circle,
+  Pencil,
+  PencilOff,
+  X,
 } from 'lucide-react';
 import { EditableElement } from './EditableElement';
 import {
@@ -129,6 +132,12 @@ export const Preview: React.FC<PreviewProps> = ({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [cooldownText, setCooldownText] = useState<string | null>(null);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
+  // Edit mode is only available on the first visit (readOnly=false). Starts on.
+  const [editModeActive, setEditModeActive] = useState(!readOnly);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // Actual read-only state fed to EditableElement instances.
+  const isReadOnly = readOnly || !editModeActive;
 
   useEffect(() => {
     if (!cooldownEndsAt || canRegenerate) {
@@ -349,7 +358,7 @@ export const Preview: React.FC<PreviewProps> = ({
           }
           style={nameStyle}
           placeholder="YOUR NAME"
-          readOnly={readOnly}
+          readOnly={isReadOnly}
         />
         {contactParts.length > 0 && (
           <div style={contactLineStyle}>{contactParts.join('  |  ')}</div>
@@ -371,7 +380,7 @@ export const Preview: React.FC<PreviewProps> = ({
               whiteSpace: 'pre-line',
             }}
             placeholder="Add a professional summary..."
-            readOnly={readOnly}
+            readOnly={isReadOnly}
           />
         </section>
       )}
@@ -392,7 +401,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   }}
                   style={itemTitleStyle}
                   placeholder="Role"
-                  readOnly={readOnly}
+                  readOnly={isReadOnly}
                 />
                 <span style={itemMetaStyle}>
                   {formatDate(exp.startDate)} –{' '}
@@ -408,7 +417,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 }}
                 style={italicLineStyle}
                 placeholder="Company"
-                readOnly={readOnly}
+                readOnly={isReadOnly}
               />
               {exp.refinedBullets && exp.refinedBullets.length > 0 ? (
                 <ul style={bulletListStyle}>
@@ -429,7 +438,7 @@ export const Preview: React.FC<PreviewProps> = ({
                           };
                           onUpdate({ ...data, experience: newExp });
                         }}
-                        readOnly={readOnly}
+                        readOnly={isReadOnly}
                       />
                     </li>
                   ))}
@@ -445,7 +454,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   }}
                   placeholder="No description provided. Click to add one."
                   style={{ ...bodyTextStyle, fontStyle: 'italic' }}
-                  readOnly={readOnly}
+                  readOnly={isReadOnly}
                 />
               )}
             </div>
@@ -488,7 +497,7 @@ export const Preview: React.FC<PreviewProps> = ({
                           };
                           onUpdate({ ...data, projects: newProjects });
                         }}
-                        readOnly={readOnly}
+                        readOnly={isReadOnly}
                       />
                     </li>
                   ))}
@@ -507,7 +516,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   }}
                   placeholder="No description provided. Click to add one."
                   style={{ ...bodyTextStyle, fontStyle: 'italic' }}
-                  readOnly={readOnly}
+                  readOnly={isReadOnly}
                 />
               )}
             </div>
@@ -634,7 +643,16 @@ export const Preview: React.FC<PreviewProps> = ({
       {isVisible('skills') && data.skills.length > 0 && (
         <section style={sectionStyle}>
           <h3 style={sectionHeadingStyle}>Skills</h3>
-          <div style={bodyTextStyle}>{data.skills.join(', ')}</div>
+          {data.skillCategories && data.skillCategories.length > 0 ? (
+            data.skillCategories.map((cat) => (
+              <div key={cat.category} style={bodyTextStyle}>
+                <span style={{ fontWeight: 600 }}>{cat.category}:</span>{' '}
+                {cat.items.join(', ')}
+              </div>
+            ))
+          ) : (
+            <div style={bodyTextStyle}>{data.skills.join(', ')}</div>
+          )}
         </section>
       )}
 
@@ -796,6 +814,24 @@ export const Preview: React.FC<PreviewProps> = ({
         </div>
 
         <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-end flex-wrap overflow-x-auto scrollbar-hide">
+          {/* Edit mode toggle — only shown when the session allows editing */}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => setEditModeActive(v => !v)}
+              className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-md border shadow-sm transition-colors ${
+                editModeActive
+                  ? 'bg-accent-400 border-accent-500 text-brand-900 hover:bg-accent-500'
+                  : 'bg-white border-charcoal-300 text-charcoal-600 hover:bg-charcoal-50'
+              }`}
+              title={editModeActive ? t('preview.editModeOn') : t('preview.editModeOff')}
+            >
+              {editModeActive
+                ? <Pencil size={15} />
+                : <PencilOff size={15} />}
+              {editModeActive ? t('preview.editModeOn') : t('preview.editModeOff')}
+            </button>
+          )}
           {isGeneralResume && (
             <button
               type="button"
@@ -859,6 +895,27 @@ export const Preview: React.FC<PreviewProps> = ({
           )}
         </div>
       </header>
+
+      {/* One-time edit banner — shown only on fresh post-generation visit */}
+      {!readOnly && editModeActive && !bannerDismissed && (
+        <div className="shrink-0 flex items-start gap-4 bg-accent-50 border-b border-accent-300 px-4 md:px-6 py-3.5">
+          <div className="w-8 h-8 rounded-full bg-accent-400 text-brand-900 flex items-center justify-center shrink-0 mt-0.5">
+            <Pencil size={15} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-brand-800">{t('preview.editBannerHeading')}</p>
+            <p className="text-[13px] text-brand-700 mt-0.5 leading-relaxed">{t('preview.editBannerBody')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBannerDismissed(true)}
+            className="p-1.5 text-brand-600 hover:text-brand-900 hover:bg-accent-200 rounded-lg transition-colors shrink-0"
+            aria-label={t('preview.editBannerDismiss')}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
         {/* Left Sidebar — template picker + toolkit navigation */}

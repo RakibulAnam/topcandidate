@@ -8,12 +8,6 @@
 //   - SectionHeader with a Saffron eyebrow + Fraunces display title.
 //   - TipCard — always-on "Quick guide" panel above the form (rules + real
 //     examples). User can hide it; defaults open.
-//   - PromptList — numbered scaffolding above brain-dump textareas: 3 small
-//     questions that walk the user through what to type.
-//   - WritingChecklist — live, transparent feedback under brain-dump
-//     textareas. Four explicit checks (action verb, number, outcome, detail)
-//     that flip from hollow to filled as the user types. Replaces the old
-//     opaque 3-bar QualityMeter.
 //   - PolishHint — small "type messy, the AI will polish" reassurance next
 //     to brain-dump fields.
 //   - CollapsibleItem — list cards (Experience, Projects, Education, etc.)
@@ -59,6 +53,9 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { MonthPicker } from './ui/month-picker';
+import { EmailInput } from './ui/EmailInput';
+import { PhoneInput } from './ui/PhoneInput';
+import { LanguagePicker } from './ui/LanguagePicker';
 import { useT } from '../i18n/LocaleContext';
 
 // -----------------------------------------------------------------------------
@@ -250,140 +247,10 @@ const TipCard = ({
   );
 };
 
-// Heuristic signals for the free-form "brain dump" textareas. Pure regex —
-// no network call. Drives WritingChecklist below so the user can see exactly
-// what they have and what's still missing.
-const ACTION_VERB_RE =
-  /\b(led|ran|built|designed|launched|grew|managed|shipped|drove|created|improved|reduced|increased|organized|delivered|owned|scaled|developed|implemented|coached|mentored|taught|researched|analyzed|wrote|negotiated|won|closed|sold|recruited|hired|trained|advised|architected|deployed|automated|published|presented|founded|coordinated|streamlined|optimized|produced|planned|facilitated|launched|drafted|authored|spearheaded|oversaw|supervised|curated|redesigned|rebuilt|migrated|rolled\s+out)\b/i;
-const METRIC_RE =
-  /(\$\s?\d)|(\b\d+(\.\d+)?\s?(%|x|k|m|million|thousand|hrs?|hours?|mins?|days?|weeks?|months?|years?|yrs?|people|users|customers|clients|students|patients|cases|tickets|leads|orders|reps|members|sessions|events)\b)/i;
-const OUTCOME_RE =
-  /\b(resulted in|leading to|so that|because of|cut|saved|raised|earned|grew|reduced|increased|improved|drove|won|closed|hit|exceeded|beat|raised by|fell|rose)\b/i;
-
-type WritingCheck = {
-  id: string;
-  label: string;
-  hint: string;
-  passed: boolean;
-};
-
-function getWritingChecks(text: string, t: ReturnType<typeof useT>): WritingCheck[] {
-  const trimmed = text.trim();
-  const words = trimmed.length === 0 ? 0 : trimmed.split(/\s+/).length;
-  const hasVerb = ACTION_VERB_RE.test(trimmed);
-  const hasMetric = METRIC_RE.test(trimmed);
-  const hasOutcome = hasMetric || OUTCOME_RE.test(trimmed);
-  return [
-    {
-      id: 'verb',
-      label: t('formSteps.checkVerbLabel'),
-      hint: t('formSteps.checkVerbHint'),
-      passed: hasVerb,
-    },
-    {
-      id: 'metric',
-      label: t('formSteps.checkMetricLabel'),
-      hint: t('formSteps.checkMetricHint'),
-      passed: hasMetric,
-    },
-    {
-      id: 'outcome',
-      label: t('formSteps.checkOutcomeLabel'),
-      hint: t('formSteps.checkOutcomeHint'),
-      passed: hasOutcome,
-    },
-    {
-      id: 'detail',
-      label: t('formSteps.checkDetailLabel'),
-      hint: t('formSteps.checkDetailHint'),
-      passed: words >= 18,
-    },
-  ];
-}
-
-// Numbered scaffolding above brain-dump textareas — turns "what do I write?"
-// into 3 small questions the user can answer one at a time.
-const PromptList = ({ prompts }: { prompts: string[] }) => (
-  <ol className="rounded-xl border border-charcoal-200 bg-charcoal-50/70 px-4 py-3 space-y-1.5">
-    {prompts.map((p, i) => (
-      <li
-        key={i}
-        className="flex items-start gap-2.5 text-[13px] leading-relaxed text-brand-700"
-      >
-        <span className="w-5 h-5 shrink-0 rounded-full bg-white border border-charcoal-200 text-[11px] font-semibold text-accent-600 flex items-center justify-center mt-px">
-          {i + 1}
-        </span>
-        <span>{p}</span>
-      </li>
-    ))}
-  </ol>
-);
-
-// Live, transparent feedback under brain-dump textareas. Replaces the old
-// 3-bar opaque meter with explicit checks the user can read at a glance.
-const WritingChecklist = ({ text }: { text: string }) => {
-  const t = useT();
-  const items = getWritingChecks(text, t);
-  const passed = items.filter(i => i.passed).length;
-  const empty = !text.trim();
-  const allPass = passed === items.length;
-
-  return (
-    <div className="rounded-xl border border-charcoal-200 bg-white p-3.5 mt-1.5">
-      <div className="flex items-center justify-between mb-2.5">
-        <p className="text-[10px] uppercase tracking-[0.22em] text-charcoal-500 font-semibold">
-          {empty
-            ? t('formSteps.weCheckFour')
-            : allPass
-              ? t('formSteps.lookingGreat')
-              : t('formSteps.soFarN', { passed, total: items.length })}
-        </p>
-        {allPass && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-700">
-            <Sparkles size={12} />
-            {t('formSteps.plentyForAi')}
-          </span>
-        )}
-      </div>
-      <ul className="space-y-2">
-        {items.map(item => (
-          <li
-            key={item.id}
-            className="flex items-start gap-2.5 text-[13px] leading-snug"
-          >
-            <span
-              aria-hidden
-              className={`mt-0.5 w-[18px] h-[18px] rounded-full flex items-center justify-center shrink-0 transition-colors ${
-                item.passed
-                  ? 'bg-accent-500 text-white'
-                  : 'border border-charcoal-300 bg-white'
-              }`}
-            >
-              {item.passed && <Check size={11} strokeWidth={3} />}
-            </span>
-            <span className="flex-1 min-w-0">
-              <span
-                className={`font-semibold ${
-                  item.passed ? 'text-brand-700' : 'text-charcoal-700'
-                }`}
-              >
-                {item.label}
-              </span>
-              <span className="text-charcoal-500"> — {item.hint}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-};
-
 // Friendlier alternative to TipCard for brain-dump-heavy steps (Experience,
 // Projects). Leads with a *reassurance hero* — "write it however feels
 // natural, the AI cleans it up" — instead of a wall of rules. Examples are
 // tucked behind a toggle so they're available without being in your face.
-// The "what to mention" scaffolding lives inline next to each textarea via
-// PromptList, so it isn't duplicated up here.
 const WritingGuide = ({
   reassurance,
   examples,
@@ -852,15 +719,13 @@ export const PersonalInfoStep: React.FC<{
           <InputGroup
             label={t('formSteps.emailLabel')}
             required
-            error={errors?.['personalInfo.email']}
           >
-            <Input
+            <EmailInput
               error={errors?.['personalInfo.email']}
-              type="email"
               value={data.email}
-              onChange={e => update({ ...data, email: e.target.value })}
+              onChange={v => update({ ...data, email: v })}
               placeholder={t('formSteps.emailPlaceholder')}
-              autoComplete="email"
+              invalidMessage={t('builder.errEmailInvalid')}
             />
           </InputGroup>
         </div>
@@ -875,12 +740,11 @@ export const PersonalInfoStep: React.FC<{
         />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <InputGroup label={t('formSteps.phoneLabel')}>
-            <Input
-              type="tel"
+            <PhoneInput
               value={data.phone}
-              onChange={e => update({ ...data, phone: e.target.value })}
+              onChange={v => update({ ...data, phone: v })}
               placeholder={t('formSteps.phonePlaceholder')}
-              autoComplete="tel"
+              invalidMessage={t('builder.errPhoneInvalid')}
             />
           </InputGroup>
           <InputGroup
@@ -1055,13 +919,6 @@ export const ProjectsStep: React.FC<{
               required
               error={errors?.[`projects.${index}.rawDescription`]}
             >
-              <PromptList
-                prompts={[
-                  t('formSteps.projectsPrompt1'),
-                  t('formSteps.projectsPrompt2'),
-                  t('formSteps.projectsPrompt3'),
-                ]}
-              />
               <PolishHint />
               <TextArea
                 error={errors?.[`projects.${index}.rawDescription`]}
@@ -1072,7 +929,6 @@ export const ProjectsStep: React.FC<{
                 }
                 placeholder={t('formSteps.projectsDescPlaceholder')}
               />
-              <WritingChecklist text={project.rawDescription} />
             </InputGroup>
           </CollapsibleItem>
         );
@@ -1247,13 +1103,6 @@ export const ExperienceStep: React.FC<{
               required
               error={errors?.[`experience.${index}.rawDescription`]}
             >
-              <PromptList
-                prompts={[
-                  t('formSteps.experiencePrompt1'),
-                  t('formSteps.experiencePrompt2'),
-                  t('formSteps.experiencePrompt3'),
-                ]}
-              />
               <PolishHint />
               <TextArea
                 error={errors?.[`experience.${index}.rawDescription`]}
@@ -1264,7 +1113,6 @@ export const ExperienceStep: React.FC<{
                 }
                 placeholder={t('formSteps.experienceDescPlaceholder')}
               />
-              <WritingChecklist text={exp.rawDescription} />
             </InputGroup>
           </CollapsibleItem>
         );
@@ -1390,13 +1238,10 @@ export const EducationStep: React.FC<{
                   required
                   error={errors?.[`education.${index}.startDate`]}
                 >
-                  <Input
-                    error={errors?.[`education.${index}.startDate`]}
+                  <MonthPicker
+                    isError={!!errors?.[`education.${index}.startDate`]}
                     value={edu.startDate}
-                    onChange={e =>
-                      updateEdu(edu.id, 'startDate', e.target.value)
-                    }
-                    placeholder={t('formSteps.educationStartYearPlaceholder')}
+                    onChange={val => updateEdu(edu.id, 'startDate', val)}
                   />
                 </InputGroup>
                 <InputGroup
@@ -1404,11 +1249,10 @@ export const EducationStep: React.FC<{
                   required
                   error={errors?.[`education.${index}.endDate`]}
                 >
-                  <Input
-                    error={errors?.[`education.${index}.endDate`]}
+                  <MonthPicker
+                    isError={!!errors?.[`education.${index}.endDate`]}
                     value={edu.endDate}
-                    onChange={e => updateEdu(edu.id, 'endDate', e.target.value)}
-                    placeholder={t('formSteps.educationEndYearPlaceholder')}
+                    onChange={val => updateEdu(edu.id, 'endDate', val)}
                   />
                 </InputGroup>
               </div>
@@ -1807,13 +1651,6 @@ export const ExtracurricularStep: React.FC<{
               </InputGroup>
             </div>
             <InputGroup label={t('formSteps.extracurricularsDescLabel')} optional>
-              <PromptList
-                prompts={[
-                  t('formSteps.extracurricularsPrompt1'),
-                  t('formSteps.extracurricularsPrompt2'),
-                  t('formSteps.extracurricularsPrompt3'),
-                ]}
-              />
               <PolishHint />
               <TextArea
                 rows={3}
@@ -1823,7 +1660,6 @@ export const ExtracurricularStep: React.FC<{
                 }
                 placeholder={t('formSteps.extracurricularsDescPlaceholder')}
               />
-              <WritingChecklist text={item.description} />
             </InputGroup>
           </CollapsibleItem>
         );
@@ -2304,11 +2140,10 @@ export const LanguagesStep: React.FC<{
               required
               error={errors?.[`languages.${i}.name`]}
             >
-              <Input
-                error={errors?.[`languages.${i}.name`]}
+              <LanguagePicker
+                isError={!!errors?.[`languages.${i}.name`]}
                 value={item.name}
-                onChange={e => updateItem(item.id, 'name', e.target.value)}
-                placeholder={t('formSteps.languagesLanguagePlaceholder')}
+                onChange={val => updateItem(item.id, 'name', val)}
               />
             </InputGroup>
             <InputGroup label={t('formSteps.languagesProficiencyLabel')} required>
@@ -2431,26 +2266,25 @@ export const ReferencesStep: React.FC<{
               <InputGroup
                 label={t('formSteps.refsEmailLabel')}
                 required
-                error={errors?.[`references.${i}.email`]}
               >
-                <Input
-                  type="email"
+                <EmailInput
                   error={errors?.[`references.${i}.email`]}
                   value={item.email}
-                  onChange={e => updateItem(item.id, 'email', e.target.value)}
+                  onChange={v => updateItem(item.id, 'email', v)}
                   placeholder={t('formSteps.refsEmailPlaceholder')}
+                  invalidMessage={t('builder.errEmailInvalid')}
                 />
               </InputGroup>
               <InputGroup
                 label={t('formSteps.refsPhoneLabel')}
                 required
-                error={errors?.[`references.${i}.phone`]}
               >
-                <Input
+                <PhoneInput
                   error={errors?.[`references.${i}.phone`]}
                   value={item.phone}
-                  onChange={e => updateItem(item.id, 'phone', e.target.value)}
+                  onChange={v => updateItem(item.id, 'phone', v)}
                   placeholder={t('formSteps.refsPhonePlaceholder')}
+                  invalidMessage={t('builder.errPhoneInvalid')}
                 />
               </InputGroup>
               <InputGroup

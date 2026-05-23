@@ -136,6 +136,15 @@ export interface InterviewQuestion {
   category: InterviewQuestionCategory;
   whyAsked: string;       // What the interviewer is evaluating.
   answerStrategy: string; // Notes on how to structure a strong answer.
+  // Bengali (Bangla) translations. Optional for back-compat with resumes
+  // generated before bilingual prep landed — the UI falls back to the English
+  // field when these are absent. The English fields stay authoritative
+  // (recruiters scan English; copy-paste-to-LinkedIn / brief exports default
+  // to English). The Bn versions are for the candidate's own rehearsal, since
+  // BD interviews routinely swing between languages even at MNCs.
+  questionBn?: string;
+  whyAskedBn?: string;
+  answerStrategyBn?: string;
 }
 
 export type ToolkitItem =
@@ -167,15 +176,37 @@ export interface JobToolkit {
 /**
  * Shape returned by the combined toolkit generator — cover letter + outreach
  * email + LinkedIn note + interview questions produced in a single AI call
- * to stay under Gemini's free-tier RPM budget. All fields are required; if
- * any come back empty the generator throws and the service records the error
- * for every toolkit item at once.
+ * to stay under Gemini's free-tier RPM budget.
+ *
+ * Each artifact is OPTIONAL and validated in isolation. If one slot fails
+ * (empty payload, fabricated tokens, missing specificity anchor, etc.), the
+ * generator records the reason in `errors[<item>]` and continues — the other
+ * three artifacts are still returned so the user gets whatever the model
+ * produced cleanly. The all-or-nothing behaviour we used to have caused the
+ * whole toolkit to disappear on a single weak interview answer, forcing the
+ * user to manually regenerate every item via the per-card retry buttons.
+ *
+ * `errors` may be empty (perfect generation) or contain up to 4 keys (total
+ * failure). Per-item failures are recovered via /api/toolkit-item which is
+ * free and ungated; the bundled call costs one toolkit credit regardless.
  */
 export interface GeneratedToolkit {
-  coverLetter: string;
-  outreachEmail: OutreachEmail;
-  linkedInMessage: string;
-  interviewQuestions: InterviewQuestion[];
+  coverLetter?: string;
+  outreachEmail?: OutreachEmail;
+  linkedInMessage?: string;
+  interviewQuestions?: InterviewQuestion[];
+  errors: ToolkitErrors;
+}
+
+// Categorized skills bucket (AI-generated). Each category groups related
+// items in JD casing (Languages, Frameworks, Tools, Cloud & Infra, Databases,
+// Testing, Methodologies, Domain). Renderers use skillCategories when present
+// and fall back to the flat skills[] for back-compat with older saved
+// resumes. The flat skills[] stays authoritative as well — JD-ordered, used
+// by exporters that need a single line.
+export interface SkillCategory {
+  category: string;
+  items: string[];
 }
 
 export interface ResumeData {
@@ -186,7 +217,8 @@ export interface ResumeData {
   experience: WorkExperience[];
   projects: Project[]; // Added Projects
   education: Education[];
-  skills: string[]; // User input -> AI Refined
+  skills: string[]; // User input -> AI Refined (JD-ordered flat list)
+  skillCategories?: SkillCategory[]; // AI-generated grouped view of skills
 
   // New Sections
   extracurriculars?: Extracurricular[];
@@ -217,6 +249,7 @@ export type ResumeTemplate =
 export interface OptimizedResumeData {
   summary: string;
   skills: string[];
+  skillCategories?: SkillCategory[];
   experience: {
     id: string;
     refinedBullets: string[];

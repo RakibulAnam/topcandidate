@@ -10,7 +10,6 @@ import {
     Users,
     Target,
     Sparkles,
-    Star,
     Quote,
     Play,
     Menu,
@@ -87,8 +86,6 @@ const SectionEyebrow = ({ children }: { children: React.ReactNode }) => (
 );
 
 const FEATURE_ICONS = [FileText, Mail, ArrowUpRight, Linkedin, MessageSquare, Users] as const;
-const CONSULTANT_RATINGS = [4.9, 5.0, 4.8] as const;
-const CONSULTANT_SESSIONS = [142, 88, 67] as const;
 const TESTIMONIAL_INITIALS = ['PK', 'MT', 'LR'] as const;
 
 export const LandingScreen = ({ onGetStarted }: Props) => {
@@ -105,15 +102,6 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
         n: String(n).padStart(2, '0'),
         title: t(`landing.step${n}Title` as 'landing.step1Title'),
         body: t(`landing.step${n}Body` as 'landing.step1Body'),
-    }));
-
-    const consultants = [1, 2, 3].map((n, i) => ({
-        name: t(`landing.consultant${n}Name` as 'landing.consultant1Name'),
-        focus: t(`landing.consultant${n}Focus` as 'landing.consultant1Focus'),
-        company: t(`landing.consultant${n}Company` as 'landing.consultant1Company'),
-        rate: t(`landing.consultant${n}Rate` as 'landing.consultant1Rate'),
-        rating: CONSULTANT_RATINGS[i],
-        sessions: CONSULTANT_SESSIONS[i],
     }));
 
     const testimonials = [1, 2, 3].map((n, i) => ({
@@ -166,33 +154,33 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                         <Wordmark />
                     </button>
 
-                    <div className="hidden md:flex items-center gap-8 text-sm font-medium text-brand-500">
+                    <div className="hidden lg:flex items-center gap-6 xl:gap-8 text-sm font-medium text-brand-500">
                         <button type="button" onClick={() => scrollTo('toolkit')} className="hover:text-brand-700 transition-colors">{t('landing.navToolkit')}</button>
-                        <button type="button" onClick={() => scrollTo('mock-interviews')} className="hover:text-brand-700 transition-colors">{t('landing.navMockInterviews')}</button>
-                        <button type="button" onClick={() => scrollTo('how')} className="hover:text-brand-700 transition-colors">{t('landing.navHow')}</button>
+                        <button type="button" onClick={() => scrollTo('mock-interviews')} className="hover:text-brand-700 transition-colors whitespace-nowrap">{t('landing.navMockInterviews')}</button>
+                        <button type="button" onClick={() => scrollTo('how')} className="hover:text-brand-700 transition-colors whitespace-nowrap">{t('landing.navHow')}</button>
                         <button type="button" onClick={() => scrollTo('proof')} className="hover:text-brand-700 transition-colors">{t('landing.navProof')}</button>
                     </div>
 
-                    <div className="hidden md:flex items-center gap-2">
+                    <div className="hidden lg:flex items-center gap-2">
                         <LanguageToggle />
                         <button
                             type="button"
                             onClick={onGetStarted}
-                            className="text-sm font-semibold text-brand-600 hover:text-brand-700 transition-colors px-3 py-2"
+                            className="text-sm font-semibold text-brand-600 hover:text-brand-700 transition-colors px-3 py-2 whitespace-nowrap"
                         >
                             {t('landing.navSignIn')}
                         </button>
                         <button
                             type="button"
                             onClick={onGetStarted}
-                            className="inline-flex items-center gap-1.5 text-sm font-semibold bg-brand-700 text-charcoal-50 px-4 py-2 rounded-full hover:bg-brand-800 transition-colors"
+                            className="inline-flex items-center gap-1.5 text-sm font-semibold bg-brand-700 text-charcoal-50 px-4 py-2 rounded-full hover:bg-brand-800 transition-colors whitespace-nowrap"
                         >
                             {t('landing.navGetStarted')}
                             <ArrowRight size={14} />
                         </button>
                     </div>
 
-                    <div className="md:hidden flex items-center gap-2">
+                    <div className="lg:hidden flex items-center gap-2">
                         <LanguageToggle variant="compact" />
                         <button
                             type="button"
@@ -206,7 +194,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                 </div>
 
                 {mobileOpen && (
-                    <div className="md:hidden border-t border-charcoal-200 bg-charcoal-50">
+                    <div className="lg:hidden border-t border-charcoal-200 bg-charcoal-50">
                         <div className="px-4 py-4 flex flex-col gap-1 text-sm font-medium text-brand-600">
                             <button type="button" onClick={() => scrollTo('toolkit')} className="text-left py-2.5">{t('landing.navToolkit')}</button>
                             <button type="button" onClick={() => scrollTo('mock-interviews')} className="text-left py-2.5">{t('landing.navMockInterviews')}</button>
@@ -236,13 +224,13 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                                 {t('landing.heroBadge')}
                             </div>
 
-                            <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-semibold leading-[1.02] text-brand-700 mb-6">
+                            <h1 className="font-display text-4xl sm:text-5xl md:text-6xl lg:text-6xl xl:text-7xl font-semibold leading-[1.04] text-brand-700 mb-6 break-words">
                                 {t('landing.heroTitlePrefix')}{' '}
                                 <span className="italic text-accent-500">{t('landing.heroTitleAccent')}</span>{' '}
                                 {t('landing.heroTitleSuffix')}
                             </h1>
 
-                            <p className="text-lg sm:text-xl text-brand-500 leading-relaxed max-w-2xl mb-8">
+                            <p className="text-base sm:text-lg lg:text-xl text-brand-500 leading-relaxed max-w-2xl mb-8">
                                 {t('landing.heroSubtitle')}
                             </p>
 
@@ -250,7 +238,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                                 <button
                                     type="button"
                                     onClick={onGetStarted}
-                                    className="inline-flex items-center justify-center gap-2 px-6 py-4 text-base font-semibold text-charcoal-50 bg-brand-700 rounded-full hover:bg-brand-800 transition-colors"
+                                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-6 py-3.5 sm:py-4 text-base font-semibold text-charcoal-50 bg-brand-700 rounded-full hover:bg-brand-800 transition-colors"
                                 >
                                     {t('landing.heroCtaPrimary')}
                                     <ArrowRight size={18} />
@@ -258,7 +246,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                                 <button
                                     type="button"
                                     onClick={() => scrollTo('how')}
-                                    className="inline-flex items-center justify-center gap-2 px-6 py-4 text-base font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-full hover:border-brand-700 transition-colors"
+                                    className="inline-flex w-full sm:w-auto items-center justify-center gap-2 px-6 py-3.5 sm:py-4 text-base font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-full hover:border-brand-700 transition-colors"
                                 >
                                     <Play size={16} className="fill-current" />
                                     {t('landing.heroCtaSecondary')}
@@ -302,7 +290,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
             </section>
 
             {/* The toolkit */}
-            <section id="toolkit" className="py-20 lg:py-28">
+            <section id="toolkit" className="py-16 sm:py-20 lg:py-28">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="max-w-3xl mb-14">
                         <SectionEyebrow>{t('landing.toolkitEyebrow')}</SectionEyebrow>
@@ -328,74 +316,52 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                 </div>
             </section>
 
-            {/* Mock interviews spotlight */}
-            <section id="mock-interviews" className="bg-brand-700 text-charcoal-100 py-20 lg:py-28">
+            {/* Mock interviews — coming soon */}
+            <section id="mock-interviews" className="bg-brand-700 text-charcoal-100 py-16 sm:py-20 lg:py-28">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="grid lg:grid-cols-12 gap-12 lg:gap-16 items-center">
-                        <div className="lg:col-span-5">
+                    <div className="grid lg:grid-cols-12 gap-10 lg:gap-16 items-center">
+                        <div className="lg:col-span-7">
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-400/10 text-accent-300 text-xs font-semibold border border-accent-400/30 mb-5">
+                                <Sparkles size={12} />
+                                {t('landing.mockSoonBadge')}
+                            </div>
                             <p className="text-[11px] uppercase tracking-[0.22em] text-accent-400 font-semibold mb-4">
                                 {t('landing.mockEyebrow')}
                             </p>
-                            <h2 className="font-display text-4xl sm:text-5xl font-semibold leading-[1.05] text-charcoal-50 mb-5">
+                            <h2 className="font-display text-3xl sm:text-4xl lg:text-5xl font-semibold leading-[1.05] text-charcoal-50 mb-5">
                                 {t('landing.mockTitle')}
                             </h2>
-                            <p className="text-lg text-charcoal-300 leading-relaxed mb-8">
+                            <p className="text-base sm:text-lg text-charcoal-300 leading-relaxed mb-8">
                                 {t('landing.mockBody')}
                             </p>
 
-                            <ul className="space-y-3.5 mb-9">
+                            <ul className="space-y-3.5">
                                 {mockBullets.map((item) => (
                                     <li key={item} className="flex items-start gap-3 text-charcoal-200">
                                         <CheckCircle2 size={18} className="text-accent-400 shrink-0 mt-0.5" />
-                                        <span>{item}</span>
+                                        <span className="text-sm sm:text-base">{item}</span>
                                     </li>
                                 ))}
                             </ul>
-
-                            <button
-                                type="button"
-                                onClick={onGetStarted}
-                                className="inline-flex items-center gap-2 bg-accent-400 text-brand-800 font-semibold px-6 py-3.5 rounded-full hover:bg-accent-300 transition-colors"
-                            >
-                                {t('landing.mockCta')}
-                                <ArrowRight size={18} />
-                            </button>
                         </div>
 
-                        <div className="lg:col-span-7">
-                            <div className="grid sm:grid-cols-2 gap-4">
-                                {consultants.map((c, i) => (
-                                    <div
-                                        key={c.name}
-                                        className={`bg-brand-800 border border-brand-600 rounded-2xl p-6 flex flex-col ${i === 0 ? 'sm:translate-y-6' : ''} ${i === 2 ? 'sm:translate-y-6 sm:col-span-2 sm:max-w-[calc(50%-0.5rem)] sm:mx-auto' : ''}`}
-                                    >
-                                        <div className="flex items-start gap-4 mb-4">
-                                            <Asset
-                                                src={`/avatar_consultant_${i + 1}.png`}
-                                                alt={c.name}
-                                                filename={`avatar_consultant_${i + 1}.png`}
-                                                description={c.name}
-                                                dimensions="200 × 200, PNG, square"
-                                                className="w-14 h-14 rounded-full object-cover bg-brand-600 shrink-0"
-                                            />
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-display text-base font-semibold text-charcoal-50">{c.name}</p>
-                                                <p className="text-xs text-charcoal-400 mt-0.5">{c.company}</p>
-                                            </div>
-                                        </div>
-
-                                        <p className="text-sm text-charcoal-200 mb-5">{c.focus}</p>
-
-                                        <div className="flex items-center justify-between text-xs mt-auto pt-4 border-t border-brand-600">
-                                            <div className="flex items-center gap-1 text-accent-400 font-semibold">
-                                                <Star size={13} className="fill-current" />
-                                                {c.rating}
-                                                <span className="text-charcoal-400 font-normal ml-1">({c.sessions})</span>
-                                            </div>
-                                            <p className="text-charcoal-300 font-medium">{c.rate}</p>
-                                        </div>
+                        <div className="lg:col-span-5">
+                            <div className="relative rounded-3xl border border-brand-600 bg-brand-800 p-7 sm:p-9 overflow-hidden">
+                                <div className="absolute inset-0 bg-paper opacity-[0.04]" aria-hidden />
+                                <div className="relative">
+                                    <div className="w-14 h-14 rounded-2xl bg-accent-400/10 border border-accent-400/30 flex items-center justify-center mb-6">
+                                        <Users size={24} className="text-accent-400" />
                                     </div>
-                                ))}
+                                    <p className="text-[11px] uppercase tracking-[0.22em] text-accent-400 font-semibold mb-3">
+                                        {t('landing.mockSoonCardEyebrow')}
+                                    </p>
+                                    <h3 className="font-display text-2xl sm:text-3xl font-semibold text-charcoal-50 mb-4 leading-[1.1]">
+                                        {t('landing.mockSoonCardTitle')}
+                                    </h3>
+                                    <p className="text-sm sm:text-base text-charcoal-300 leading-relaxed">
+                                        {t('landing.mockSoonCardBody')}
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -403,7 +369,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
             </section>
 
             {/* How it works */}
-            <section id="how" className="py-20 lg:py-28">
+            <section id="how" className="py-16 sm:py-20 lg:py-28">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="max-w-3xl mb-14">
                         <SectionEyebrow>{t('landing.howEyebrow')}</SectionEyebrow>
@@ -425,7 +391,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
             </section>
 
             {/* Why TOP CANDIDATE */}
-            <section className="bg-charcoal-100 py-20 lg:py-28">
+            <section className="bg-charcoal-100 py-16 sm:py-20 lg:py-28">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-12 gap-12 lg:gap-16">
                     <div className="lg:col-span-5">
                         <SectionEyebrow>{t('landing.whyEyebrow')}</SectionEyebrow>
@@ -453,7 +419,7 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
             </section>
 
             {/* Testimonials */}
-            <section id="proof" className="py-20 lg:py-28">
+            <section id="proof" className="py-16 sm:py-20 lg:py-28">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="max-w-3xl mb-14">
                         <SectionEyebrow>{t('landing.proofEyebrow')}</SectionEyebrow>
@@ -462,11 +428,11 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                         </h2>
                     </div>
 
-                    <div className="grid md:grid-cols-3 gap-6">
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
                         {testimonials.map((tm) => (
-                            <figure key={tm.author} className="bg-charcoal-50 border border-charcoal-200 rounded-2xl p-7 flex flex-col">
+                            <figure key={tm.author} className="bg-charcoal-50 border border-charcoal-200 rounded-2xl p-6 sm:p-7 flex flex-col sm:last:col-span-2 lg:last:col-span-1">
                                 <Quote size={22} className="text-accent-500 mb-5" />
-                                <blockquote className="font-display text-lg leading-snug text-brand-700 mb-7 flex-1">
+                                <blockquote className="font-display text-base sm:text-lg leading-snug text-brand-700 mb-7 flex-1">
                                     "{tm.quote}"
                                 </blockquote>
                                 <figcaption className="flex items-center gap-3">
@@ -486,22 +452,22 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
 
             {/* Final CTA */}
             <section className="px-4 sm:px-6 lg:px-8 pb-20 lg:pb-28">
-                <div className="max-w-7xl mx-auto bg-brand-700 text-charcoal-50 rounded-[2rem] px-8 sm:px-14 py-16 lg:py-20 text-center relative overflow-hidden">
+                <div className="max-w-7xl mx-auto bg-brand-700 text-charcoal-50 rounded-3xl sm:rounded-[2rem] px-6 sm:px-10 lg:px-14 py-14 sm:py-16 lg:py-20 text-center relative overflow-hidden">
                     <div className="absolute inset-0 bg-paper opacity-[0.04]" aria-hidden />
                     <div className="relative max-w-3xl mx-auto">
                         <SectionEyebrow>
                             <span className="text-accent-400">{t('landing.finalEyebrow')}</span>
                         </SectionEyebrow>
-                        <h2 className="font-display text-4xl sm:text-5xl lg:text-6xl font-semibold leading-[1.05] mb-6">
+                        <h2 className="font-display text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-semibold leading-[1.05] mb-6 break-words">
                             {t('landing.finalTitle')}
                         </h2>
-                        <p className="text-lg text-charcoal-300 leading-relaxed mb-10 max-w-2xl mx-auto">
+                        <p className="text-base sm:text-lg text-charcoal-300 leading-relaxed mb-10 max-w-2xl mx-auto">
                             {t('landing.finalBody')}
                         </p>
                         <button
                             type="button"
                             onClick={onGetStarted}
-                            className="inline-flex items-center gap-2 bg-accent-400 text-brand-800 font-semibold px-8 py-4 rounded-full hover:bg-accent-300 transition-colors text-base"
+                            className="inline-flex items-center justify-center gap-2 bg-accent-400 text-brand-800 font-semibold px-7 sm:px-8 py-3.5 sm:py-4 rounded-full hover:bg-accent-300 transition-colors text-sm sm:text-base"
                         >
                             {t('landing.finalCta')}
                             <ArrowRight size={18} />
@@ -511,13 +477,13 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
             </section>
 
             {/* Footer */}
-            <footer className="border-t border-charcoal-200 bg-charcoal-50 py-12">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <footer className="border-t border-charcoal-200 bg-charcoal-50 py-10 sm:py-12">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
                     <div>
                         <Wordmark />
                         <p className="text-xs text-brand-500 mt-2">{t('landing.footerTagline')}</p>
                     </div>
-                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-brand-500">
+                    <div className="flex flex-wrap gap-x-5 sm:gap-x-6 gap-y-2 text-sm text-brand-500">
                         <a href="#toolkit" className="hover:text-brand-700 transition-colors">{t('landing.navToolkit')}</a>
                         <a href="#mock-interviews" className="hover:text-brand-700 transition-colors">{t('landing.navMockInterviews')}</a>
                         <a href="#how" className="hover:text-brand-700 transition-colors">{t('landing.navHow')}</a>

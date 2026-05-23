@@ -318,6 +318,7 @@ interface QuestionCardProps {
   index: number;
   expanded: boolean;
   onToggle: () => void;
+  lang: 'en' | 'bn';
 }
 
 const QuestionCard: React.FC<QuestionCardProps> = ({
@@ -325,6 +326,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   index,
   expanded,
   onToggle,
+  lang,
 }) => {
   const t = useT();
   const categoryLabels: Record<string, string> = {
@@ -335,7 +337,12 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
     Situational: t('toolkit.catSituational'),
   };
   const badge = CATEGORY_STYLES[q.category] ?? CATEGORY_STYLES['Role-specific'];
-  const fullText = `Q${index + 1}. ${q.question}\n\n${t('toolkit.interviewWhy')}: ${q.whyAsked}\n\n${t('toolkit.interviewHow')}: ${q.answerStrategy}`;
+  // English text is authoritative; fall back to it whenever the requested
+  // Bengali field is missing (older resumes, or a translation Gemini skipped).
+  const question = lang === 'bn' && q.questionBn?.trim() ? q.questionBn : q.question;
+  const whyAsked = lang === 'bn' && q.whyAskedBn?.trim() ? q.whyAskedBn : q.whyAsked;
+  const answerStrategy = lang === 'bn' && q.answerStrategyBn?.trim() ? q.answerStrategyBn : q.answerStrategy;
+  const fullText = `Q${index + 1}. ${question}\n\n${t('toolkit.interviewWhy')}: ${whyAsked}\n\n${t('toolkit.interviewHow')}: ${answerStrategy}`;
 
   return (
     <div className="bg-charcoal-50 border border-charcoal-200 rounded-2xl overflow-hidden">
@@ -349,7 +356,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
         </span>
         <div className="flex-1 min-w-0">
           <p className="font-display text-base font-semibold text-brand-700 mb-2 leading-snug">
-            {q.question}
+            {question}
           </p>
           <span
             className={`inline-block text-[10px] uppercase tracking-[0.14em] font-semibold px-2 py-0.5 rounded-full border ${badge}`}
@@ -368,13 +375,13 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
             <p className="text-[10px] uppercase tracking-[0.18em] text-brand-500 font-semibold mb-1.5">
               {t('toolkit.interviewWhy')}
             </p>
-            <p className="text-brand-700">{q.whyAsked}</p>
+            <p className="text-brand-700">{whyAsked}</p>
           </div>
           <div>
             <p className="text-[10px] uppercase tracking-[0.18em] text-brand-500 font-semibold mb-1.5">
               {t('toolkit.interviewHow')}
             </p>
-            <p className="text-brand-700">{q.answerStrategy}</p>
+            <p className="text-brand-700">{answerStrategy}</p>
           </div>
           <div className="pt-2">
             <CopyButton text={fullText} label={t('toolkit.interviewQNotes')} />
@@ -385,6 +392,44 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
   );
 };
 
+// Persisted user preference for which language (English vs Bangla) the
+// interview prep should display. Defaults to English. Stored at the
+// localStorage layer so the toggle survives refreshes and tab switches.
+type PrepLang = 'en' | 'bn';
+const PREP_LANG_KEY = 'topcandidate.interviewPrepLang';
+
+function loadPrepLang(): PrepLang {
+  try {
+    const v = typeof window !== 'undefined' ? window.localStorage.getItem(PREP_LANG_KEY) : null;
+    return v === 'bn' ? 'bn' : 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+function savePrepLang(lang: PrepLang): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.setItem(PREP_LANG_KEY, lang);
+  } catch {
+    // Ignore storage failures — toggle still works in-session.
+  }
+}
+
+// True only when at least one question carries Bengali content. Old saved
+// resumes (pre-bilingual landing) won't have any, so the toggle hides itself.
+function hasBengaliPrep(questions: InterviewQuestion[]): boolean {
+  return questions.some(
+    q => (q.questionBn?.trim() ?? '') || (q.whyAskedBn?.trim() ?? '') || (q.answerStrategyBn?.trim() ?? ''),
+  );
+}
+
+// Pick the right text for the current language with English fallback so a
+// missing translation doesn't blank the UI.
+function pickLang(en: string, bn: string | undefined, lang: PrepLang): string {
+  if (lang === 'bn' && bn && bn.trim()) return bn;
+  return en;
+}
+
 export const InterviewPrepViewer = ({
   questions,
 }: {
@@ -392,6 +437,18 @@ export const InterviewPrepViewer = ({
 }) => {
   const t = useT();
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
+  const [lang, setLang] = useState<PrepLang>(() => loadPrepLang());
+
+  const bilingual = hasBengaliPrep(questions);
+  // If the saved preference is Bangla but this resume's questions only have
+  // English (e.g. generated before bilingual prep landed), don't strand the
+  // user on a language with nothing to show.
+  const effectiveLang: PrepLang = bilingual ? lang : 'en';
+
+  const setLangPersist = (next: PrepLang) => {
+    setLang(next);
+    savePrepLang(next);
+  };
 
   const toggle = (i: number) => {
     setExpanded((prev) => {
@@ -410,10 +467,12 @@ export const InterviewPrepViewer = ({
   };
 
   const fullBrief = questions
-    .map(
-      (q, i) =>
-        `Q${i + 1}. ${q.question}\n[${q.category}]\n${t('toolkit.interviewWhy')}: ${q.whyAsked}\n${t('toolkit.interviewHow')}: ${q.answerStrategy}`,
-    )
+    .map((q, i) => {
+      const question = pickLang(q.question, q.questionBn, effectiveLang);
+      const why = pickLang(q.whyAsked, q.whyAskedBn, effectiveLang);
+      const how = pickLang(q.answerStrategy, q.answerStrategyBn, effectiveLang);
+      return `Q${i + 1}. ${question}\n[${q.category}]\n${t('toolkit.interviewWhy')}: ${why}\n${t('toolkit.interviewHow')}: ${how}`;
+    })
     .join('\n\n──\n\n');
 
   return (
@@ -424,9 +483,43 @@ export const InterviewPrepViewer = ({
       description={t('toolkit.interviewDesc')}
     >
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <p className="text-sm text-brand-500">
-          {t('toolkit.interviewQCount', { n: questions.length })}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-brand-500">
+            {t('toolkit.interviewQCount', { n: questions.length })}
+          </p>
+          {bilingual && (
+            <div
+              role="group"
+              aria-label={t('toolkit.interviewLangToggleLabel')}
+              className="inline-flex rounded-full border border-charcoal-300 bg-charcoal-50 p-0.5"
+            >
+              <button
+                type="button"
+                onClick={() => setLangPersist('en')}
+                aria-pressed={effectiveLang === 'en'}
+                className={`text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
+                  effectiveLang === 'en'
+                    ? 'bg-brand-700 text-charcoal-50'
+                    : 'text-brand-500 hover:text-brand-700'
+                }`}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                onClick={() => setLangPersist('bn')}
+                aria-pressed={effectiveLang === 'bn'}
+                className={`text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
+                  effectiveLang === 'bn'
+                    ? 'bg-brand-700 text-charcoal-50'
+                    : 'text-brand-500 hover:text-brand-700'
+                }`}
+              >
+                বাংলা
+              </button>
+            </div>
+          )}
+        </div>
         <div className="flex gap-2">
           <button
             type="button"
@@ -447,6 +540,7 @@ export const InterviewPrepViewer = ({
             index={i}
             expanded={expanded.has(i)}
             onToggle={() => toggle(i)}
+            lang={effectiveLang}
           />
         ))}
       </div>

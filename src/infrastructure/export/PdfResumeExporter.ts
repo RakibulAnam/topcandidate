@@ -208,8 +208,44 @@ export class PdfResumeExporter {
 
     if (isVisible('skills') && data.skills.length > 0) {
       this.renderSectionHeading(doc, 'Skills', t, cursor);
-      // Comma-delimited — the most ATS-parseable skill layout.
-      this.renderParagraph(doc, data.skills.join(', '), t, cursor, contentWidth);
+      // Categorized layout when present (one line per bucket, ATS still
+      // parses comma-delimited within each); flat fallback otherwise.
+      if (data.skillCategories && data.skillCategories.length > 0) {
+        for (const cat of data.skillCategories) {
+          if (!cat.items || cat.items.length === 0) continue;
+          const label = `${cat.category}: `;
+          const itemsText = cat.items.join(', ');
+
+          // Measure bold label width (font+size must be set first for accuracy)
+          doc.setFont(t.pdfFont, 'bold');
+          doc.setFontSize(t.sizeBody);
+          const labelWidth = (doc.getStringUnitWidth(label) * t.sizeBody) / doc.internal.scaleFactor;
+
+          // Wrap items text to the remaining width after the label
+          doc.setFont(t.pdfFont, 'normal');
+          const lines = doc.splitTextToSize(itemsText, contentWidth - labelWidth);
+
+          this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
+          cursor.y += t.sizeBody * t.lineHeight;
+
+          // Bold label + first items line on the same row
+          doc.setFont(t.pdfFont, 'bold');
+          doc.text(label, t.margin, cursor.y);
+          doc.setFont(t.pdfFont, 'normal');
+          if (lines.length > 0) {
+            doc.text(lines[0], t.margin + labelWidth, cursor.y);
+          }
+
+          // Subsequent wrapped lines indented to align with items text
+          for (let i = 1; i < lines.length; i++) {
+            this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
+            cursor.y += t.sizeBody * t.lineHeight;
+            doc.text(lines[i], t.margin + labelWidth, cursor.y);
+          }
+        }
+      } else {
+        this.renderParagraph(doc, data.skills.join(', '), t, cursor, contentWidth);
+      }
     }
 
     if (

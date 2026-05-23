@@ -1,4 +1,4 @@
-import { IResumeRepository } from '../../domain/repositories/IResumeRepository';
+import { IResumeRepository, ResumeListItem, ResumeListPage, ResumeListParams } from '../../domain/repositories/IResumeRepository';
 import { ResumeData, JobToolkit } from '../../domain/entities/Resume';
 import { supabase } from '../supabase/client';
 
@@ -61,10 +61,10 @@ export class SupabaseResumeRepository implements IResumeRepository {
         if (error) throw error;
     }
 
-    async getGeneratedResumes(userId: string): Promise<{ id: string; title: string; date: string; updatedAt?: string; company?: string }[]> {
+    async getGeneratedResumes(userId: string): Promise<ResumeListItem[]> {
         const { data, error } = await supabase
             .from('generated_resumes')
-            .select('id, title, created_at, updated_at, data')
+            .select('id, title, created_at, updated_at, company')
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
 
@@ -75,8 +75,41 @@ export class SupabaseResumeRepository implements IResumeRepository {
             title: item.title,
             date: item.created_at,
             updatedAt: item.updated_at || item.created_at,
-            company: item.data?.targetJob?.company
+            company: item.company ?? undefined,
         }));
+    }
+
+    async getGeneratedResumesPaginated(userId: string, params: ResumeListParams): Promise<ResumeListPage> {
+        const { page, pageSize, search } = params;
+
+        let query = supabase
+            .from('generated_resumes')
+            .select('id, title, created_at, updated_at, company', { count: 'exact' })
+            .eq('user_id', userId)
+            .neq('title', 'General Resume')
+            .order('created_at', { ascending: false });
+
+        const term = search?.trim();
+        if (term) {
+            query = query.or(`title.ilike.%${term}%,company.ilike.%${term}%`);
+        }
+
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+        const { data, count, error } = await query.range(from, to);
+
+        if (error) throw error;
+
+        return {
+            items: (data ?? []).map(item => ({
+                id: item.id,
+                title: item.title,
+                date: item.created_at,
+                updatedAt: item.updated_at || item.created_at,
+                company: item.company ?? undefined,
+            })),
+            total: count ?? 0,
+        };
     }
 
     async getGeneratedResume(id: string): Promise<ResumeData | null> {

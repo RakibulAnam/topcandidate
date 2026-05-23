@@ -6,6 +6,7 @@
 
 import {
   ProxyResumeOptimizer,
+  ProxyGeneralResumeOptimizer,
   ProxyToolkitGenerator,
   ProxyCoverLetterGenerator,
   ProxyOutreachEmailGenerator,
@@ -20,6 +21,7 @@ import { SupabaseProfileRepository } from '../repositories/SupabaseProfileReposi
 import { SupabaseApplicationRepository } from '../repositories/SupabaseApplicationRepository';
 
 const resumeOptimizer = new ProxyResumeOptimizer();
+const generalResumeOptimizer = new ProxyGeneralResumeOptimizer();
 const toolkitGenerator = new ProxyToolkitGenerator();
 const coverLetterGenerator = new ProxyCoverLetterGenerator();
 const outreachEmailGenerator = new ProxyOutreachEmailGenerator();
@@ -44,6 +46,7 @@ export const createResumeService = () => {
     interviewQuestionsGenerator,
     toolkitGenerator,
     resumeRepository,
-    profileRepository
+    profileRepository,
+    generalResumeOptimizer
   );
 };

@@ -21,24 +21,34 @@ import type { ResumeData } from '../src/domain/entities/Resume';
 type Kind = 'coverLetter' | 'outreachEmail' | 'linkedInMessage' | 'interviewQuestions';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const rid = Math.random().toString(36).slice(2, 10);
+  const t0 = Date.now();
+  res.setHeader('x-request-id', rid);
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
   const auth = await authenticate(req, res);
-  if (!auth) return;
+  if (!auth) {
+    console.warn(`[toolkit-item ${rid}] auth failed`);
+    return;
+  }
 
   const { kind, data } = (req.body ?? {}) as { kind?: Kind; data?: ResumeData };
   if (!kind || !data || !data.targetJob?.description) {
+    console.warn(`[toolkit-item ${rid}] 400 missing kind or data kind=${kind}`);
     res.status(400).json({ error: 'Missing kind or resume data' });
     return;
   }
+  console.info(`[toolkit-item ${rid}] start user=${auth.userId.slice(0, 8)} kind=${kind}`);
 
   try {
     await assertWithinLimit(auth.userId, auth.jwt);
   } catch (err) {
     if (err instanceof RateLimitError) {
+      console.warn(`[toolkit-item ${rid}] 429 rate-limited used=${err.used}/${err.cap}`);
       res.status(429).json({ error: err.message, used: err.used, cap: err.cap });
       return;
     }
@@ -48,9 +58,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const result = await runItem(kind, data);
     await logCall(auth.userId, auth.jwt, 'toolkit_item');
+    console.info(`[toolkit-item ${rid}] 200 kind=${kind} total=${Date.now() - t0}ms`);
     res.status(200).json({ result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Generation failed';
+    console.error(`[toolkit-item ${rid}] 502 kind=${kind} total=${Date.now() - t0}ms: ${msg}`);
     res.status(502).json({ error: msg });
   }
 }

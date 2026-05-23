@@ -14,6 +14,7 @@ import { assertNotGibberish, FieldCheck } from '../validation/gibberishDetector'
 
 export class ResumeService {
   private optimizeUseCase: OptimizeResumeUseCase;
+  private generalOptimizeUseCase: OptimizeResumeUseCase;
   private exportUseCase: ExportResumeUseCase;
   private coverLetterUseCase: GenerateCoverLetterUseCase;
   private outreachEmailUseCase: GenerateOutreachEmailUseCase;
@@ -30,9 +31,13 @@ export class ResumeService {
     interviewQuestionsGenerator: IInterviewQuestionsGenerator,
     toolkitGenerator: IToolkitGenerator,
     private repository: IResumeRepository,
-    private profileRepository?: IProfileRepository
+    private profileRepository?: IProfileRepository,
+    generalResumeOptimizer?: IResumeOptimizer
   ) {
     this.optimizeUseCase = new OptimizeResumeUseCase(resumeOptimizer);
+    // Falls back to the regular optimizer if no dedicated general-resume
+    // optimizer is wired (e.g. in local dev without the new endpoint).
+    this.generalOptimizeUseCase = new OptimizeResumeUseCase(generalResumeOptimizer ?? resumeOptimizer);
     this.exportUseCase = new ExportResumeUseCase(resumeExporter);
     this.coverLetterUseCase = new GenerateCoverLetterUseCase(coverLetterGenerator);
     this.outreachEmailUseCase = new GenerateOutreachEmailUseCase(outreachEmailGenerator);
@@ -61,6 +66,13 @@ export class ResumeService {
     return this.repository.getGeneratedResumes(userId);
   }
 
+  async getGeneratedResumesPaginated(
+    userId: string,
+    params: { page: number; pageSize: number; search?: string },
+  ) {
+    return this.repository.getGeneratedResumesPaginated(userId, params);
+  }
+
   async getGeneratedResume(id: string): Promise<ResumeData | null> {
     return this.repository.getGeneratedResume(id);
   }
@@ -70,12 +82,20 @@ export class ResumeService {
   }
 
   async optimizeResume(data: ResumeData): Promise<OptimizedResumeData> {
+    const t0 = performance.now();
+    console.info(`[resume-service] optimizeResume start jdLen=${data.targetJob?.description?.length ?? 0} exp=${data.experience?.length ?? 0} proj=${data.projects?.length ?? 0}`);
+
     // Pre-flight gate: refuse to spend tokens on keyboard mashing. Throws a
     // GibberishContentError listing the offending fields so the UI can show a
     // meaningful message. We only check the long, free-form fields the user
     // typed themselves — short structured fields (names, dates, locations)
     // are too noisy to score and not where waste comes from.
-    this.assertContentIsReal(data);
+    try {
+      this.assertContentIsReal(data);
+    } catch (gateErr) {
+      console.warn('[resume-service] gibberish gate refused generation:', this.errorMessage(gateErr));
+      throw gateErr;
+    }
 
     // Two concurrent Gemini calls instead of five — the optimizer refines the
     // resume itself while the combined toolkit generator produces cover
@@ -83,14 +103,26 @@ export class ResumeService {
     // shot. Keeping them independent means the user still gets a tailored
     // resume even if the toolkit call fails (and vice versa), and they share
     // the same raw input, so the toolkit doesn't need the refined bullets.
+    //
+    // Do NOT wrap the toolkit call in withRetry here: in the proxy build, both
+    // halves are served by the same /api/optimize request (deduped via an
+    // inflight cache keyed by the ResumeData reference). A retry triggers a
+    // brand-new POST to /api/optimize, which the server treats as a fresh
+    // generation and charges another toolkit credit — so a transient toolkit
+    // failure would silently burn a second credit. Per-item retries go through
+    // /api/toolkit-item, which is free; the warning-card retry buttons in the
+    // Preview tabs are the supported recovery path.
     const [optimizeResult, toolkitResult] = await Promise.allSettled([
       this.optimizeUseCase.execute(data),
-      this.withRetry(() => this.toolkitUseCase.execute(data)),
+      this.toolkitUseCase.execute(data),
     ]);
+
+    console.info(`[resume-service] AI settled in ${Math.round(performance.now() - t0)}ms optimizer=${optimizeResult.status} toolkit=${toolkitResult.status}`);
 
     // Optimizer is the core artifact — if it failed, the whole flow failed
     // and we surface the error to the caller the same way as before.
     if (optimizeResult.status === 'rejected') {
+      console.error('[resume-service] optimizer rejected:', this.errorMessage(optimizeResult.reason));
       throw optimizeResult.reason instanceof Error
         ? optimizeResult.reason
         : new Error(this.errorMessage(optimizeResult.reason));
@@ -101,20 +133,29 @@ export class ResumeService {
     let coverLetter: string | undefined;
 
     if (toolkitResult.status === 'fulfilled' && toolkitResult.value) {
-      coverLetter = toolkitResult.value.coverLetter;
-      toolkit.outreachEmail = toolkitResult.value.outreachEmail;
-      toolkit.linkedInMessage = toolkitResult.value.linkedInMessage;
-      toolkit.interviewQuestions = toolkitResult.value.interviewQuestions;
+      // Per-artifact partial result: each slot is independently populated or
+      // missing, and `errors` carries the per-item reason for any failures.
+      // Successful slots flow through verbatim; failed slots stay undefined
+      // and surface as "failed" cards with retry buttons in Preview.
+      const value = toolkitResult.value;
+      coverLetter = value.coverLetter;
+      toolkit.outreachEmail = value.outreachEmail;
+      toolkit.linkedInMessage = value.linkedInMessage;
+      toolkit.interviewQuestions = value.interviewQuestions;
+      if (Object.keys(value.errors).length > 0) {
+        toolkit.errors = { ...value.errors };
+        console.warn(`[resume-service] toolkit partial — errors=${JSON.stringify(value.errors)}`);
+      } else {
+        console.info('[resume-service] toolkit full — all 4 slots populated');
+      }
     } else {
-      // One failure = all four items failed, since they came from the same
-      // call. Record the same error under each key so the UI can render
-      // "failed" cards for each and the user can retry any one of them
-      // individually (a single-item retry hits a single-item generator, so
-      // a rate-limit blip on the combined call doesn't force a full re-run).
+      // Hard failure (network / no API key / call rejected before the
+      // per-artifact validation runs). Record the same reason under every
+      // toolkit slot so the UI shows four retryable failure cards.
       const reason =
         toolkitResult.status === 'rejected' ? toolkitResult.reason : 'Generator returned no data';
       const friendlyMessage = this.errorMessage(reason);
-      console.error('Toolkit generation failed:', reason);
+      console.error('[resume-service] toolkit hard-failed:', friendlyMessage);
       toolkit.errors = {
         coverLetter: friendlyMessage,
         outreachEmail: friendlyMessage,
@@ -122,6 +163,8 @@ export class ResumeService {
         interviewQuestions: friendlyMessage,
       };
     }
+
+    console.info(`[resume-service] optimizeResume done total=${Math.round(performance.now() - t0)}ms`);
 
     return {
       ...optimizedData,
@@ -149,6 +192,8 @@ export class ResumeService {
     data: ResumeData,
     item: ToolkitItem,
   ): Promise<ResumeData> {
+    const t0 = performance.now();
+    console.info(`[resume-service] regenerateToolkitItem start item=${item} resumeId=${resumeId ?? '(unsaved)'}`);
     const nextToolkit: JobToolkit = { ...(data.toolkit ?? {}) };
     const nextErrors: ToolkitErrors = { ...(nextToolkit.errors ?? {}) };
     const next: ResumeData = { ...data, toolkit: nextToolkit };
@@ -172,9 +217,10 @@ export class ResumeService {
         nextToolkit.interviewQuestions = v;
       }
       delete nextErrors[item];
+      console.info(`[resume-service] regenerateToolkitItem ok item=${item} took=${Math.round(performance.now() - t0)}ms`);
     } catch (err) {
       nextErrors[item] = this.errorMessage(err);
-      console.error(`Regeneration of ${item} failed:`, err);
+      console.error(`[resume-service] regenerateToolkitItem failed item=${item} took=${Math.round(performance.now() - t0)}ms:`, this.errorMessage(err));
     }
 
     nextToolkit.errors = Object.keys(nextErrors).length > 0 ? nextErrors : undefined;
@@ -287,6 +333,7 @@ export class ResumeService {
       ...originalData,
       summary: optimizedData.summary || originalData.summary,
       skills: optimizedData.skills || originalData.skills,
+      skillCategories: optimizedData.skillCategories ?? originalData.skillCategories,
       coverLetter: optimizedData.coverLetter || originalData.coverLetter,
       toolkit: optimizedData.toolkit || originalData.toolkit,
       experience: originalData.experience.length > 0
@@ -297,11 +344,11 @@ export class ResumeService {
             : exp;
         })
         : [], // Return empty array if no experience (for students)
+      // Projects follow the optimizer's order — reorderProjectsByJDFit may
+      // have moved the most JD-relevant project to the top. Fall back to the
+      // candidate's input order if the optimizer omitted any.
       projects: originalData.projects.length > 0
-        ? originalData.projects.map(proj => {
-          const refined = optimizedData.projects?.find(p => p.id === proj.id);
-          return refined ? { ...proj, refinedBullets: refined.refinedBullets } : proj;
-        })
+        ? reorderProjectsByOptimizer(originalData.projects, optimizedData.projects)
         : [],
       extracurriculars: originalData.extracurriculars && originalData.extracurriculars.length > 0
         ? originalData.extracurriculars.map(extra => {
@@ -409,8 +456,13 @@ export class ResumeService {
       template: 'ats-classic',
     };
 
-    // Optimize via AI
-    const optimizedData = await this.optimizeResume(resumeData);
+    // Pre-flight gibberish gate — same one the paid path uses. Profile data
+    // can still contain keyboard-mashing in long-form fields (experience /
+    // project / activity descriptions) and we shouldn't spend AI tokens on it.
+    this.assertContentIsReal(resumeData);
+
+    // Optimize via the free general-resume path (no credit gate, no toolkit).
+    const optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
     const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
 
     // Save and return ID
@@ -488,13 +540,45 @@ export class ResumeService {
       template: 'ats-classic',
     };
 
-    // Optimize via AI
-    const optimizedData = await this.optimizeResume(resumeData);
+    // Pre-flight gibberish gate — same as the initial general-resume path.
+    this.assertContentIsReal(resumeData);
+
+    // Optimize via the free general-resume path (no credit gate, no toolkit).
+    const optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
     const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
 
     // Update existing resume
     await this.updateGeneratedResume(existingResumeId, mergedData, ResumeService.GENERAL_RESUME_TITLE);
     return mergedData;
   }
+}
+
+// Reorder the candidate's projects to match the optimizer's output order
+// (which has been JD-reordered by reorderProjectsByJDFit) while still
+// reattaching refinedBullets to the original input project. Any project
+// the optimizer omitted gets appended in original order so we don't lose
+// data on a partial response.
+function reorderProjectsByOptimizer<P extends { id: string }>(
+  inputs: P[],
+  optimized: { id: string; refinedBullets: string[] }[] | undefined
+): (P & { refinedBullets: string[] })[] {
+  if (!optimized || optimized.length === 0) {
+    return inputs.map(p => ({ ...p, refinedBullets: (p as P & { refinedBullets?: string[] }).refinedBullets ?? [] }));
+  }
+  const inputById = new Map(inputs.map(p => [p.id, p]));
+  const seen = new Set<string>();
+  const ordered: (P & { refinedBullets: string[] })[] = [];
+
+  for (const o of optimized) {
+    const original = inputById.get(o.id);
+    if (!original) continue;
+    seen.add(o.id);
+    ordered.push({ ...original, refinedBullets: o.refinedBullets });
+  }
+  for (const p of inputs) {
+    if (seen.has(p.id)) continue;
+    ordered.push({ ...p, refinedBullets: (p as P & { refinedBullets?: string[] }).refinedBullets ?? [] });
+  }
+  return ordered;
 }
 

@@ -3,6 +3,11 @@
 import { GoogleGenAI } from '@google/genai';
 import { ResumeData } from '../../domain/entities/Resume.js';
 import { ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase.js';
+import {
+  buildCandidateContext,
+  assertNoFabricatedTools,
+  classifyFitMode,
+} from './prompts/toolkitContext.js';
 
 export class GeminiCoverLetterGenerator implements ICoverLetterGenerator {
   private genAI: GoogleGenAI;
@@ -15,15 +20,19 @@ export class GeminiCoverLetterGenerator implements ICoverLetterGenerator {
   }
 
   async generate(data: ResumeData): Promise<string> {
-    const prompt = this.buildPrompt(data);
+    const fit = classifyFitMode(data);
+    console.info(`[cover-letter-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
+    const prompt = this.buildPrompt(data, fit.mode);
 
     try {
       const result = await this.genAI.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
-          temperature: 0.4,
+          temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
           systemInstruction: `You are a senior cover-letter writer specializing in applications that pass BOTH ATS keyword screening AND human hiring-manager review.
+
+GROUND YOUR WRITING IN THE CANDIDATE'S EVIDENCE — the prompt provides the candidate's full profile (experience, projects, education, certifications, awards, publications, extracurriculars, languages, skills) FIRST, and the JD SECOND. Your job is to choose the most JD-relevant slices of the candidate's actual evidence and arrange them. The JD orders and filters; the candidate's own work is the source of truth.
 
 SCOPE — You write ONLY the body paragraphs. The application renders the date, sender block, recipient block, "Dear Hiring Manager,", "Sincerely,", and signature separately. Do NOT include any of those.
 
@@ -31,11 +40,11 @@ FORMAT — Return 3–4 plain-text body paragraphs separated by a single blank l
 
 LENGTH — 250–400 words total across all paragraphs. Tight, specific, confident. No filler.
 
-TONE — Professional, direct, authentic. No clichés ("I am writing to express my interest", "team player", "think outside the box", "proven track record" as a standalone phrase). No hedging ("I believe I could maybe…"). No grandiosity.
+TONE — Professional, direct, authentic. Where the candidate's own raw words (VOICE REFERENCE) carry a natural framing or phrasing, let it color your tone — but never lift facts that aren't also in the polished bullets. No clichés ("I am writing to express my interest", "team player", "think outside the box", "proven track record" as a standalone phrase). No hedging ("I believe I could maybe…"). No grandiosity.
 
-ATS & KEYWORD DISCIPLINE — Mirror the job description's exact hard-skill and tool keywords verbatim (matching casing). Weave them naturally into truthful statements about the candidate. Never keyword-stuff; never invent experience.
+ATS & KEYWORD DISCIPLINE — Mirror the job description's exact hard-skill and tool keywords verbatim (matching casing) — but ONLY when the candidate's evidence supports them. Never keyword-stuff; never invent experience.
 
-HONESTY — Do not fabricate metrics, employers, outcomes, or credentials. Only use what the provided candidate data supports.`,
+HONESTY — Do not fabricate metrics, employers, outcomes, tools, or credentials. If the JD demands something the candidate doesn't have, redirect to an adjacent strength they do have, or omit the topic.`,
         },
       });
 
@@ -44,7 +53,12 @@ HONESTY — Do not fabricate metrics, employers, outcomes, or credentials. Only 
         throw new Error('No response from AI');
       }
 
-      return this.cleanResponse(responseText.trim(), data);
+      const cleaned = this.cleanResponse(responseText.trim(), data);
+      // Stretch mode lets the AI reference JD-named tools as growth targets,
+      // so the fabrication guard must allow JD-text into the evidence corpus.
+      // Match mode keeps the strict corpus.
+      assertNoFabricatedTools(cleaned, data, { allowJD: fit.mode === 'stretch' });
+      return cleaned;
     } catch (error) {
       console.error('Cover letter generation failed:', error);
       throw new Error(
@@ -119,52 +133,32 @@ HONESTY — Do not fabricate metrics, employers, outcomes, or credentials. Only 
       .trim();
   }
 
-  private buildPrompt(data: ResumeData): string {
+  private buildPrompt(data: ResumeData, mode: 'match' | 'stretch' = 'match'): string {
     const isStudent = data.userType === 'student';
-    const hasExperience = data.experience.length > 0;
-
-    // Use refined (AI-polished) bullets where available — they're the strongest signal
-    const experienceBlock = hasExperience
-      ? data.experience
-          .map(exp => {
-            const bullets = (exp.refinedBullets && exp.refinedBullets.length > 0)
-              ? exp.refinedBullets
-              : (exp.rawDescription ? [exp.rawDescription] : []);
-            const header = `- ${exp.role} at ${exp.company} (${exp.startDate} – ${exp.isCurrent ? 'Present' : exp.endDate})`;
-            const body = bullets.length > 0
-              ? bullets.map(b => `    • ${b}`).join('\n')
-              : '';
-            return body ? `${header}\n${body}` : header;
-          })
-          .join('\n')
-      : '';
-
-    const projectsBlock = data.projects.length > 0
-      ? data.projects
-          .map(p => {
-            const bullets = (p.refinedBullets && p.refinedBullets.length > 0)
-              ? p.refinedBullets
-              : (p.rawDescription ? [p.rawDescription] : []);
-            const header = `- ${p.name}${p.technologies ? ` (${p.technologies})` : ''}`;
-            const body = bullets.length > 0
-              ? bullets.map(b => `    • ${b}`).join('\n')
-              : '';
-            return body ? `${header}\n${body}` : header;
-          })
-          .join('\n')
-      : '';
-
-    const educationBlock = data.education.length > 0
-      ? data.education
-          .map(edu => `- ${edu.degree}${edu.field ? ` in ${edu.field}` : ''} from ${edu.school}${edu.gpa ? ` (GPA: ${edu.gpa})` : ''}`)
-          .join('\n')
-      : 'Not provided';
+    const candidateContext = buildCandidateContext(data);
+    const stretchPreamble = mode === 'stretch' ? `
+═══════════════════════════════════════════════
+STRETCH MODE — CAREER SWITCH
+═══════════════════════════════════════════════
+This is a career-switch application: the candidate's evidence does NOT closely match the JD's field. Make the strongest HONEST case anyway:
+- Lean on TRANSFERABLE SKILLS (analysis, structured thinking, stakeholder management, communication, learning velocity, domain rigor) — bridge them concretely to the JD.
+- ACKNOWLEDGE the pivot in the opener: "Coming from <past field> into <target field>". Don't disguise it.
+- JD-named tools / frameworks the candidate has NOT used may appear as GROWTH TARGETS or ramp areas — never as past experience. "I'd be excited to ramp on X" is honest; "I have X experience" is fabrication.
+- Tone: confident-but-curious, eager-not-desperate.
+- Never invent past employers, credentials, or metrics — that rule never relaxes.
+` : '';
 
     return `
 Write the 3–4 body paragraphs of a cover letter (no date, no addresses, no greeting, no closing, no signature — those are rendered separately).
+${stretchPreamble}
 
 ═══════════════════════════════════════════════
-JOB DETAILS (keyword source of truth)
+CANDIDATE EVIDENCE (source of truth — use ONLY what's here)
+═══════════════════════════════════════════════
+${candidateContext}
+
+═══════════════════════════════════════════════
+TARGET ROLE (filter & ordering signal — NOT a content source)
 ═══════════════════════════════════════════════
 Position: ${data.targetJob.title || 'N/A'}
 Company: ${data.targetJob.company || 'N/A'}
@@ -172,41 +166,25 @@ Company: ${data.targetJob.company || 'N/A'}
 Job Description:
 ${data.targetJob.description}
 
-Before writing, mentally extract the top 3–5 hard-skill/tool keywords and the top 2 responsibility themes from the JD. Mirror those keywords verbatim (same casing) across your paragraphs where they are truthful for this candidate.
-
-═══════════════════════════════════════════════
-CANDIDATE
-═══════════════════════════════════════════════
-Name: ${data.personalInfo.fullName}
-Type: ${isStudent ? 'Student / Entry-level' : 'Experienced Professional'}
-Professional Summary: ${data.summary || '(not provided)'}
-
-${hasExperience ? `WORK EXPERIENCE (use specific bullets as source for concrete achievements):\n${experienceBlock}` : 'WORK EXPERIENCE: (none provided)'}
-
-${projectsBlock ? `PROJECTS:\n${projectsBlock}` : ''}
-
-EDUCATION:
-${educationBlock}
-
-SKILLS: ${data.skills.join(', ') || '(none provided)'}
+Mentally extract the JD's top 3–5 hard-skill / tool keywords and top 2 responsibility themes. For each, find the candidate-evidence item above that maps best. Then mirror those keywords verbatim in the candidate's own context — never use them where the candidate has no evidence.
 
 ═══════════════════════════════════════════════
 PARAGRAPH STRUCTURE (3–4 paragraphs, 250–400 words total)
 ═══════════════════════════════════════════════
 Paragraph 1 — HOOK (2–3 sentences):
-  Open with a specific, concrete achievement or qualification from the candidate data that directly maps to the JD's top requirement. NO "I am writing to apply for…" opening. Name the role${data.targetJob.company ? ` and ${data.targetJob.company}` : ''} in the first or second sentence. Make the reader want to keep reading.
+  Open with a specific, concrete achievement or qualification from the candidate evidence that directly maps to the JD's top requirement. NO "I am writing to apply for…" opening. Name the role${data.targetJob.company ? ` and ${data.targetJob.company}` : ''} in the first or second sentence. Make the reader want to keep reading.
 
 Paragraph 2 — EVIDENCE OF FIT (4–6 sentences):
   ${isStudent
-    ? 'Connect 2–3 concrete project or coursework achievements to the JD\'s technical requirements. Reference specific technologies and methodologies from the JD. Show how academic work prepared you for the role\'s day-one responsibilities.'
-    : 'Reference 2–3 concrete achievements from the work experience above (pulling real details and numbers — never invent). Map each one explicitly to a JD requirement. Use the JD\'s exact keywords for tools/methodologies.'}
+    ? 'Connect 2–3 concrete project or coursework achievements (from the candidate evidence) to the JD\'s technical requirements. Reference specific technologies and methodologies from the JD that the candidate actually used. Show how academic work prepared you for the role\'s day-one responsibilities.'
+    : 'Reference 2–3 concrete achievements from the candidate\'s actual work experience or projects (pulling real details and numbers that already appear above — never invent). Map each one explicitly to a JD requirement. Use the JD\'s exact keywords for tools/methodologies the candidate evidenced.'}
 
 ${isStudent
-  ? `Paragraph 3 — BROADER VALUE (3–4 sentences): Highlight transferable skills, leadership/extracurriculars, or complementary strengths. Show initiative, learning velocity, and collaboration.`
-  : `Paragraph 3 — BROADER VALUE (3–4 sentences): Highlight leadership, cross-functional collaboration, domain expertise, or culture-fit signals relevant to ${data.targetJob.company || 'the company'} and the role.`}
+  ? `Paragraph 3 — BROADER VALUE (3–4 sentences): Highlight transferable skills from the candidate's certifications, awards, extracurriculars, or publications. Show initiative, learning velocity, and collaboration — anchored in real items from the evidence above.`
+  : `Paragraph 3 — BROADER VALUE (3–4 sentences): Highlight leadership, cross-functional collaboration, certifications, awards, or domain expertise — drawing from real items in the candidate evidence — relevant to ${data.targetJob.company || 'the company'} and the role.`}
 
 Paragraph 4 — CLOSE (2–3 sentences):
-  Express specific interest in discussing how your background maps to the team's goals. One sentence thanking the reader. Forward-looking tone — no hedging, no "I look forward to hearing from you" boilerplate-only ending (you may use a fresher phrasing).
+  Express specific interest in discussing how the candidate's background maps to the team's goals. One sentence thanking the reader. Forward-looking tone — no hedging, no "I look forward to hearing from you" boilerplate-only ending (you may use a fresher phrasing).
 
 ═══════════════════════════════════════════════
 HARD CONSTRAINTS
@@ -215,10 +193,11 @@ HARD CONSTRAINTS
 - No salutation. No closing. No signature. No date. No contact info.
 - No markdown, no bullets, no headings, no code fences.
 - 250–400 words total.
-- Do NOT fabricate metrics, employers, tools, or credentials.
-- Mirror JD hard-skill keywords verbatim when truthful for this candidate.
+- ${mode === 'stretch'
+  ? 'You may reference JD-named tools / frameworks the candidate has not used, but ONLY as growth targets / learning intent — never phrased as past experience. Never invent past employers, credentials, or metrics.'
+  : 'Do NOT mention any tool / framework / cloud / company that does not appear in the CANDIDATE EVIDENCE block above (target company exempt — you may name it as the recipient).'}
+- Mirror JD hard-skill keywords verbatim ONLY when truthful for this candidate.
 - Avoid clichés: "I am writing to express my interest", "proven track record" (as standalone), "team player", "think outside the box", "hit the ground running".
 `;
   }
 }
-

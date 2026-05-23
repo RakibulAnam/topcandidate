@@ -1,0 +1,96 @@
+{
+  "userType": "experienced",
+  "targetJob": {
+    "title": "Relationship Manager — SME Banking",
+    "company": "BRAC Bank Limited",
+    "description": "Position: Relationship Manager, SME Banking\nLocation: Chattogram (Agrabad Branch)\nCompany: BRAC Bank PLC\nDeadline: 30 May 2026\nSalary: As per company policy, negotiable for the right candidate.\n\nAbout the role\nBRAC Bank is the largest CMSME lender in Bangladesh and a market leader in SME banking. We are hiring a Relationship Manager (RM) for our SME Banking unit at the Chattogram Agrabad branch. The RM will own a portfolio of small and medium enterprise clients across the port-city corridor — RMG accessory, leather, light engineering, ship-breaking allied, and trading houses — and is responsible for end-to-end client lifecycle management, from acquisition through credit assessment, disbursement, and ongoing monitoring.\n\nKey responsibilities\n- Acquire new SME clients with annual turnover BDT 3 crore – 50 crore through field calls, referrals, and chamber of commerce networks.\n- Own the credit memo (CM) for each client — financial spreading, ratio analysis, sensitivity testing, security valuation, and IFRS 9 ECL staging.\n- Recommend facility structures (working capital, term loan, LATR, LIM, BG, LC) and present at the SME credit committee.\n- Ensure 100% CIB and AML/KYC compliance per Bangladesh Bank guidelines.\n- Maintain portfolio NPL ratio below 3.5%; manage early warning signals proactively.\n- Cross-sell deposit, payroll, and trade finance products to grow the wallet share.\n- Quarterly client visits, factory inspections, and stock audits where applicable.\n\nQualifications\n- Master's / MBA from a reputed university; Finance / Banking concentration preferred.\n- 4–7 years SME banking experience.\n- Strong financial analysis, credit-memo writing, and negotiation skills.\n- CFA / CIMA / FRM partial completion is a plus.\n- Excellent in MS Office (Excel modelling, PowerPoint).\n- Strong English communication; fluency in Bangla required for local client engagement.\n- Willingness to travel within Chattogram division.\n- Existing book of CMSME clients in the port city is a strong advantage."
+  },
+  "personalInfo": {
+    "fullName": "Sumaiya Akter",
+    "email": "sumaiya.akter.audit01@gmail.com",
+    "phone": "+880 1712-345678",
+    "location": "Dhaka, Bangladesh",
+    "linkedin": "https://linkedin.com/in/sumaiya-akter-bd"
+  },
+  "summary": "",
+  "experience": [
+    {
+      "id": "exp-1",
+      "company": "BRAC Bank Limited",
+      "role": "Senior Credit Analyst",
+      "startDate": "2020-09",
+      "endDate": "",
+      "isCurrent": true,
+      "rawDescription": "Ami SME credit analyst hisebe BRAC Bank-er Gulshan branch e 5 bochor kaaj korci. Mainly RMG (knit + woven), light engineering, and pharma distributor portfolios. CMSME loan size 50 lakh thika 5 crore taka porjonto evaluate kori — financial spreading (3-yr P&L, balance sheet, cash flow projections), sales tax / VAT challan verification, factory site visits, buyer-supplier due diligence (H&M, Inditex, M&S compliance check), and CIB inquiry through Bangladesh Bank portal. Last year amar portfolio er NPL ratio 2.3% (branch avg 4.1%), and approved disbursement 38 crore taka against target 32 crore. Built a buyer-concentration risk scorecard for knit garments clients that the SME credit committee adopted bank-wide — that won me a Best Analyst (SME) award in 2024. Mentor 2 junior credit officers on financial modeling and IFRS 9 ECL staging. CFA Level II clear korechi 2023 e."
+    },
+    {
+      "id": "exp-2",
+      "company": "Standard Chartered Bank Bangladesh",
+      "role": "Credit Officer (Trainee)",
+      "startDate": "2021-09",
+      "endDate": "2020-08",
+      "isCurrent": false,
+      "rawDescription": "Wait — actually before BRAC Bank I did a 1-year training rotation at Standard Chartered Bangladesh Priority Banking from Sep 2019 to Aug 2020. Spreadsheet-heavy work — pulled customer credit histories from the Bangladesh Bank CIB database, prepared exposure summaries for the credit committee, and helped seniors write CM notes for renewal cases. Got exposed to RMG payroll account onboarding (Square Group, Beximco) and learned the trade finance basics — LCs, BGs, back-to-back, bill discounting. KYC + AML was strict — I sat in on Bangladesh Bank inspection prep twice and helped tighten our PEP (politically exposed person) screening checklist."
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj-1",
+      "name": "Buyer-Concentration Risk Scorecard for Knit Garments Portfolio",
+      "rawDescription": "Designed a 7-factor risk scorecard ranking knit-garments SME borrowers by their dependence on top-3 buyers, payment terms, country diversification, and order-book stability. Pulled 36 months of disbursement and repayment data, built logistic regression in Excel + Python (statsmodels) to predict early-warning. SME credit committee adopted bank-wide in Q3 2024. Used to flag 14 borrowers as high-risk before NPL crystallisation; saved ~4.2 crore taka in expected losses on the audited cohort.",
+      "technologies": "Excel, Python (pandas, statsmodels), Tableau, IFRS 9 ECL"
+    },
+    {
+      "id": "proj-2",
+      "name": "RMG Buyer Compliance Verification Workflow",
+      "rawDescription": "Built a workflow + checklist that verifies whether a knit / woven SME borrower's claimed buyer relationships (H&M, Inditex, M&S, Walmart) are real — cross-referenced LC records, B/L copies, and buyer factory audit reports. Reduced fake-buyer fraud risk on three live applications, two of which were declined and one re-priced. Documented as an SOP that all five Gulshan branch RMs now use.",
+      "technologies": "MS Excel, Bangladesh Bank CIB portal, SWIFT message review"
+    }
+  ],
+  "education": [
+    {
+      "id": "ed-1",
+      "school": "North South University",
+      "degree": "Bachelor of Business Administration",
+      "field": "Finance",
+      "startDate": "2017",
+      "endDate": "2021",
+      "gpa": "3.72/4.0"
+    }
+  ],
+  "skills": [
+    "Credit Analysis",
+    "Financial Modeling",
+    "IFRS 9 ECL Staging",
+    "CIB Inquiry",
+    "SME Lending",
+    "Trade Finance (LC, BG, LATR)",
+    "AML / KYC",
+    "Bangladesh Bank Compliance",
+    "Excel (advanced)",
+    "Python (pandas)",
+    "Tableau",
+    "Bengali",
+    "English"
+  ],
+  "awards": [
+    {
+      "id": "award-1",
+      "title": "Best Analyst (SME) — Annual Award",
+      "issuer": "BRAC Bank Limited",
+      "date": "2024",
+      "description": "Bank-wide recognition for the buyer-concentration risk scorecard adopted as a standard SME credit-committee tool."
+    }
+  ],
+  "certifications": [
+    { "id": "cert-1", "name": "CFA Level II Pass", "issuer": "CFA Institute", "date": "2023" }
+  ],
+  "languages": [
+    { "id": "lang-1", "name": "Bengali", "proficiency": "Native" },
+    { "id": "lang-2", "name": "English", "proficiency": "Professional" }
+  ],
+  "visibleSections": [
+    "experience","education","projects","skills","awards","certifications","languages","references"
+  ],
+  "template": "ats-classic"
+}

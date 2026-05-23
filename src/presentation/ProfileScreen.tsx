@@ -19,6 +19,7 @@ import { AffiliationSection } from './components/profile/AffiliationSection';
 import { PublicationSection } from './components/profile/PublicationSection';
 import { LanguageSection } from './components/profile/LanguageSection';
 import { ReferenceSection } from './components/profile/ReferenceSection';
+import { PhoneInput, isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 
 type TabId =
@@ -165,6 +166,13 @@ export const ProfileScreen = () => {
     const handleSavePersonal = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+        // Phone is optional on the profile, but if filled it must parse as a
+        // valid international number — otherwise downstream resume renders
+        // will emit a broken `tel:` link.
+        if (personalInfo.phone && !isValidPhone(personalInfo.phone)) {
+            toast.error(t('builder.errPhoneInvalid'));
+            return;
+        }
         setSaving(true);
         try {
             await profileRepository.saveProfile(user.id, personalInfo);
@@ -276,11 +284,10 @@ export const ProfileScreen = () => {
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-charcoal-700 mb-1">{t('profile.fieldPhone')}</label>
-                                <input
-                                    type="text"
+                                <PhoneInput
                                     value={personalInfo.phone}
-                                    onChange={e => setPersonalInfo({ ...personalInfo, phone: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500"
+                                    onChange={v => setPersonalInfo({ ...personalInfo, phone: v })}
+                                    invalidMessage={t('builder.errPhoneInvalid')}
                                 />
                             </div>
                             <div>

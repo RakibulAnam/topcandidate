@@ -4,6 +4,8 @@ import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, Users } from 'lucide-react';
+import { EmailInput, isValidEmail } from '../ui/EmailInput';
+import { PhoneInput, isValidPhone } from '../ui/PhoneInput';
 
 interface Props {
     items: Reference[];
@@ -43,6 +45,14 @@ export const ReferenceSection = ({ items, onRefresh }: Props) => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+        if (!isValidEmail(formData.email || '')) {
+            toast.error('Please enter a valid email address.');
+            return;
+        }
+        if (!isValidPhone(formData.phone || '')) {
+            toast.error('Please enter a valid phone number.');
+            return;
+        }
         setSaving(true);
         try {
             await profileRepository.saveReference(user.id, {
@@ -88,11 +98,19 @@ export const ReferenceSection = ({ items, onRefresh }: Props) => {
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Email</label>
-                            <input required type="email" className={`w-full p-2 border rounded-lg ${!formData.email ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`} value={formData.email || ''} onChange={e => setFormData({ ...formData, email: e.target.value })} placeholder="e.g. a.islam@company.com" />
+                            <EmailInput
+                                value={formData.email || ''}
+                                onChange={v => setFormData({ ...formData, email: v })}
+                                placeholder="e.g. a.islam@company.com"
+                            />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Phone</label>
-                            <input required className={`w-full p-2 border rounded-lg ${!formData.phone ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`} value={formData.phone || ''} onChange={e => setFormData({ ...formData, phone: e.target.value })} placeholder="e.g. +880 1711-000000" />
+                            <PhoneInput
+                                value={formData.phone || ''}
+                                onChange={v => setFormData({ ...formData, phone: v })}
+                                placeholder="e.g. 1711-000000"
+                            />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Relationship (Optional)</label>

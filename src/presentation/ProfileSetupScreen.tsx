@@ -52,6 +52,8 @@ import {
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
 import { ExtractedProfileData } from '../domain/usecases/ExtractResumeUseCase';
 import { isGibberish } from '../application/validation/gibberishDetector';
+import { isValidEmail } from './components/ui/EmailInput';
+import { isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 
@@ -277,6 +279,10 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             case SetupStep.PERSONAL_INFO:
                 if (!(personalInfo.fullName || '').trim()) { showError(t('profileSetup.valFullName')); return false; }
                 if (!(personalInfo.email || '').trim()) { showError(t('profileSetup.valEmail')); return false; }
+                if (!isValidEmail(personalInfo.email)) { showError(t('profileSetup.valEmailInvalid')); return false; }
+                if ((personalInfo.phone || '').trim() && !isValidPhone(personalInfo.phone)) {
+                    showError(t('profileSetup.valPhoneInvalid')); return false;
+                }
                 return true;
             case SetupStep.EDUCATION:
                 if (education.length === 0) { showError(t('profileSetup.valEduOne')); return false; }
@@ -373,6 +379,16 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     }
                     if (!(item.date || '').trim()) { showError(t('profileSetup.valPubDate')); return false; }
                     if (flagGibberish(t('profileSetup.fieldPublicationTitle'), item.title)) return false;
+                }
+                return true;
+            case SetupStep.REFERENCES:
+                for (const item of references) {
+                    if (item.email && !isValidEmail(item.email)) {
+                        showError(t('profileSetup.valEmailInvalid')); return false;
+                    }
+                    if (item.phone && !isValidPhone(item.phone)) {
+                        showError(t('profileSetup.valPhoneInvalid')); return false;
+                    }
                 }
                 return true;
             default:

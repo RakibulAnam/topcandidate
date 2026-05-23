@@ -21,11 +21,15 @@ import {
 import { Preview } from './components/Preview';
 import { ResumeService } from '../application/services/ResumeService';
 import { isGibberish } from '../application/validation/gibberishDetector';
+import { isValidEmail } from './components/ui/EmailInput';
+import { isValidPhone } from './components/ui/PhoneInput';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { ChevronRight, ChevronLeft, Sparkles } from 'lucide-react';
 import { Navbar } from './components/Layout/Navbar';
 import { BuilderStepper } from './components/Builder/BuilderStepper';
+import { PurchaseModal } from './components/PurchaseModal';
 import { profileRepository } from '../infrastructure/config/dependencies';
+import { ApiCallError } from '../infrastructure/ai/proxy/ProxyClients';
 import { useT } from './i18n/LocaleContext';
 
 const stepsInfoFor = (t: ReturnType<typeof useT>) => [
@@ -121,6 +125,17 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
 
+  // Toolkit credits — null while loading, integer once fetched. We fetch on
+  // mount and after every purchase so the user always sees a fresh balance
+  // before clicking Generate. The server is the source of truth; this number
+  // only drives the UI (the gate is enforced in /api/optimize).
+  const [credits, setCredits] = useState<number | null>(null);
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  // True if the user clicked Generate while at zero credits — after a
+  // successful purchase we resume the generation automatically rather than
+  // making them click again.
+  const [resumeGenerateAfterPurchase, setResumeGenerateAfterPurchase] = useState(false);
+
   // Validation errors map field paths (e.g. "personalInfo.fullName") to error messages
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -150,6 +165,24 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         if (!cancelled) setProfileSkills(skills ?? []);
       })
       .catch(err => console.warn('Could not load profile skills', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Pull the user's credit balance once on mount (and whenever the user
+  // changes). On failure we leave it as null — the server still gates the
+  // call, so a missing client-side balance just means we don't show the
+  // remaining-count hint until the next refresh.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    profileRepository
+      .getToolkitCredits(user.id)
+      .then(n => {
+        if (!cancelled) setCredits(n);
+      })
+      .catch(err => console.warn('Could not load toolkit credits', err));
     return () => {
       cancelled = true;
     };
@@ -263,6 +296,13 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     };
 
     switch (currentStepId) {
+      case AppStep.SECTIONS:
+        if (!resumeData.visibleSections || resumeData.visibleSections.length === 0) {
+          if (showToast) toast.error(t('builder.selectAtLeastOneSection'));
+          isValid = false;
+        }
+        break;
+
       case AppStep.TARGET_JOB:
         if (!(resumeData.targetJob?.title || '').trim()) {
           newErrors['targetJob.title'] = t('builder.errJobTitle');
@@ -287,6 +327,13 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         }
         if (!(resumeData.personalInfo.email || '').trim()) {
           newErrors['personalInfo.email'] = t('builder.errEmail');
+          isValid = false;
+        } else if (!isValidEmail(resumeData.personalInfo.email)) {
+          newErrors['personalInfo.email'] = t('builder.errEmailInvalid');
+          isValid = false;
+        }
+        if ((resumeData.personalInfo.phone || '').trim() && !isValidPhone(resumeData.personalInfo.phone)) {
+          newErrors['personalInfo.phone'] = t('builder.errPhoneInvalid');
           isValid = false;
         }
         break;
@@ -499,9 +546,15 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
           if (!(item.email || '').trim()) {
             newErrors[`references.${index}.email`] = t('builder.errEmail');
             isValid = false;
+          } else if (!isValidEmail(item.email)) {
+            newErrors[`references.${index}.email`] = t('builder.errEmailInvalid');
+            isValid = false;
           }
           if (!(item.phone || '').trim()) {
             newErrors[`references.${index}.phone`] = t('builder.errPhone');
+            isValid = false;
+          } else if (!isValidPhone(item.phone)) {
+            newErrors[`references.${index}.phone`] = t('builder.errPhoneInvalid');
             isValid = false;
           }
           flagIfGibberish(`references.${index}.position`, item.position);
@@ -567,28 +620,79 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (opts?: { skipCreditCheck?: boolean }) => {
     if (!resumeService) {
       toast.error(t('builder.serviceNotInit'));
+      return;
+    }
+
+    console.info(`[builder] handleGenerate clicked creditsBefore=${credits ?? 'loading'} skipCreditCheck=${!!opts?.skipCreditCheck}`);
+
+    // Client-side credit gate. The server enforces the real check (atomic in
+    // /api/optimize); this just avoids a wasted round-trip when we already
+    // know the user is at zero. If `credits` is null (still loading), let the
+    // call go through — the server will reject with 402 if needed.
+    // skipCreditCheck is set after a successful purchase: the closure here
+    // still has the stale credits=0, so without the override we'd loop the
+    // user back into the modal.
+    if (!opts?.skipCreditCheck && credits === 0) {
+      console.info('[builder] credit pre-check refused (credits=0), opening purchase modal');
+      setResumeGenerateAfterPurchase(true);
+      setPurchaseModalOpen(true);
       return;
     }
 
     setIsGenerating(true);
     setGenerationError(null);
     try {
-      const optimizedData = await resumeService.optimizeResume(resumeData);
-      const mergedData = resumeService.mergeOptimizedData(resumeData, optimizedData);
+      // Strip selected sections that have no content so they never produce an
+      // empty header in the generated resume.
+      const dataForGeneration: ResumeData = resumeData.visibleSections
+        ? {
+            ...resumeData,
+            visibleSections: resumeData.visibleSections.filter(key => {
+              switch (key) {
+                case 'experience':      return resumeData.experience.length > 0;
+                case 'projects':        return (resumeData.projects?.length ?? 0) > 0;
+                case 'education':       return resumeData.education.length > 0;
+                case 'skills':          return resumeData.skills.length > 0;
+                case 'extracurriculars': return (resumeData.extracurriculars?.length ?? 0) > 0;
+                case 'awards':          return (resumeData.awards?.length ?? 0) > 0;
+                case 'certifications':  return (resumeData.certifications?.length ?? 0) > 0;
+                case 'affiliations':    return (resumeData.affiliations?.length ?? 0) > 0;
+                case 'publications':    return (resumeData.publications?.length ?? 0) > 0;
+                case 'languages':       return (resumeData.languages?.length ?? 0) > 0;
+                case 'references':      return (resumeData.references?.length ?? 0) > 0;
+                default:                return true;
+              }
+            }),
+          }
+        : resumeData;
+
+      const optimizedData = await resumeService.optimizeResume(dataForGeneration);
+      const mergedData = resumeService.mergeOptimizedData(dataForGeneration, optimizedData);
       setResumeData(mergedData);
       setStep(AppStep.PREVIEW);
+
+      // Server consumed one credit on success — keep the local count in sync.
+      setCredits(prev => {
+        if (prev === null) return prev;
+        const next = Math.max(0, prev - 1);
+        console.info(`[builder] credit decrement local: ${prev} -> ${next}`);
+        return next;
+      });
 
       // With the combined toolkit call, success is all-or-nothing on the
       // initial generation — either every toolkit item is present or every
       // one is in the failed state. The warning-card retry path lives on
       // each tab, so we just tell the user where to look.
-      const toolkitFailed = Object.keys(mergedData.toolkit?.errors ?? {}).length > 0;
+      const errorKeys = Object.keys(mergedData.toolkit?.errors ?? {});
+      const toolkitFailed = errorKeys.length > 0;
       if (!toolkitFailed) {
+        console.info('[builder] generation success — full toolkit');
         toast.success(t('builder.toolkitReady'));
       } else {
+        console.warn(`[builder] generation success — partial toolkit, failed slots=${errorKeys.join(',')}`);
         toast.warning(t('builder.toolkitPartial'));
       }
 
@@ -611,10 +715,22 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         }
       }
     } catch (err) {
-      console.error('Resume generation failed:', err);
-      // GibberishContentError carries a user-actionable message naming the
-      // offending field — surface it verbatim so the user knows where to fix.
-      if (err instanceof Error && err.name === 'GibberishContentError') {
+      const errCode = err instanceof ApiCallError ? err.code : undefined;
+      const errStatus = err instanceof ApiCallError ? err.status : undefined;
+      const errName = err instanceof Error ? err.name : 'Unknown';
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[builder] generation failed name=${errName} status=${errStatus ?? '-'} code=${errCode ?? '-'} msg="${errMsg}"`);
+      // Server says no credits left — open the purchase modal instead of
+      // showing an error. Covers the race where the local count was stale
+      // (e.g. user bought credits in another tab and they ran out, or the
+      // mount fetch failed and we let the call proceed).
+      if (err instanceof ApiCallError && err.code === 'insufficient_credits') {
+        setCredits(0);
+        setResumeGenerateAfterPurchase(true);
+        setPurchaseModalOpen(true);
+      } else if (err instanceof Error && err.name === 'GibberishContentError') {
+        // GibberishContentError carries a user-actionable message naming the
+        // offending field — surface it verbatim so the user knows where to fix.
         toast.error(err.message);
       } else {
         toast.error(t('builder.optimizeFailed'));
@@ -622,6 +738,32 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handlePurchaseSuccess = () => {
+    if (!user) return;
+    // Re-fetch credits immediately. In dev/mock mode the credits are already
+    // in the DB by the time onSuccess fires; in production they may still be
+    // pending, but a single re-fetch is cheap and correct for the mock path.
+    profileRepository
+      .getToolkitCredits(user.id)
+      .then(n => {
+        setCredits(n);
+        if (resumeGenerateAfterPurchase && n > 0) {
+          setResumeGenerateAfterPurchase(false);
+          void handleGenerate({ skipCreditCheck: true });
+        } else {
+          setResumeGenerateAfterPurchase(false);
+        }
+      })
+      .catch(() => {
+        setResumeGenerateAfterPurchase(false);
+      });
+  };
+
+  const handlePurchaseClose = () => {
+    setPurchaseModalOpen(false);
+    setResumeGenerateAfterPurchase(false);
   };
 
   const handleExportWord = async (data: ResumeData) => {
@@ -672,7 +814,12 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
 
   return (
     <div className="min-h-screen bg-paper flex flex-col">
-      <Navbar onDashboardClick={onExit} showExitBuilder={true} />
+      <Navbar
+        onDashboardClick={onExit}
+        showExitBuilder={true}
+        credits={credits}
+        onBuyCredits={() => setPurchaseModalOpen(true)}
+      />
       <BuilderStepper steps={visibleSteps} currentStep={step} />
 
       <main className="flex-1 max-w-3xl mx-auto w-full p-4 md:p-8">
@@ -834,15 +981,32 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                 {t('builder.nextCta')} <ChevronRight size={18} />
               </button>
             ) : isLastStep ? (
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="flex items-center gap-2 px-8 py-3 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
-              >
-                {isGenerating ? t('builder.generating') : t('builder.buildToolkitCta')}{' '}
-                <Sparkles size={18} className="text-accent-400" />
-              </button>
+              <>
+                {credits !== null && (
+                  <p
+                    className={`text-xs mb-2 font-medium ${credits === 0 ? 'text-accent-700' : 'text-charcoal-500'}`}
+                  >
+                    {credits === 0
+                      ? t('builder.creditsExhausted')
+                      : credits === 1
+                        ? t('builder.creditsRemainingOne')
+                        : t('builder.creditsRemainingMany', { count: credits })}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { void handleGenerate(); }}
+                  disabled={isGenerating}
+                  className="flex items-center gap-2 px-8 py-3 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
+                >
+                  {isGenerating
+                    ? t('builder.generating')
+                    : credits === 0
+                      ? t('builder.buyGenerationsCta')
+                      : t('builder.buildToolkitCta')}{' '}
+                  <Sparkles size={18} className="text-accent-400" />
+                </button>
+              </>
             ) : (
               <button
                 type="button"
@@ -855,6 +1019,12 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
           </div>
         </div>
       </footer>
+
+      <PurchaseModal
+        isOpen={purchaseModalOpen}
+        onClose={handlePurchaseClose}
+        onSuccess={handlePurchaseSuccess}
+      />
     </div>
   );
 };

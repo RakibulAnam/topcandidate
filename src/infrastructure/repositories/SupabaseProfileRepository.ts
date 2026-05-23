@@ -95,6 +95,16 @@ export class SupabaseProfileRepository implements IProfileRepository {
         if (error) throw error;
     }
 
+    async getToolkitCredits(userId: string): Promise<number> {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('toolkit_credits')
+            .eq('id', userId)
+            .single();
+        if (error) throw error;
+        return (data?.toolkit_credits as number | null) ?? 0;
+    }
+
     // --- Experience ---
     async getExperiences(userId: string): Promise<WorkExperience[]> {
         const { data, error } = await supabase

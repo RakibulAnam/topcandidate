@@ -1,0 +1,39 @@
+{
+  "summary": "Senior banking professional with 6 years 7 months of experience in SME lending, specializing in credit analysis, financial modeling, and risk management. Proven track record of managing portfolios with low NPL ratios and driving business growth through effective credit assessment and disbursement. Skilled in financial analysis, credit memo writing, and negotiation, with a strong understanding of IFRS 9 ECL staging, CIB inquiry, and AML/KYC compliance. Proficient in MS Office, Excel, Python, and Tableau, with fluency in Bengali and English.",
+  "skills": ["Credit Analysis","Financial Modeling","IFRS 9 ECL Staging","CIB Inquiry","SME Lending","Trade Finance","AML / KYC","Bangladesh Bank Compliance","Excel","Python","Tableau","Bengali","English"],
+  "skillCategories": [
+    {"category":"Financial Skills","items":["Credit Analysis","Financial Modeling","IFRS 9 ECL Staging","CIB Inquiry","SME Lending","Trade Finance"]},
+    {"category":"Compliance and Risk Management","items":["AML / KYC","Bangladesh Bank Compliance"]},
+    {"category":"Tools and Technologies","items":["Excel","Python","Tableau"]},
+    {"category":"Languages","items":["Bengali","English"]}
+  ],
+  "experience": [
+    {"id":"exp-1","refinedBullets":[
+      "Owned and managed a portfolio of SME clients with low NPL ratios, achieving 2.3% NPL ratio against a branch average of 4.1%.",
+      "Conducted financial spreading, sales tax/VAT challan verification, factory site visits, and buyer-supplier due diligence for CMSME loan evaluations.",
+      "Built a buyer-concentration risk scorecard for knit garments clients, adopted bank-wide, and mentored junior credit officers on financial modeling and IFRS 9 ECL staging.",
+      "Approved disbursement of 38 crore taka against a target of 32 crore, and ensured 100% CIB and AML/KYC compliance."
+    ]},
+    {"id":"exp-2","refinedBullets":[
+      "Acquired exposure to RMG payroll account onboarding, trade finance basics, and credit memo writing during a 1-year training rotation at Standard Chartered Bangladesh Priority Banking.",
+      "Prepared exposure summaries for the credit committee, pulled customer credit histories from the Bangladesh Bank CIB database, and helped seniors write CM notes for renewal cases."
+    ]}
+  ],
+  "projects": [
+    {"id":"proj-1","refinedBullets":[
+      "Predicted early-warning signs of NPL crystallization, flagging 14 high-risk borrowers and saving approximately 4.2 crore taka in expected losses.",
+      "Designed a 7-factor risk scorecard to rank knit-garments SME borrowers by their dependence on top-3 buyers, payment terms, country diversification, and order-book stability, using logistic regression in Excel and Python."
+    ]},
+    {"id":"proj-2","refinedBullets":[
+      "Documented the workflow as an SOP, now used by all five Gulshan branch RMs, to cross-reference LC records, B/L copies, and buyer factory audit reports.",
+      "Developed a workflow and checklist to verify knit/woven SME borrowers' claimed buyer relationships, reducing fake-buyer fraud risk on three live applications."
+    ]}
+  ],
+  "_audit_notes": {
+    "elapsed_ms": 33828,
+    "toolkit_status": "all 4 artifacts FAILED with Gemini 503 UNAVAILABLE",
+    "credit_consumed": 1,
+    "credit_refunded": false,
+    "expected_balance_change": "9999 -> 9998"
+  }
+}

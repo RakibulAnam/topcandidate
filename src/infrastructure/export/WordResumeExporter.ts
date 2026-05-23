@@ -488,14 +488,29 @@ export class WordResumeExporter implements IResumeExporter {
 
     if (isVisible('skills') && data.skills && data.skills.length > 0) {
       sections.push(this.createSectionHeading('Skills', t));
-      sections.push(
-        new Paragraph({
-          children: [
-            new TextRun({ text: data.skills.join(', '), size: pt(t.sizeBody) }),
-          ],
-          spacing: { after: twips(t.itemGap) },
-        })
-      );
+      if (data.skillCategories && data.skillCategories.length > 0) {
+        const cats = data.skillCategories.filter(c => c.items && c.items.length > 0);
+        cats.forEach((cat, i) => {
+          sections.push(
+            new Paragraph({
+              children: [
+                new TextRun({ text: `${cat.category}: `, bold: true, size: pt(t.sizeBody) }),
+                new TextRun({ text: cat.items.join(', '), size: pt(t.sizeBody) }),
+              ],
+              spacing: { after: twips(i === cats.length - 1 ? t.itemGap : t.bulletGap) },
+            })
+          );
+        });
+      } else {
+        sections.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: data.skills.join(', '), size: pt(t.sizeBody) }),
+            ],
+            spacing: { after: twips(t.itemGap) },
+          })
+        );
+      }
     }
 
     if (

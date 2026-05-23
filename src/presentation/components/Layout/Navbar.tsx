@@ -3,13 +3,17 @@ import { LogOut, User, Menu } from 'lucide-react';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { useT } from '../../i18n/LocaleContext';
 import { LanguageToggle } from '../../i18n/LanguageToggle';
+import { CreditsBadge } from '../CreditsBadge';
 
 interface NavbarProps {
     onDashboardClick?: () => void;
     showExitBuilder?: boolean;
+    /** Optional — when supplied, the navbar shows a clickable credits pill. */
+    credits?: number | null;
+    onBuyCredits?: () => void;
 }
 
-export const Navbar = ({ onDashboardClick, showExitBuilder }: NavbarProps) => {
+export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredits }: NavbarProps) => {
     const { signOut, user } = useAuth();
     const t = useT();
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -42,6 +46,9 @@ export const Navbar = ({ onDashboardClick, showExitBuilder }: NavbarProps) => {
 
                     {/* Right Section - Language toggle + User Menu */}
                     <div className="hidden md:flex items-center gap-3">
+                        {credits !== undefined && onBuyCredits && (
+                            <CreditsBadge credits={credits} onBuy={onBuyCredits} />
+                        )}
                         <LanguageToggle />
 
                         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-charcoal-50 border border-charcoal-200">
@@ -63,8 +70,11 @@ export const Navbar = ({ onDashboardClick, showExitBuilder }: NavbarProps) => {
                         </button>
                     </div>
 
-                    {/* Mobile: language toggle stays visible, then hamburger */}
+                    {/* Mobile: credits pill + language toggle stay visible, then hamburger */}
                     <div className="flex items-center gap-2 md:hidden">
+                        {credits !== undefined && onBuyCredits && (
+                            <CreditsBadge credits={credits} onBuy={onBuyCredits} />
+                        )}
                         <LanguageToggle variant="compact" />
                         <button
                             type="button"

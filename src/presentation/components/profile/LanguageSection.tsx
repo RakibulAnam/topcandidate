@@ -4,6 +4,7 @@ import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, Languages } from 'lucide-react';
+import { LanguagePicker } from '../ui/LanguagePicker';
 
 const PROFICIENCIES: LanguageProficiency[] = ['Native', 'Fluent', 'Professional', 'Conversational', 'Basic'];
 
@@ -74,12 +75,10 @@ export const LanguageSection = ({ items, onRefresh }: Props) => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Language</label>
-                            <input
-                                required
-                                className={`w-full p-2 border rounded-lg ${!formData.name ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`}
+                            <LanguagePicker
+                                isError={!formData.name}
                                 value={formData.name || ''}
-                                onChange={e => setFormData({ ...formData, name: e.target.value })}
-                                placeholder="e.g. Bengali, English, Hindi"
+                                onChange={name => setFormData({ ...formData, name })}
                             />
                         </div>
                         <div>

@@ -25,6 +25,12 @@
 
 ```bash
 npm run build          # tsc + vite build — must pass clean
+
+# Smoke-test that the server-only API code path imports cleanly. `vite build`
+# only bundles client code and tree-shakes server-only files (api/_lib/aiFactory
+# and the Gemini/Groq generators), so a syntax error in those files passes
+# `npm run build` undetected. This catches it.
+node_modules/.bin/tsx -e "await import('./api/_lib/aiFactory.ts'); console.log('ok')"
 ```
 
 For UI changes: start `npm run dev`, exercise the flow yourself, and report what you tested. If you couldn't test the UI from this environment, say so explicitly — don't claim success.

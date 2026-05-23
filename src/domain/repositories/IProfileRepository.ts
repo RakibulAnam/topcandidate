@@ -11,6 +11,9 @@ export interface IProfileRepository {
     saveProfile(userId: string, data: PersonalInfo): Promise<void>;
     deleteProfile(userId: string): Promise<void>;
 
+    /** Returns the user's current toolkit_credits balance (0 if missing). */
+    getToolkitCredits(userId: string): Promise<number>;
+
     getExperiences(userId: string): Promise<WorkExperience[]>;
     saveExperience(userId: string, experience: WorkExperience): Promise<void>;
     deleteExperience(id: string): Promise<void>;
