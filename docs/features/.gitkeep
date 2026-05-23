@@ -1,0 +1,3 @@
+# One file per non-trivial feature.
+# Add a markdown file here when starting a feature whose context is worth preserving
+# (motivation, design decisions, edge cases, follow-ups). Skip for trivial fixes.

@@ -1,61 +1,39 @@
-# TOP CANDIDATE
+# TopCandidate
 
-The complete toolkit to land the job. Paste a job description; get an ATS-tailored resume, a real cover letter, a cold outreach email to the hiring manager, a LinkedIn connection note, and a prep sheet of the 6–8 questions you'll actually be asked — all in one run.
+The TopCandidate platform — a single repo for the web app and its mobile companion.
 
-> **For AI agents** (Claude Code, Cursor, Antigravity, etc.): the canonical context document is [`AGENTS.md`](./AGENTS.md). Start there.
-> Claude Code-specific rules are in [`CLAUDE.md`](./CLAUDE.md).
+## Layout
 
----
+```
+topcandidate/
+├── apps/
+│   ├── web/         — Vite + React 19 + Vercel Functions + Supabase (the customer-facing product)
+│   └── mobile/      — Flutter Android-only bKash payment-confirmation watcher (operator-side)
+├── docs/            — Product, architecture, contracts, decisions, workflows (see docs/README is implicit; start at AGENTS.md)
+├── AGENTS.md        — Entry point for AI coding agents
+├── CLAUDE.md        — Claude Code-specific rules
+└── .claude/         — Shared Claude Code project settings
+```
+
+The two apps are loosely coupled by a single HTTPS webhook contract — see [`docs/contracts/webhook-confirm-purchase.md`](docs/contracts/webhook-confirm-purchase.md). There is no shared runtime code.
 
 ## Quick start
 
-```bash
-npm install
-cp .env.example .env     # fill in the three env vars below
-npm run dev
-```
+- **Web:** `cd apps/web && npm install && npm run dev` (Vite on `:3000`). Build: `npm run build`. See [`docs/deployment/web-vercel.md`](docs/deployment/web-vercel.md).
+- **Mobile:** `cd apps/mobile && flutter pub get && flutter analyze && flutter test`. Android build: `flutter build apk`. See [`docs/deployment/mobile-android.md`](docs/deployment/mobile-android.md).
 
-### Required env vars
+## Where to look
 
-| Variable | Where to get it |
-|---|---|
-| `VITE_GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
-| `VITE_SUPABASE_URL` | Supabase Project Settings → API |
-| `VITE_SUPABASE_ANON_KEY` | Supabase Project Settings → API |
+| Need | Read |
+| --- | --- |
+| What this platform is | [`docs/product/overview.md`](docs/product/overview.md) |
+| How the pieces fit together | [`docs/architecture/system-overview.md`](docs/architecture/system-overview.md) |
+| The webhook between apps | [`docs/contracts/webhook-confirm-purchase.md`](docs/contracts/webhook-confirm-purchase.md) |
+| Web app internals | [`apps/web/AGENTS.md`](apps/web/AGENTS.md) |
+| Mobile app internals | [`apps/mobile/AGENTS.md`](apps/mobile/AGENTS.md) and [`apps/mobile/spec/`](apps/mobile/spec/) |
+| Branching / release flow | [`docs/workflows/branching.md`](docs/workflows/branching.md) |
+| Why decisions were made | [`docs/decisions/`](docs/decisions/) |
 
-### Database
+## Working with AI agents
 
-Run `supabase/schema.sql` in the Supabase SQL editor, then every file under `supabase/migrations/` in order. All migrations are idempotent.
-
-## Build
-
-```bash
-npm run build       # tsc + vite build
-npm run preview     # serve dist/
-```
-
-No test suite. Verification is `npm run build` passing + a manual browser pass.
-
-## What's in the box
-
-- **Resume** — tailored summary, bullets, skills; 4 ATS-safe single-column templates; export to PDF or Word
-- **Cover letter** — role-specific body paragraphs; export to PDF or Word
-- **Outreach email** — cold email to the hiring manager (subject + body); copy-to-clipboard
-- **LinkedIn note** — ≤ 280-char tailored connection request
-- **Interview prep** — 6–8 questions with *why asked* and *how to answer*, expandable cards, per-question copy
-- **Master profile** — one-time capture; drives auto-generated resumes and prefills the builder
-- **General Resume** — a generic, profile-based resume with a 24-hour regen cooldown
-
-## Stack
-
-React 19 · TypeScript 5.8 · Vite 6 · Tailwind (CDN) · Google Gemini 2.5 Flash · Supabase (Auth + Postgres + RLS) · docx · jspdf / html2pdf.js · Lucide · Sonner · date-fns
-
-Clean Architecture: `domain → application → infrastructure (impl) ← presentation`. Full details in [`AGENTS.md`](./AGENTS.md).
-
-## Deploying
-
-See [`DEPLOYING.md`](./DEPLOYING.md) — Vercel + Supabase, with the migration step called out.
-
-## License
-
-MIT
+Start by reading [`AGENTS.md`](AGENTS.md). It is short on purpose — it points to the per-app `AGENTS.md` files and the topic-scoped docs above.

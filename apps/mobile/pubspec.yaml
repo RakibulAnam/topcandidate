@@ -1,0 +1,62 @@
+name: bkash_watcher
+description: "Android-only Flutter watcher that POSTs bKash money-received SMS to a confirm-purchase webhook."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.0
+
+# Pinned dependencies. Do NOT bump without updating AGENTS.md and the spec.
+# See spec/03-architecture.md for the rationale on each pick.
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # SMS read access (Android only).
+  another_telephony: ^0.4.1
+
+  # Persistent foreground service that survives UI close.
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.0
+
+  # AES-encrypted local key/value (Android Keystore-backed).
+  flutter_secure_storage: ^10.0.0
+
+  # Crypto for HMAC-SHA256 (signs the webhook body).
+  crypto: ^3.0.5
+
+  # HTTP client.
+  http: ^1.2.2
+
+  # Local SQLite for processed_sms table.
+  sqflite: ^2.4.2
+  path: ^1.9.0
+  path_provider: ^2.1.4
+
+  # Tray + outcome notifications.
+  flutter_local_notifications: ^20.0.0
+
+  # Periodic dispatcher tick (safety net for retries).
+  workmanager: ^0.9.0+3
+
+  # Runtime permission requests.
+  permission_handler: ^12.0.0
+
+  # Battery optimization deeplink.
+  disable_battery_optimization: ^1.1.1
+
+  # Time-ago strings for the Status tab.
+  timeago: ^3.7.0
+
+  # Reactive state for UI tabs (Status/History/Settings).
+  provider: ^6.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
