@@ -21,6 +21,20 @@
 
 8. **No test harness.** This repo has no `npm test`. Don't add one unsolicited. Verification = `npm run build` (tsc is part of Vite) + manual browser pass.
 
+9. **Run a "mobile impact check" before declaring any non-trivial change done.** The mobile bKash watcher (`apps/mobile/`) is loosely coupled to the web app but cares about a narrow set of web surfaces. Before saying you're done, verify whether the change touches any of:
+
+   - **The webhook handler** `api/confirm-purchase.ts` — payload schema, response codes (200 / 400 / 401 / 404 / 409 / 503 / 5xx), HMAC behavior, idempotency. Canonical contract: [`../../docs/contracts/webhook-confirm-purchase.md`](../../docs/contracts/webhook-confirm-purchase.md).
+   - **The `pending_purchase` table and rows the web creates** (`api/purchase.ts`, related Supabase columns / RLS, the `trx_id` lookup). Mobile expects to find these rows when it POSTs; schema changes that affect lookup or column names break the watcher.
+   - **The shared `BKASH_WEBHOOK_SECRET`** env var — rotation requires coordinating with the operator's phone settings (see [`../../docs/contracts/webhook-confirm-purchase.md`](../../docs/contracts/webhook-confirm-purchase.md) for the rotation procedure).
+   - **Customer-facing purchase status UI states** (waiting / confirming / confirmed / expired / mismatch). Mobile's `apps/mobile/WHAT_IT_DOES.md` §6 documents the expected user-visible flow.
+
+   At the end of the response, emit a **"Mobile impact"** block with one of:
+
+   - **`Mobile impact: none.`** — the change touches nothing in the list above.
+   - **`Mobile impact: yes —`** followed by a bulleted list naming the mobile-side changes needed: which files in `apps/mobile/` (typically `lib/dispatch/webhook_client.dart`, `lib/dispatch/dispatcher.dart`, or `spec/01-server-contract.md`), what to update, and why. If the webhook contract itself changes, also flag that [`../../docs/contracts/webhook-confirm-purchase.md`](../../docs/contracts/webhook-confirm-purchase.md) MUST be updated in the same PR — that's the cross-app rule from the root [`../../CLAUDE.md`](../../CLAUDE.md).
+
+   Skip the block only for purely cosmetic edits (typo fixes, comment-only changes, isolated profile-UI tweaks with no schema effect). For everything else, even when the answer is "none", say so explicitly so the operator knows the check happened.
+
 ## Verification commands
 
 ```bash
@@ -52,3 +66,4 @@ Before declaring done:
 2. `AGENTS.md` reflects reality
 3. Any SQL migration is both written as a file **and** surfaced to the user as a script to run
 4. No gradient, no blue, no purple snuck in
+5. The **Mobile impact** block (rule 9) is included — even if "none"
