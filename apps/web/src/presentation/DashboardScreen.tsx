@@ -24,7 +24,9 @@ import { toast } from 'sonner';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { PurchaseModal } from './components/PurchaseModal';
+import { PurchaseHistorySection } from './components/PurchaseHistorySection';
 import { CreditsBadge } from './components/CreditsBadge';
+import { VerifyingPurchasePill } from './components/Layout/VerifyingPurchasePill';
 
 interface Props {
     onCreateNew: () => void;
@@ -223,6 +225,7 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                     <Wordmark />
                     <div className="relative flex items-center gap-2">
+                        <VerifyingPurchasePill onResubmit={() => setPurchaseModalOpen(true)} />
                         <CreditsBadge credits={credits} onBuy={() => setPurchaseModalOpen(true)} />
                         <LanguageToggle />
                         <button
@@ -637,6 +640,8 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                             </ul>
                         </section>
                     )}
+
+                    <PurchaseHistorySection />
                 </div>
             </main>
 

@@ -23,10 +23,17 @@
 //      are free.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { authenticate, userClient } from './_lib/auth.js';
+import { createClient } from '@supabase/supabase-js';
+import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { resumeOptimizer, toolkitGenerator } from './_lib/aiFactory.js';
 import type { ResumeData, GeneratedToolkit } from '../src/domain/entities/Resume';
+
+// Service-role client for credit RPCs. Migration 008 locked consume/refund
+// to service_role only — end-user JWTs no longer have EXECUTE. The userId
+// is passed explicitly (the RPCs no longer read auth.uid()).
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Short correlation id for tracing a single generation across log lines and
@@ -76,12 +83,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── Credit gate ───────────────────────────────────────────────────────────
   // Atomically decrement the user's toolkit_credits balance before running AI.
-  // The security-definer RPC enforces that balance cannot go below 0 and that
-  // the decrement is serialised at the row level (no race condition with a
-  // concurrent request).
-  const supabase = userClient(auth.jwt);
+  // Migration 008 locked the RPCs to service_role only — we pass userId
+  // explicitly. The function still enforces balance ≥ 0 at the row level
+  // via the WHERE clause + RETURNING idiom (no race with a concurrent call).
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error(`[optimize ${rid}] 503 service-role not configured`);
+    res.status(503).json({ error: 'Server is not configured for credit accounting.' });
+    return;
+  }
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
   const tCredit = Date.now();
-  const { error: creditError } = await supabase.rpc('consume_toolkit_credit');
+  const { error: creditError } = await supabase.rpc('consume_toolkit_credit', {
+    p_user_id: auth.userId,
+  });
 
   if (creditError) {
     if (creditError.message?.includes('insufficient_credits')) {
@@ -118,7 +134,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Core artifact failed — refund the credit so the user isn't charged for
     // a generation that produced nothing.
     if (creditConsumed) {
-      const { error: refundError } = await supabase.rpc('refund_toolkit_credit');
+      const { error: refundError } = await supabase.rpc('refund_toolkit_credit', {
+        p_user_id: auth.userId,
+      });
       if (refundError) {
         console.error(`[optimize ${rid}] credit refund failed: ${refundError.message}`);
       } else {

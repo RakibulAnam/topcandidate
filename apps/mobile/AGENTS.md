@@ -47,6 +47,7 @@ bkash_watcher/
 ├── README.md                  ← operator-facing install + QA
 ├── pubspec.yaml               ← pinned dependency versions
 ├── analysis_options.yaml
+├── prompts-from-web/          ← cross-app briefs from web sessions; delete when done (§6.5)
 ├── spec/                      ← single source of truth for behavior
 │   ├── 00-overview.md
 │   ├── 01-server-contract.md
@@ -175,6 +176,34 @@ VM without Flutter. Anything that pulls a Flutter import into `sms/` or
    API surface used by `lib/` still matches.
 
 ---
+
+## 6.5. prompts-from-web protocol
+
+When the web app makes a change that requires coordinated work on the mobile
+side, the web session drops a self-contained markdown brief into
+`prompts-from-web/<YYYY-MM-DD>-<slug>.md`. Each brief is a complete
+specification — it states what the web changed, what the mobile must do,
+which files to touch, and how to verify.
+
+**Lifecycle**:
+
+1. The web session creates the file.
+2. A future mobile session reads this file (`AGENTS.md`) first, then opens
+   any file in `prompts-from-web/` and treats it as the active brief.
+3. When the mobile work is complete and verified — `flutter analyze` and
+   `flutter test` green, manual smoke on a real device passed, build
+   sideloaded to the operator's phone — the agent **deletes the prompt
+   file in the same commit as the `pubspec.yaml` version bump**.
+
+The folder is a queue of pending cross-app work, not an archive. A stale
+prompt file is worse than none — it makes a future agent believe work is
+owed when it isn't. Git history is the archive; the file's job is to mark
+"work is owed". Once shipped, remove it.
+
+If you cannot finish the prompt's work in one session, leave it in place
+and add a note at the top describing what's done vs pending. Do NOT
+partially-delete sections of the prompt as a progress marker — keep the
+file whole, annotate the top.
 
 ## 7. When the operator asks for a change
 

@@ -43,6 +43,7 @@ import { useT } from '../i18n/LocaleContext';
 import { supabase } from '../../infrastructure/supabase/client';
 import { purchasePackage, type PackageId } from '../../infrastructure/api/purchaseClient';
 import { ApiCallError } from '../../infrastructure/ai/proxy/ProxyClients';
+import { writePendingPurchase } from '../../infrastructure/api/purchaseStatusClient';
 
 interface Props {
   isOpen: boolean;
@@ -153,6 +154,12 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
         transactionId: trimmedTxn,
         senderMsisdn: senderMsisdn.trim() || undefined,
       });
+
+      // Hand off to the navbar VerifyingPurchasePill, which polls
+      // /api/my-purchase-status and surfaces the right action card per
+      // observed status (verifying / underpaid / mismatch / expired /
+      // completed). Survives navigation.
+      writePendingPurchase({ txnId: trimmedTxn, submittedAt: Date.now() });
 
       if (MOCK_AUTOCONFIRM) {
         setPhase('verifying');

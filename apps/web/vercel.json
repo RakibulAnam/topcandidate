@@ -10,5 +10,8 @@
   },
   "rewrites": [
     { "source": "/((?!api/|@|src/|node_modules/|assets/|.*\\.).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/expire-pending", "schedule": "*/15 * * * *" }
   ]
 }

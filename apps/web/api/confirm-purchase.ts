@@ -144,13 +144,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const txn = transactionId.trim();
+  const { amountTaka } = body;
+  // Amount must be a positive integer Taka if provided. Watcher floors decimals.
+  const observedAmount =
+    typeof amountTaka === 'number' && Number.isFinite(amountTaka) && amountTaka > 0
+      ? Math.floor(amountTaka)
+      : null;
+
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // P0-A defense-in-depth (revenue leak, 2026-05-17): the DB-level confirm_purchase
+  // (migration 007) compares observed vs expected and refuses under-payments,
+  // but we ALSO check here so deployments that haven't applied 007 yet still
+  // fail closed. If the row's amount_taka > observedAmount, return 409 underpaid
+  // before the RPC. The watcher treats 409 as terminal `mismatch` and notifies
+  // the operator, who recovers via /api/admin/confirm-purchase.
+  if (observedAmount !== null) {
+    const { data: pending } = await admin
+      .from('purchases')
+      .select('id, amount_taka, status')
+      .eq('payment_reference', txn)
+      .in('status', ['pending', 'underpaid'])
+      .maybeSingle();
+    if (pending && observedAmount < pending.amount_taka) {
+      // Surface the underpayment to the DB layer so the row flips to
+      // 'underpaid' and the audit row is written. Use a service-role update
+      // here rather than letting confirm_purchase raise — keeps the response
+      // shape consistent.
+      await admin
+        .from('purchases')
+        .update({ status: 'underpaid', observed_amount_taka: observedAmount })
+        .eq('id', pending.id);
+      await admin.from('purchase_state_changes').insert({
+        purchase_id: pending.id,
+        from_status: pending.status,
+        to_status: 'underpaid',
+        actor: 'flutter',
+        reason: `observed=${observedAmount} expected=${pending.amount_taka}`,
+      });
+      res.status(409).json({
+        error: `Observed amount ${observedAmount} is less than required ${pending.amount_taka}.`,
+        code: 'underpaid',
+        expected: pending.amount_taka,
+        observed: observedAmount,
+      });
+      return;
+    }
+  }
+
   const { data, error } = await admin.rpc('confirm_purchase', {
     p_transaction_id: txn,
     p_observed_sender_msisdn: senderMsisdn?.trim() || null,
+    p_observed_amount_taka: observedAmount,
   });
 
   if (error) {
@@ -187,6 +234,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(409).json({
         error: 'Sender phone number does not match the pending purchase.',
         code: 'msisdn_mismatch',
+      });
+      return;
+    }
+    if (msg.includes('underpaid')) {
+      // confirm_purchase v2 (migration 007) raises this when observed <
+      // expected. The watcher treats 409 as terminal so it stops retrying;
+      // the operator recovers via the admin panel.
+      res.status(409).json({
+        error: 'Amount sent is less than required for this package.',
+        code: 'underpaid',
       });
       return;
     }

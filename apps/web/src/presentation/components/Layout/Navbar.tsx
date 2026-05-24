@@ -4,6 +4,7 @@ import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { useT } from '../../i18n/LocaleContext';
 import { LanguageToggle } from '../../i18n/LanguageToggle';
 import { CreditsBadge } from '../CreditsBadge';
+import { VerifyingPurchasePill } from './VerifyingPurchasePill';
 
 interface NavbarProps {
     onDashboardClick?: () => void;
@@ -45,7 +46,8 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
 
 
                     {/* Right Section - Language toggle + User Menu */}
-                    <div className="hidden md:flex items-center gap-3">
+                    <div className="hidden md:flex items-center gap-3 relative">
+                        <VerifyingPurchasePill onResubmit={onBuyCredits} />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}
@@ -71,7 +73,8 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
                     </div>
 
                     {/* Mobile: credits pill + language toggle stay visible, then hamburger */}
-                    <div className="flex items-center gap-2 md:hidden">
+                    <div className="flex items-center gap-2 md:hidden relative">
+                        <VerifyingPurchasePill onResubmit={onBuyCredits} />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}
