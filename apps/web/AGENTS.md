@@ -404,16 +404,18 @@ api/                                    Vercel Functions — server-side AI prox
   ├── my-purchase-status.ts             GET  — customer pill polls this (auth required)
   ├── cron/expire-pending.ts            GET  — Bearer CRON_SECRET; 15-min Vercel Cron
   ├── admin/                            All gated by X-Admin-Key (ADMIN_API_KEY)
+  │   ├── [action].ts                   Dynamic-route dispatcher — single Vercel function (consolidated 2026-05-24 to stay under Hobby's 12-function cap). URLs unchanged.
   │   ├── _lib/adminAuth.ts             requireAdmin + requireReason + adminSupabase
-  │   ├── dashboard.ts                  GET — stat tiles
-  │   ├── pending.ts                    GET — stuck non-terminal rows
-  │   ├── orphans.ts                    GET — unmatched SMS + pending candidates
-  │   ├── disputes.ts                   GET — customer disputes
-  │   ├── parser-failures.ts            GET (admin) + POST (HMAC) — bKash SMS the parser couldn't classify
-  │   ├── confirm-purchase.ts           POST — operator manual confirm (P0-B)
-  │   ├── refund-purchase.ts            POST — operator manual refund
-  │   ├── match-orphan.ts               POST — link orphan SMS to pending row
-  │   └── resolve-dispute.ts            POST — close a dispute
+  │   └── _handlers/                    Per-action implementations (underscore prefix → not routed by Vercel)
+  │       ├── dashboard.ts              GET — stat tiles
+  │       ├── pending.ts                GET — stuck non-terminal rows
+  │       ├── orphans.ts                GET — unmatched SMS + pending candidates
+  │       ├── disputes.ts               GET — customer disputes
+  │       ├── parser-failures.ts        GET (admin) + POST (HMAC) — bKash SMS the parser couldn't classify
+  │       ├── confirm-purchase.ts       POST — operator manual confirm (P0-B)
+  │       ├── refund-purchase.ts        POST — operator manual refund
+  │       ├── match-orphan.ts           POST — link orphan SMS to pending row
+  │       └── resolve-dispute.ts        POST — close a dispute
   └── _lib/                             auth.ts, rateLimit.ts, aiFactory.ts, webhookAuth.ts
 
 src/infrastructure/api/purchaseClient.ts  Typed client for /api/purchase — used by PurchaseModal
@@ -638,7 +640,7 @@ Agents: **do not build these unless the user asks.**
 - **Locale persistence to Supabase** — locale is currently `localStorage`-only. Cross-device sync would need a `preferred_locale` column on `profiles` + a fetch on sign-in. Skipped for v1 because device-local is enough for a Bangladesh-first launch.
 - **Flutter SMS-watcher app for the new webhooks.** The watcher ships and confirms `/api/confirm-purchase` end-to-end. Migration 007 adds three more endpoints it should also call but doesn't yet: `/api/orphan-inbound-sms` (post unmatched SMS after the 24h retry window), `/api/reverse-purchase` (bKash reversal SMS), `/api/admin/parser-failures` POST (unclassifiable SMS). All three reuse the same `BKASH_WEBHOOK_SECRET` HMAC. Until the watcher gets these branches, orphan/reversal/parser-failure data has to be entered manually via SQL — the customer-facing dispute flow + operator `/admin` panel still recover the cases correctly, it's just less proactive.
 
-- **Dev mock-confirm scaffolding** — `api/dev-mock-confirm.ts` + the `mockConfirm()` auto-trigger inside `PurchaseModal.tsx`. These exist solely so the buy → pending → credits flow can be exercised end-to-end during development before the Flutter app is built. Gated by `VITE_BKASH_MOCK_AUTOCONFIRM=true` (client) + `BKASH_MOCK_AUTOCONFIRM=true` (server). **Delete the endpoint file, the modal's `mockConfirm` block, the two env vars, and the matching `purchaseModal.mockBadge` / `verifying` / `confirmedToast` locale strings once the Flutter app is shipping confirmations.**
+- ~~**Dev mock-confirm scaffolding**~~ — **REMOVED 2026-05-24**. `api/dev-mock-confirm.ts` deleted, `mockConfirm()` block and `MOCK_AUTOCONFIRM` flag removed from `PurchaseModal.tsx`, `VITE_BKASH_MOCK_AUTOCONFIRM` / `BKASH_MOCK_AUTOCONFIRM` removed from `.env.example`. The shipped Flutter watcher confirms purchases for real; the mock scaffolding is no longer needed. A few orphan locale strings remain (`purchaseModal.mockBadge`, `verifying`, `confirmedToast`, `confirmedHeading`, `confirmedSub`, `confirmedShort`) — they're unused dead text and can be cleaned up in a future PR; not load-bearing.
 
 - ~~**`refund_toolkit_credit()` is user-callable**~~ — **CLOSED 2026-05-24 by migration 008**. Both `consume_toolkit_credit` and `refund_toolkit_credit` now take an explicit `p_user_id uuid` arg and have EXECUTE revoked from `anon` + `authenticated`. `api/optimize.ts` calls them via `SUPABASE_SERVICE_ROLE_KEY`. End-user JWTs no longer have any RPC path that mutates `toolkit_credits`.
 
