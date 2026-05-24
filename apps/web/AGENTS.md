@@ -95,7 +95,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | **Customer dispute filing** | `/api/dispute-purchase`, dispute dialog inside `VerifyingPurchasePill` | shipped |
 | **Operator admin SPA** — Pending / Orphans / Disputes / Parser-failures tabs | `/admin`, `src/presentation/admin/AdminScreen.tsx` | shipped — gated by `ADMIN_API_KEY` |
 | **Mobile-callable webhooks** (HMAC) — orphan dump, reversal, parser failure | `/api/orphan-inbound-sms`, `/api/reverse-purchase`, `/api/admin/parser-failures` (POST) | shipped — Flutter watcher must be updated to call these |
-| **Cron expiry** — flips pending rows > 24h old to `expired` | `/api/cron/expire-pending`, `vercel.json` `crons` entry, optional `007_optional_pg_cron.sql` | shipped |
+| **Cron expiry** — flips pending rows > 24h old to `expired` | `/api/cron/expire-pending` (manual / Pro-tier Vercel Cron) + `007_optional_pg_cron.sql` (Supabase pg_cron, the default path on Hobby) | shipped — see §13 "Cron cadence" |
 
 ---
 
@@ -641,6 +641,8 @@ Agents: **do not build these unless the user asks.**
 - **Dev mock-confirm scaffolding** — `api/dev-mock-confirm.ts` + the `mockConfirm()` auto-trigger inside `PurchaseModal.tsx`. These exist solely so the buy → pending → credits flow can be exercised end-to-end during development before the Flutter app is built. Gated by `VITE_BKASH_MOCK_AUTOCONFIRM=true` (client) + `BKASH_MOCK_AUTOCONFIRM=true` (server). **Delete the endpoint file, the modal's `mockConfirm` block, the two env vars, and the matching `purchaseModal.mockBadge` / `verifying` / `confirmedToast` locale strings once the Flutter app is shipping confirmations.**
 
 - ~~**`refund_toolkit_credit()` is user-callable**~~ — **CLOSED 2026-05-24 by migration 008**. Both `consume_toolkit_credit` and `refund_toolkit_credit` now take an explicit `p_user_id uuid` arg and have EXECUTE revoked from `anon` + `authenticated`. `api/optimize.ts` calls them via `SUPABASE_SERVICE_ROLE_KEY`. End-user JWTs no longer have any RPC path that mutates `toolkit_credits`.
+
+- **Cron cadence is on Supabase pg_cron, not Vercel Cron.** Vercel Hobby restricts cron schedules to once-per-day (per https://vercel.com/docs/cron-jobs/usage-and-pricing); a `*/15 * * * *` entry in `vercel.json` fails at deploy time. We removed the `vercel.json` `crons` block on 2026-05-24 and rely on `supabase/migrations/007_optional_pg_cron.sql` which schedules `expire_stale_pending_purchases()` every 15 min at the DB layer. The `/api/cron/expire-pending` HTTP endpoint stays in the codebase as a manual trigger (`curl -H 'Authorization: Bearer $CRON_SECRET' ...`) and as the path that gets re-enabled in `vercel.json` if/when the operator upgrades to Vercel Pro.
 
 - **Operator email digest for stuck pending rows** (case #20 from `topcandidate-audit-2026-05-08/PROMPT-transaction-flow-edge-cases.md`). The cron-driven `expired` flip handles the 24h cliff, and the admin dashboard tile surfaces the oldest pending row at every page load. The proactive ping (e.g. "any pending row > 12h triggers an email") is NOT wired — the repo has no email provider. Add when the operator picks one (Resend / Postmark / SES).
 

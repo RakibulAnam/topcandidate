@@ -10,7 +10,7 @@
    openssl rand -hex 32   # → CRON_SECRET
    ```
 2. Add both to Vercel's Environment Variables UI (Production + Preview + Development).
-3. (Optional, recommended) Enable `pg_cron` in Supabase Dashboard → Database → Extensions, then run `supabase/migrations/007_optional_pg_cron.sql` in the SQL editor. This schedules the 24h-TTL pending-expiry every 15 min. If you stay on Vercel Hobby (which only allows once-daily Vercel Cron), this is the only way to get the 15-min cadence.
+3. **Enable `pg_cron` in Supabase** (required on Vercel Hobby) — Dashboard → Database → Extensions → enable `pg_cron`. Then paste `supabase/migrations/007_optional_pg_cron.sql` into the SQL editor and run it. This schedules the 24h-TTL pending-expiry every 15 minutes. The Vercel cron path is *not* used on Hobby plans — Vercel rejects schedules more frequent than once-per-day at deploy time, which is why the `vercel.json` `crons` block was removed on 2026-05-24. On Vercel Pro you could re-add a `crons` entry pointing at `/api/cron/expire-pending`, but pg_cron stays cleaner either way.
 4. Open `/admin` on the deployed site. Paste `ADMIN_API_KEY` into the gate. The key is stored in your browser's localStorage; lock the panel any time via the "Lock" button.
 
 ## Daily workflow (suggested glance order)
@@ -86,7 +86,7 @@ Before exposing the purchase flow to real customers:
 - [ ] Delete `api/dev-mock-confirm.ts` and the `mockConfirm` block in `PurchaseModal.tsx` (see web `AGENTS.md` §13).
 - [ ] `ADMIN_API_KEY`, `CRON_SECRET`, `BKASH_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` all set in Vercel Production.
 - [ ] Apply migration 007 in the Supabase SQL editor.
-- [ ] (Optional but recommended) Apply `007_optional_pg_cron.sql` if pg_cron is enabled.
+- [ ] Apply `007_optional_pg_cron.sql` in Supabase (required for the pending-expiry cron — Vercel Hobby can't run it).
 - [ ] Send yourself a small bKash payment end-to-end and watch the customer-side VerifyingPurchasePill complete.
 
 ## Known gaps
