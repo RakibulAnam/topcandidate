@@ -1,6 +1,6 @@
 // PurchaseModal — buy a pack of toolkit generations via bKash.
 //
-// Production flow (no payment gateway):
+// Flow (no payment gateway):
 //   1. User sees the owner's bKash number and the package amount.
 //   2. User sends the amount via bKash to that number out-of-band.
 //   3. User pastes the Transaction ID (TrxID) from the bKash confirmation
@@ -9,12 +9,9 @@
 //   5. The owner's Flutter SMS-watcher app reads the bKash SMS on the
 //      owner's phone, matches the TrxID, and POSTs to /api/confirm-purchase
 //      which flips the row to 'completed' and grants credits.
-//
-// Dev / mock flow (when VITE_BKASH_MOCK_AUTOCONFIRM=true):
-//   - Steps 1–4 happen as above.
-//   - INSTEAD of waiting for the Flutter app, this modal auto-fires
-//     /api/dev-mock-confirm after a short delay. Delete the mockConfirm
-//     dispatch + the dev endpoint when shipping.
+//   6. The VerifyingPurchasePill in the navbar polls /api/my-purchase-status
+//      and surfaces the result. This modal hands off to it via
+//      writePendingPurchase().
 //
 // Design notes:
 //   - Split-sheet checkout: a warm-cream receipt panel on the left tells
@@ -56,8 +53,6 @@ const PACKAGE_ID: PackageId = 'five-pack';
 
 // Direct `import.meta.env.X` so Vite's AST-based static substitution kicks in.
 const OWNER_BKASH_NUMBER = import.meta.env.VITE_BKASH_PAYMENT_NUMBER || '01XXXXXXXXX';
-const MOCK_AUTOCONFIRM = import.meta.env.VITE_BKASH_MOCK_AUTOCONFIRM === 'true';
-const MOCK_DELAY_MS = 3000;
 
 const TXN_MIN_LEN = 6;
 const TXN_TARGET_LEN = 10;
@@ -65,24 +60,7 @@ const TXN_TARGET_LEN = 10;
 const BKASH = '#E2136E';
 const BKASH_DEEP = '#B80E5D';
 
-type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'error';
-
-async function mockConfirm(transactionId: string): Promise<{ creditsGranted: number; newBalance: number }> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-  if (!token) throw new ApiCallError('Not authenticated.', 401);
-  const res = await fetch('/api/dev-mock-confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ transactionId }),
-  });
-  if (!res.ok) {
-    let body: { error?: string } | null = null;
-    try { body = await res.json(); } catch { /* leave null */ }
-    throw new ApiCallError(body?.error ?? `mock-confirm ${res.status}`, res.status);
-  }
-  return res.json() as Promise<{ creditsGranted: number; newBalance: number }>;
-}
+type Phase = 'idle' | 'submitting' | 'confirmed' | 'error';
 
 export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
   const t = useT();
@@ -119,7 +97,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
 
   const trimmedTxn = transactionId.trim();
   const txnIsValid = trimmedTxn.length >= TXN_MIN_LEN;
-  const busy = phase === 'submitting' || phase === 'verifying';
+  const busy = phase === 'submitting';
   const charCount = Math.min(trimmedTxn.length, TXN_TARGET_LEN);
 
   const reset = () => {
@@ -161,23 +139,8 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       // completed). Survives navigation.
       writePendingPurchase({ txnId: trimmedTxn, submittedAt: Date.now() });
 
-      if (MOCK_AUTOCONFIRM) {
-        setPhase('verifying');
-        await new Promise((r) => setTimeout(r, MOCK_DELAY_MS));
-        try {
-          const { creditsGranted } = await mockConfirm(trimmedTxn);
-          setPhase('confirmed');
-          toast.success(t('purchaseModal.confirmedToast', { credits: creditsGranted }));
-          setTimeout(finishAndClose, 1300);
-        } catch (mockErr) {
-          console.warn('[PurchaseModal] mock-confirm failed:', mockErr);
-          toast.success(t('purchaseModal.successToast'));
-          finishAndClose();
-        }
-      } else {
-        toast.success(t('purchaseModal.successToast'));
-        finishAndClose();
-      }
+      toast.success(t('purchaseModal.successToast'));
+      finishAndClose();
     } catch (err) {
       let msg: string;
       if (err instanceof ApiCallError) {
@@ -287,14 +250,6 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
               <h2 className="font-display text-lg font-semibold text-[#1A1812] tracking-tight">
                 {t('purchaseModal.panelTitle')}
               </h2>
-              {MOCK_AUTOCONFIRM && (
-                <div
-                  className="mt-2 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-[0.18em] font-bold"
-                  style={{ backgroundColor: `${BKASH}1A`, color: BKASH }}
-                >
-                  {t('purchaseModal.mockBadge')}
-                </div>
-              )}
             </div>
             <button
               type="button"
@@ -494,19 +449,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                   {t('purchaseModal.processing')}
                 </>
               )}
-              {phase === 'verifying' && (
-                <>
-                  <Loader2 size={18} className="animate-spin" />
-                  {t('purchaseModal.verifying')}
-                </>
-              )}
-              {phase === 'confirmed' && (
-                <>
-                  <Check size={18} strokeWidth={3} />
-                  {t('purchaseModal.confirmedShort')}
-                </>
-              )}
-              {(phase === 'idle' || phase === 'error') && (
+              {(phase === 'idle' || phase === 'error' || phase === 'confirmed') && (
                 <>
                   {t('purchaseModal.submitCta')}
                   <ArrowRight size={18} />

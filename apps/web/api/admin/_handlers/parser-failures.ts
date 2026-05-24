@@ -17,8 +17,8 @@ import {
   verifyBkashSignature,
   webhookSecretConfigured,
   getSignatureHeader,
-} from '../_lib/webhookAuth.js';
-import { requireAdmin, adminSupabase } from './_lib/adminAuth.js';
+} from '../../_lib/webhookAuth.js';
+import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
 
 export const config = { api: { bodyParser: false } };
 

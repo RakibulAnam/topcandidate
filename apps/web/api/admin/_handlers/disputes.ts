@@ -4,7 +4,7 @@
 // uses this.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase } from './_lib/adminAuth.js';
+import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {

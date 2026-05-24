@@ -13,7 +13,7 @@
 // 503 server not configured.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase, requireReason } from './_lib/adminAuth.js';
+import { requireAdmin, adminSupabase, requireReason } from '../_lib/adminAuth.js';
 
 interface Body {
   transactionId?: string;
