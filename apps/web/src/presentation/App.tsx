@@ -16,6 +16,14 @@ import { ProfileSetupScreen } from './ProfileSetupScreen';
 import { ResumeSourceDialog } from './components/ResumeSourceDialog';
 import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
+import { AdminScreen } from './admin/AdminScreen';
+
+// Path-based admin route. The admin SPA does NOT use Supabase auth — it
+// gates on ADMIN_API_KEY pasted by the operator. We intercept before any
+// other routing so unauthenticated visitors land on the gate, not the
+// landing page.
+const isAdminPath = (): boolean =>
+  typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
 
 const INITIAL_DATA: ResumeData = {
   userType: undefined,
@@ -317,6 +325,13 @@ const AppContent = () => {
 };
 
 export default function App() {
+  // The admin SPA mounts at /admin and does NOT use Supabase auth (gated by
+  // ADMIN_API_KEY only). Render it BEFORE the providers so the operator can
+  // get to the key-paste gate without going through Supabase login. The
+  // tradeoff: no i18n + no toasts on the admin surface, which is the design.
+  if (isAdminPath()) {
+    return <AdminScreen />;
+  }
   return (
     <LocaleProvider>
       <AuthProvider>

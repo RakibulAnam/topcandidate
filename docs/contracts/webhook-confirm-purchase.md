@@ -33,7 +33,7 @@ The HMAC is computed over the exact byte sequence of the body. **Do not** re-ser
 
 - `transactionId` — exactly 10 alphanumeric characters, uppercased. Unique key on the web side.
 - `senderMsisdn` — `01` followed by 9 digits, OR `null` for SMS variants without a sender phone. Treat as nullable.
-- `amountTaka` — positive integer Taka. Watcher floors any decimal (`Tk 200.50` → `200`).
+- `amountTaka` — positive integer Taka. Watcher floors any decimal (`Tk 200.50` → `200`). **Load-bearing** since migration 007: the server compares observed vs expected and refuses underpayments with 409 `underpaid`. A missing or zero `amountTaka` causes the underpayment check to be skipped — the watcher MUST send the real amount.
 
 ## Response codes (do NOT invent new ones)
 
@@ -45,6 +45,7 @@ The HMAC is computed over the exact byte sequence of the body. **Do not** re-ser
 | 401 | `{ error: 'bad signature' }` | HMAC missing or wrong. | Marks row `failed`. Operator alerted. |
 | 404 | `{ code: 'no_pending_purchase' }` | No matching pending row **yet**. | Marks row `waiting_user`. Retries every 5 min for 24 h. |
 | 409 | `{ code: 'msisdn_mismatch' }` | Claimed sender ≠ SMS sender. | Marks row `mismatch`. Manual review. |
+| 409 | `{ code: 'underpaid', expected, observed }` | SMS amount < required. | Marks row `mismatch` (terminal). Operator recovers via admin panel / top-up SMS. |
 | 503 | `{ error: 'webhook misconfigured' }` | Server-side misconfig. | Marks row `failed`. Operator alerted. |
 | 5xx (other) | any | Transient. | Exponential backoff: 5s → 15s → 45s → 2m → 6m → 18m → 1h, for 24 h. |
 
@@ -62,15 +63,24 @@ The customer's TrxID-paste and the operator's bKash SMS arrive in either order. 
 on POST /api/confirm-purchase:
   1. Read raw body (do NOT use req.json() first).
   2. Verify HMAC. Invalid → 401.
-  3. Parse JSON. Missing transactionId/amountTaka → 400.
+  3. Parse JSON. Missing transactionId → 400.
   4. Lookup pending_purchase by trx_id = transactionId.
-     - found AND status = 'confirmed' → 200 idempotent
-     - not found → 404 no_pending_purchase
+     - found AND status = 'completed' → 200 idempotent
+     - not found AND no completed row → 404 no_pending_purchase
      - found AND claimed_msisdn != senderMsisdn (both non-null) → 409 msisdn_mismatch
-     - found AND amount mismatch beyond tolerance → 409 (or grant lower + flag — document the choice)
-  5. Grant credits, flip status to 'confirmed', record confirmed_at + confirmed_msisdn.
+     - found AND amountTaka < pending.amount_taka → 409 underpaid; row flipped to 'underpaid'
+     - found AND amountTaka > pending.amount_taka → 200 + log surplus to purchase_overpayments
+  5. Grant credits, flip status to 'completed', record observed amount + state-change audit row.
   6. Return 200 with { success: true, userId, creditsGranted, newBalance }.
 ```
+
+### Other webhooks (added migration 007)
+
+The watcher also POSTs to three sibling endpoints, all signed with the same `X-Bkash-Webhook-Signature`:
+
+- `POST /api/orphan-inbound-sms` — body `{ transactionId, senderMsisdn?, amountTaka, rawBody, smsTimestamp }`. Used after the watcher gives up retrying a 404'd row (24h). Server dumps the row into `unmatched_inbound_sms` for operator reconciliation.
+- `POST /api/reverse-purchase` — body `{ transactionId, reason? }`. For bKash reversal SMS. Server flips the matching `completed` row to `refunded` and decrements credits.
+- `POST /api/admin/parser-failures` (POST mode) — body `{ rawBody, senderMsisdn?, smsTimestamp?, reason? }`. For SMS the watcher could not classify. Server stores the verbatim body so the operator can update the parser.
 
 ## HMAC verification example (Node)
 

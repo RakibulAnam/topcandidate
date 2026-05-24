@@ -89,6 +89,13 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | Export (Word + PDF) for resume & cover letter | `src/infrastructure/export/` | shipped |
 | Resume extract (from uploaded PDF/Word) | `src/infrastructure/ai/GeminiResumeExtractor.ts` | shipped |
 | **Toolkit credits + mock purchase** — paid tier gating tailored generations | `profiles.toolkit_credits`, `api/optimize.ts` (gate), `api/purchase.ts` (mock), `PurchaseModal.tsx` | shipped (mock) — replace `api/purchase.ts` with a real payment-gateway webhook before launch |
+| **Transaction state machine** — observable states for every bKash purchase outcome | `purchases.status`, migration 007, `confirm_purchase` v2 | shipped — `pending`/`completed`/`underpaid`/`msisdn_mismatch_review`/`expired`/`refunded`/`failed` |
+| **Customer purchase status pill** — navbar widget polling `/api/my-purchase-status` after submit | `VerifyingPurchasePill.tsx`, `purchaseStatusClient.ts` | shipped |
+| **Purchase history (customer)** — read-only table on Dashboard | `PurchaseHistorySection.tsx` | shipped |
+| **Customer dispute filing** | `/api/dispute-purchase`, dispute dialog inside `VerifyingPurchasePill` | shipped |
+| **Operator admin SPA** — Pending / Orphans / Disputes / Parser-failures tabs | `/admin`, `src/presentation/admin/AdminScreen.tsx` | shipped — gated by `ADMIN_API_KEY` |
+| **Mobile-callable webhooks** (HMAC) — orphan dump, reversal, parser failure | `/api/orphan-inbound-sms`, `/api/reverse-purchase`, `/api/admin/parser-failures` (POST) | shipped — Flutter watcher must be updated to call these |
+| **Cron expiry** — flips pending rows > 24h old to `expired` | `/api/cron/expire-pending` (manual / Pro-tier Vercel Cron) + `007_optional_pg_cron.sql` (Supabase pg_cron, the default path on Hobby) | shipped — see §13 "Cron cadence" |
 
 ---
 
@@ -203,6 +210,33 @@ When adding a new AI entry point: add a corresponding `assertContentIsReal`-styl
 **Adding a new paid feature?** If you ever monetise something else, do NOT introduce a generic "credits" abstraction — add a separate column (e.g. `interview_coach_credits`) and a sibling RPC. Reason: keeping each feature on its own integer is clearer for the user ("3 toolkit generations remaining") and avoids the "what else can I spend credits on?" UX trap.
 
 **Adding a new package?** Edit the `case p_package_id` block in the `initiate_purchase` SQL function (in both `schema.sql` and a new migration). The package mapping is server-side authoritative — any new pricing must ship as a SQL change, not a client constant.
+
+**Transaction state machine (migration 007).** Every purchase row now has a named state and a path forward:
+
+```
+pending ─────► completed             (happy path; observed >= expected; credits granted)
+   │
+   ├──────────► underpaid             (observed < expected; no credits; awaits top-up or admin)
+   │              │
+   │              └─► completed       (apply_purchase_topup sums multiple SMS; flips when reached)
+   │
+   ├──────────► msisdn_mismatch_review (claimed sender ≠ SMS sender; operator decides)
+   │              │
+   │              ├─► completed       (operator_confirm_purchase with override)
+   │              └─► failed          (operator rejects)
+   │
+   ├──────────► expired               (cron flips after 24h with no SMS)
+   │              │
+   │              └─► completed       (operator can still confirm via admin path)
+   │
+   ├──────────► completed ─► refunded (bKash reversal SMS or operator_refund_purchase)
+   │
+   └──────────► failed                (terminal; explicit rejection)
+```
+
+Every transition writes to `purchase_state_changes` (actor + reason + from/to). Overpayments log to `purchase_overpayments`. Top-ups link via `purchase_topups`. The Flutter watcher dumps unmatchable SMS to `unmatched_inbound_sms` for operator reconciliation through the `/admin` SPA. The operator runbook is at [`ADMIN.md`](ADMIN.md).
+
+**Operator surface (`/admin`)** is gated by `ADMIN_API_KEY` (timing-safe compare on `X-Admin-Key`). The SPA lives at `src/presentation/admin/AdminScreen.tsx` — single file, four tabs, no react-router. App.tsx short-circuits at the outer `App` component when `window.location.pathname.startsWith('/admin')` so the panel mounts before `AuthProvider` (the operator doesn't sign in via Supabase). Adding new admin endpoints: drop them in `api/admin/`, gate via `requireAdmin(req, res)` from `api/admin/_lib/adminAuth.ts`. All write endpoints require a non-empty `reason` for the audit log.
 
 ---
 
@@ -357,13 +391,30 @@ src/infrastructure/ai/                  AI providers (run server-side) + client 
   ├── proxy/ProxyClients.ts             Client-side adapters that POST to /api/*
   └── Gemini{CoverLetter,Outreach,LinkedIn,InterviewQ,Toolkit,Extractor}Generator.ts (server-only)
 
-api/                                    Vercel Functions — server-side AI proxy
+api/                                    Vercel Functions — server-side AI proxy + bKash flow
   ├── optimize.ts                       POST — runs optimizer + toolkit (paid: gates on toolkit_credits, refunds on optimizer failure)
   ├── optimize-general.ts               POST — optimizer only, no toolkit, no credit gate (free General Resume path)
   ├── toolkit-item.ts                   POST — single-item regenerate (free retry)
   ├── extract-resume.ts                 POST — PDF/Word extract (base64 + mimeType)
-  ├── purchase.ts                       POST — mock purchase; replaces with payment-gateway webhook for production
-  └── _lib/                             auth.ts, rateLimit.ts, aiFactory.ts
+  ├── purchase.ts                       POST — records pending bKash purchase
+  ├── confirm-purchase.ts               POST — HMAC webhook from Flutter; amount + msisdn checks (migration 007)
+  ├── orphan-inbound-sms.ts             POST — HMAC; Flutter dumps unmatched SMS after 24h retry window
+  ├── reverse-purchase.ts               POST — HMAC; bKash reversal SMS path
+  ├── dispute-purchase.ts               POST — customer-filed disputes (auth required)
+  ├── my-purchase-status.ts             GET  — customer pill polls this (auth required)
+  ├── cron/expire-pending.ts            GET  — Bearer CRON_SECRET; 15-min Vercel Cron
+  ├── admin/                            All gated by X-Admin-Key (ADMIN_API_KEY)
+  │   ├── _lib/adminAuth.ts             requireAdmin + requireReason + adminSupabase
+  │   ├── dashboard.ts                  GET — stat tiles
+  │   ├── pending.ts                    GET — stuck non-terminal rows
+  │   ├── orphans.ts                    GET — unmatched SMS + pending candidates
+  │   ├── disputes.ts                   GET — customer disputes
+  │   ├── parser-failures.ts            GET (admin) + POST (HMAC) — bKash SMS the parser couldn't classify
+  │   ├── confirm-purchase.ts           POST — operator manual confirm (P0-B)
+  │   ├── refund-purchase.ts            POST — operator manual refund
+  │   ├── match-orphan.ts               POST — link orphan SMS to pending row
+  │   └── resolve-dispute.ts            POST — close a dispute
+  └── _lib/                             auth.ts, rateLimit.ts, aiFactory.ts, webhookAuth.ts
 
 src/infrastructure/api/purchaseClient.ts  Typed client for /api/purchase — used by PurchaseModal
 src/infrastructure/auth/AuthContext.tsx Supabase Auth context/provider/hook
@@ -409,6 +460,9 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 - `supabase/migrations/004_add_toolkit_credits.sql` — adds `profiles.toolkit_credits`, `purchases` table, and the original credit-system RPCs (`consume_toolkit_credit`, `refund_toolkit_credit`, `process_mock_purchase`)
 - `supabase/migrations/005_lock_toolkit_credits_and_bkash_pending.sql` — column-level GRANT lockdown on `profiles` (closes the toolkit_credits self-grant exploit), drops `process_mock_purchase`, adds `initiate_purchase` + `confirm_purchase` for the bKash + Flutter-SMS-watcher flow, adds `purchases.sender_msisdn` + unique index on `payment_reference`
 - `supabase/migrations/006_add_company_generated_column.sql` — adds `generated_resumes.company` stored generated column + trigram indexes on `title`/`company` for server-side paginated search in the dashboard
+- `supabase/migrations/007_transaction_flow_hardening.sql` — expands `purchases.status` enum (+ `expired`, `underpaid`, `msisdn_mismatch_review`), adds `observed_amount_taka`, adds the audit/aggregation tables (`purchase_topups`, `purchase_overpayments`, `unmatched_inbound_sms`, `purchase_disputes`, `purchase_state_changes`), rebuilds `confirm_purchase` v2 (amount + msisdn checks + audit logging), adds operator RPCs (`operator_confirm_purchase`, `operator_refund_purchase`, `apply_purchase_topup`, `record_orphan_sms`, `record_purchase_reversal`, `record_purchase_dispute`, `resolve_purchase_dispute`), adds `expire_stale_pending_purchases()` for cron
+- `supabase/migrations/007_optional_pg_cron.sql` — opt-in `pg_cron` schedule for the 15-min pending expiry. Only run if the extension is enabled (Supabase Database → Extensions). Skip if you're using the Vercel Cron entry instead.
+- `supabase/migrations/008_lock_credit_rpcs.sql` — closes the `refund_toolkit_credit` self-grant exploit. Drops the 0-arg `consume/refund_toolkit_credit()` and replaces with `(p_user_id uuid)` versions that are service-role only. `/api/optimize.ts` updated to call them via `SUPABASE_SERVICE_ROLE_KEY`.
 
 **Running migrations**: open the Supabase SQL editor and paste the migration file contents. All migrations are idempotent (`add column if not exists`, `create index if not exists`, `create or replace function`).
 
@@ -557,6 +611,10 @@ SUPABASE_SERVICE_ROLE_KEY
 # bKash purchase flow (no traditional payment gateway)
 VITE_BKASH_PAYMENT_NUMBER  # owner's bKash number, shown to users in PurchaseModal
 BKASH_WEBHOOK_SECRET       # 32-byte hex secret shared with the Flutter SMS-watcher
+
+# Admin SPA + cron (server-only)
+ADMIN_API_KEY              # 32-byte hex; gates X-Admin-Key on /api/admin/* and the /admin SPA
+CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pending (Vercel Cron sends it)
 ```
 
 **Vercel deployment notes:**
@@ -578,11 +636,19 @@ Agents: **do not build these unless the user asks.**
 - **Languages / References in ProfileSetupScreen and ProfileScreen** — currently only wired into the BuilderScreen flow (and loaded from the profile sub-tables when prefilling). To capture in the master profile too, add: state vars + step entries in `ProfileSetupScreen.tsx`, save cases in its switch, and tab + section component in `ProfileScreen.tsx` (mirror `PublicationSection`).
 - **AI output in Bengali** — the UI translates (en/bn), but the AI-generated resume bullets, cover letter, outreach email, LinkedIn note, and interview Q&A still come back in English. Most BD recruiters expect English CVs, so this is intentional. Adding a per-document "Generate in: English / বাংলা" toggle would mean: branching prompts in `prompts/resumeOptimizerPrompts.ts` and each toolkit generator + a UI affordance + a prompt-language pass-through in the optimize flow. Don't ship without an explicit ask.
 - **Locale persistence to Supabase** — locale is currently `localStorage`-only. Cross-device sync would need a `preferred_locale` column on `profiles` + a fetch on sign-in. Skipped for v1 because device-local is enough for a Bangladesh-first launch.
-- **Flutter SMS-watcher app** for bKash purchase confirmation. Server-side endpoint `/api/confirm-purchase` is implemented and HMAC-gated; the matching client (a small Flutter app the owner runs on their bKash-receiving phone) is not yet built. The app needs to: (1) request the SMS-receive permission, (2) parse incoming bKash money-received SMS for `transactionId`, `senderMsisdn`, `amountTaka`, (3) HMAC-SHA256-sign the JSON body with `BKASH_WEBHOOK_SECRET`, (4) POST to `/api/confirm-purchase` with `X-Bkash-Webhook-Signature` header, (5) retry with exponential backoff on 5xx, never on 4xx, (6) persist locally so a flaky network doesn't replay confirmed SMS. Until this app is built, pending purchases sit in the `purchases` table and the owner has to be granted credits manually (`select confirm_purchase('<txn id>');` from the Supabase SQL editor under service-role).
+- **Flutter SMS-watcher app for the new webhooks.** The watcher ships and confirms `/api/confirm-purchase` end-to-end. Migration 007 adds three more endpoints it should also call but doesn't yet: `/api/orphan-inbound-sms` (post unmatched SMS after the 24h retry window), `/api/reverse-purchase` (bKash reversal SMS), `/api/admin/parser-failures` POST (unclassifiable SMS). All three reuse the same `BKASH_WEBHOOK_SECRET` HMAC. Until the watcher gets these branches, orphan/reversal/parser-failure data has to be entered manually via SQL — the customer-facing dispute flow + operator `/admin` panel still recover the cases correctly, it's just less proactive.
 
 - **Dev mock-confirm scaffolding** — `api/dev-mock-confirm.ts` + the `mockConfirm()` auto-trigger inside `PurchaseModal.tsx`. These exist solely so the buy → pending → credits flow can be exercised end-to-end during development before the Flutter app is built. Gated by `VITE_BKASH_MOCK_AUTOCONFIRM=true` (client) + `BKASH_MOCK_AUTOCONFIRM=true` (server). **Delete the endpoint file, the modal's `mockConfirm` block, the two env vars, and the matching `purchaseModal.mockBadge` / `verifying` / `confirmedToast` locale strings once the Flutter app is shipping confirmations.**
 
-- **`refund_toolkit_credit()` is user-callable** and increments by 1 unconditionally. Same shape of exploit as the now-closed direct-UPDATE: a signed-in user can call `await supabase.rpc('refund_toolkit_credit')` from any browser console and self-grant 1 credit per call. The current `consume_toolkit_credit` / `refund_toolkit_credit` design assumes only `/api/optimize` calls them, but the EXECUTE privilege is wide-open to the `authenticated` role. Fix path: refactor `/api/optimize` to use `SUPABASE_SERVICE_ROLE_KEY` for the consume/refund calls, then `revoke execute on function consume_toolkit_credit, refund_toolkit_credit from authenticated, anon`. Same model the bKash flow already uses for `confirm_purchase`.
+- ~~**`refund_toolkit_credit()` is user-callable**~~ — **CLOSED 2026-05-24 by migration 008**. Both `consume_toolkit_credit` and `refund_toolkit_credit` now take an explicit `p_user_id uuid` arg and have EXECUTE revoked from `anon` + `authenticated`. `api/optimize.ts` calls them via `SUPABASE_SERVICE_ROLE_KEY`. End-user JWTs no longer have any RPC path that mutates `toolkit_credits`.
+
+- **Cron cadence is on Supabase pg_cron, not Vercel Cron.** Vercel Hobby restricts cron schedules to once-per-day (per https://vercel.com/docs/cron-jobs/usage-and-pricing); a `*/15 * * * *` entry in `vercel.json` fails at deploy time. We removed the `vercel.json` `crons` block on 2026-05-24 and rely on `supabase/migrations/007_optional_pg_cron.sql` which schedules `expire_stale_pending_purchases()` every 15 min at the DB layer. The `/api/cron/expire-pending` HTTP endpoint stays in the codebase as a manual trigger (`curl -H 'Authorization: Bearer $CRON_SECRET' ...`) and as the path that gets re-enabled in `vercel.json` if/when the operator upgrades to Vercel Pro.
+
+- **Operator email digest for stuck pending rows** (case #20 from `topcandidate-audit-2026-05-08/PROMPT-transaction-flow-edge-cases.md`). The cron-driven `expired` flip handles the 24h cliff, and the admin dashboard tile surfaces the oldest pending row at every page load. The proactive ping (e.g. "any pending row > 12h triggers an email") is NOT wired — the repo has no email provider. Add when the operator picks one (Resend / Postmark / SES).
+
+- **Larger admin surface from `topcandidate-audit-2026-05-08/PROMPT-admin-panel.md`** — Users tab, audit-log tab, profile_notes, flag-user, dashboard "action queue". The /admin SPA shipped here covers Pending / Orphans / Disputes / Parser-failures (the recovery-critical screens). The remaining tabs are pure additive surface and can land in a separate PR without changing any of the data model.
+
+- **Tests.** No test harness — Vitest, Playwright, pgTAP would each be new SDK additions. The 2026-05-08 PROMPT-transaction-flow-edge-cases asked for them; we deferred them per `apps/web/AGENTS.md` §13's "do not invent a test harness without asking" rule. Migration 007's RPCs are all idempotent and were written against the spec's edge cases; the per-state branches in `confirm_purchase` and `apply_purchase_topup` are the highest-value targets when a harness is added.
 
 ---
 
