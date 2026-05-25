@@ -281,3 +281,9 @@ Shipped to production 2026-05-17. First real bKash payment confirmed
 end-to-end (TrxID `DEH7BO44AJ`, Tk 30). The codebase is live; coordinate
 any wire-contract changes with the web app on the other end via
 `WHAT_IT_DOES.md`.
+
+2026-05-24: aligned with web migration 007 — three new HMAC endpoints
+(`/api/orphan-inbound-sms`, `/api/reverse-purchase`,
+`/api/admin/parser-failures`) and 409 `underpaid` handling on
+`/api/confirm-purchase`. Refund SMS now route through the dispatcher as
+`reversing` rather than landing in terminal `ignored_refund`.

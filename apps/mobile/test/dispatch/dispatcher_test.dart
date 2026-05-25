@@ -17,8 +17,19 @@ class _FakeClock implements Clock {
 
 class _FakeWebhookClient implements WebhookClient {
   WebhookResponse next = const WebhookResponse(statusCode: 200);
+  WebhookResponse nextReversal = const WebhookResponse(statusCode: 200);
+  WebhookResponse nextOrphan = const WebhookResponse(statusCode: 200);
+  WebhookResponse nextParserFailure = const WebhookResponse(statusCode: 200);
+
   int callCount = 0;
+  int reversalCallCount = 0;
+  int orphanCallCount = 0;
+  int parserFailureCallCount = 0;
+
   Map<String, dynamic>? lastBody;
+  Map<String, dynamic>? lastReversalBody;
+  Map<String, dynamic>? lastOrphanBody;
+  Map<String, dynamic>? lastParserFailureBody;
 
   @override
   Future<WebhookResponse> post({
@@ -40,6 +51,55 @@ class _FakeWebhookClient implements WebhookClient {
     callCount += 1;
     lastBody = body;
     return next;
+  }
+
+  @override
+  Future<WebhookResponse> postOrphan({
+    required String trxId,
+    required String? senderMsisdn,
+    required int amountTaka,
+    required String rawBody,
+    required DateTime smsTimestamp,
+  }) async {
+    orphanCallCount += 1;
+    lastOrphanBody = {
+      'transactionId': trxId,
+      'senderMsisdn': senderMsisdn,
+      'amountTaka': amountTaka,
+      'rawBody': rawBody,
+      'smsTimestamp': smsTimestamp.toUtc().toIso8601String(),
+    };
+    return nextOrphan;
+  }
+
+  @override
+  Future<WebhookResponse> postReversal({
+    required String trxId,
+    String? reason,
+  }) async {
+    reversalCallCount += 1;
+    lastReversalBody = {
+      'transactionId': trxId,
+      'reason': ?reason,
+    };
+    return nextReversal;
+  }
+
+  @override
+  Future<WebhookResponse> postParserFailure({
+    required String rawBody,
+    String? senderMsisdn,
+    DateTime? smsTimestamp,
+    String? reason,
+  }) async {
+    parserFailureCallCount += 1;
+    lastParserFailureBody = {
+      'rawBody': rawBody,
+      'senderMsisdn': ?senderMsisdn,
+      'smsTimestamp': ?smsTimestamp?.toUtc().toIso8601String(),
+      'reason': ?reason,
+    };
+    return nextParserFailure;
   }
 }
 
@@ -95,7 +155,8 @@ class _InMemoryDao implements DispatcherDao {
         .where((r) =>
             (r.state == ProcessedSmsState.queued ||
                 r.state == ProcessedSmsState.retrying ||
-                r.state == ProcessedSmsState.waitingUser) &&
+                r.state == ProcessedSmsState.waitingUser ||
+                r.state == ProcessedSmsState.reversing) &&
             (r.nextAttemptAt == null || !r.nextAttemptAt!.isAfter(now)))
         .take(limit)
         .toList();
@@ -277,6 +338,36 @@ void main() {
       expect(t.notify, isNotNull);
     });
 
+    test('409 with code=msisdn_mismatch → existing sender-mismatch notification',
+        () {
+      final t = Dispatcher.applyResponse(
+        base,
+        const WebhookResponse(
+          statusCode: 409,
+          body: '{"code":"msisdn_mismatch"}',
+        ),
+        now: now,
+      );
+      expect(t.nextState, ProcessedSmsState.mismatch);
+      expect(t.notify?.title, 'Sender mismatch');
+      expect(t.lastError, contains('msisdn'));
+    });
+
+    test('409 with code=underpaid → underpaid notification', () {
+      final t = Dispatcher.applyResponse(
+        base,
+        const WebhookResponse(
+          statusCode: 409,
+          body: '{"code":"underpaid","expected":200,"observed":50}',
+        ),
+        now: now,
+      );
+      expect(t.nextState, ProcessedSmsState.mismatch);
+      expect(t.notify?.title, 'Underpayment');
+      expect(t.notify?.body, contains('admin panel'));
+      expect(t.lastError, contains('underpaid'));
+    });
+
     test('503 → failed', () {
       final t = Dispatcher.applyResponse(
         base,
@@ -414,6 +505,122 @@ void main() {
       // either claimed it or already finished.
       expect(results.reduce((a, b) => a + b), 1);
       expect(dao.rows[1]!.state, ProcessedSmsState.done);
+    });
+
+    test('orphan dump fires when waiting_user gives up at attempt 288',
+        () async {
+      final dao = _InMemoryDao();
+      final client = _FakeWebhookClient()
+        ..next = const WebhookResponse(statusCode: 404);
+      final notifier = _FakeNotifier();
+      final clock = _FakeClock(DateTime(2026, 5, 17, 12, 0, 1));
+      dao.insert(
+        trxId: 'ORPHAN0001',
+        senderMsisdn: '01711111111',
+        amountTaka: 200,
+        createdAt: DateTime(2026, 5, 16, 12, 0, 0),
+        attemptCount: kWaitingUserMaxAttempts - 1,
+        state: ProcessedSmsState.waitingUser,
+      );
+      final dispatcher = Dispatcher(
+        dao: dao,
+        webhookClient: client,
+        notifier: notifier,
+        clock: clock,
+      );
+      await dispatcher.tick();
+      expect(dao.rows[1]!.state, ProcessedSmsState.failed);
+      expect(client.orphanCallCount, 1);
+      expect(client.lastOrphanBody!['transactionId'], 'ORPHAN0001');
+      expect(client.lastOrphanBody!['amountTaka'], 200);
+    });
+
+    test('orphan dump does NOT fire on transient 404 (not at give-up yet)',
+        () async {
+      final dao = _InMemoryDao();
+      final client = _FakeWebhookClient()
+        ..next = const WebhookResponse(statusCode: 404);
+      final notifier = _FakeNotifier();
+      final clock = _FakeClock(DateTime(2026, 5, 16, 12, 0, 1));
+      dao.insert(trxId: 'TRANSIENT1');
+      final dispatcher = Dispatcher(
+        dao: dao,
+        webhookClient: client,
+        notifier: notifier,
+        clock: clock,
+      );
+      await dispatcher.tick();
+      expect(dao.rows[1]!.state, ProcessedSmsState.waitingUser);
+      expect(client.orphanCallCount, 0);
+    });
+
+    test('reversal row → 200 → ignoredRefund + notify', () async {
+      final dao = _InMemoryDao();
+      final client = _FakeWebhookClient()
+        ..nextReversal = const WebhookResponse(statusCode: 200);
+      final notifier = _FakeNotifier();
+      final clock = _FakeClock(DateTime(2026, 5, 16, 12, 0, 1));
+      dao.insert(
+        trxId: 'REVERSAL01',
+        state: ProcessedSmsState.reversing,
+      );
+      final dispatcher = Dispatcher(
+        dao: dao,
+        webhookClient: client,
+        notifier: notifier,
+        clock: clock,
+      );
+      await dispatcher.tick();
+      expect(client.reversalCallCount, 1);
+      expect(client.callCount, 0, reason: 'must not hit confirm-purchase');
+      expect(dao.rows[1]!.state, ProcessedSmsState.ignoredRefund);
+      expect(notifier.notifications, hasLength(1));
+      expect(notifier.notifications.first.title, 'Refund recorded');
+    });
+
+    test('reversal row → 404 → ignoredRefund silently', () async {
+      final dao = _InMemoryDao();
+      final client = _FakeWebhookClient()
+        ..nextReversal = const WebhookResponse(statusCode: 404);
+      final notifier = _FakeNotifier();
+      final clock = _FakeClock(DateTime(2026, 5, 16, 12, 0, 1));
+      dao.insert(
+        trxId: 'REVERSAL02',
+        state: ProcessedSmsState.reversing,
+      );
+      final dispatcher = Dispatcher(
+        dao: dao,
+        webhookClient: client,
+        notifier: notifier,
+        clock: clock,
+      );
+      await dispatcher.tick();
+      expect(dao.rows[1]!.state, ProcessedSmsState.ignoredRefund);
+      // 404 on a reversal is the common case (stray reversal SMS that never
+      // matched a purchase) — no operator notification.
+      expect(notifier.notifications, isEmpty);
+    });
+
+    test('reversal row → 500 → stays in reversing with backoff', () async {
+      final dao = _InMemoryDao();
+      final client = _FakeWebhookClient()
+        ..nextReversal = const WebhookResponse(statusCode: 500);
+      final notifier = _FakeNotifier();
+      final clock = _FakeClock(DateTime(2026, 5, 16, 12, 0, 1));
+      dao.insert(
+        trxId: 'REVERSAL03',
+        state: ProcessedSmsState.reversing,
+      );
+      final dispatcher = Dispatcher(
+        dao: dao,
+        webhookClient: client,
+        notifier: notifier,
+        clock: clock,
+      );
+      await dispatcher.tick();
+      expect(dao.rows[1]!.state, ProcessedSmsState.reversing);
+      expect(dao.rows[1]!.attemptCount, 1);
+      expect(dao.rows[1]!.nextAttemptAt, isNotNull);
     });
   });
 }

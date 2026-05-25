@@ -103,7 +103,9 @@ export const PurchaseHistorySection: React.FC = () => {
                 <td className="px-4 py-2.5 text-right text-brand-700 tabular-nums">
                   ৳{r.amount_taka}
                   {r.observed_amount_taka != null && r.observed_amount_taka !== r.amount_taka && (
-                    <span className="ml-1 text-[11px] text-charcoal-500">(obs ৳{r.observed_amount_taka})</span>
+                    <span className="ml-1 text-[11px] text-charcoal-500">
+                      {t('purchaseHistory.observedAmount', { observed: r.observed_amount_taka })}
+                    </span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-right text-brand-700 tabular-nums">

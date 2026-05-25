@@ -7,6 +7,7 @@ enum ProcessedSmsState {
   sending,
   retrying,
   waitingUser,
+  reversing,
   done,
   failed,
   mismatch,
@@ -25,6 +26,8 @@ enum ProcessedSmsState {
         return 'retrying';
       case ProcessedSmsState.waitingUser:
         return 'waiting_user';
+      case ProcessedSmsState.reversing:
+        return 'reversing';
       case ProcessedSmsState.done:
         return 'done';
       case ProcessedSmsState.failed:
@@ -50,6 +53,8 @@ enum ProcessedSmsState {
         return ProcessedSmsState.retrying;
       case 'waiting_user':
         return ProcessedSmsState.waitingUser;
+      case 'reversing':
+        return ProcessedSmsState.reversing;
       case 'done':
         return ProcessedSmsState.done;
       case 'failed':
@@ -90,6 +95,8 @@ enum ProcessedSmsState {
         return 'RETRYING';
       case ProcessedSmsState.waitingUser:
         return 'WAITING';
+      case ProcessedSmsState.reversing:
+        return 'REVERSING';
       case ProcessedSmsState.done:
         return 'DONE';
       case ProcessedSmsState.failed:

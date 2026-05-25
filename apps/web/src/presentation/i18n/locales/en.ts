@@ -1015,7 +1015,11 @@ export const en = {
     pendingDetail: 'Verifying your bKash payment…',
     pendingHelp: 'Most payments confirm within a minute. If you sent it but credits never arrive,',
     txnLabel: 'Transaction ID',
+    close: 'Close',
     dismiss: 'Dismiss',
+    dismissConfirmTitle: 'Stop tracking this purchase?',
+    dismissConfirmBody: "You'll lose the navbar shortcut to file a dispute or contact support. You can still find this purchase in your history below.",
+    dismissConfirm: 'Yes, dismiss',
     underpaidActionTitle: 'Please send ৳{missing} more, referencing the same TrxID.',
     underpaidActionBody: 'Once the next bKash SMS lands the operator will top up your pack. Contact support if you prefer a refund.',
     reviewActionTitle: 'The sender phone didn’t match what you entered. The operator will review and contact you.',
@@ -1045,6 +1049,7 @@ export const en = {
     statusExpired: 'Expired',
     statusRefunded: 'Refunded',
     statusFailed: 'Failed',
+    observedAmount: '(received ৳{observed})',
   },
 } as const;
 
