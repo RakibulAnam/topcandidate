@@ -45,6 +45,7 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
   const [statusResp, setStatusResp] = useState<PurchaseStatusResponse | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
+  const [confirmDismiss, setConfirmDismiss] = useState(false);
   const stopRef = useRef(false);
 
   // Re-read when the modal writes / clears the key.
@@ -59,6 +60,7 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
     stopRef.current = false;
     setStatusResp(null);
     setExpanded(false);
+    setConfirmDismiss(false);
   }, [pending?.txnId]);
 
   // Poll loop.
@@ -104,6 +106,27 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
   const status: PurchaseStatus = statusResp?.status ?? 'pending';
   const visual = STATUS_VISUALS[status];
 
+  // Dismissing a stuck-but-non-completed purchase hides the pill, which
+  // means the customer loses their navbar entry-point to the recovery
+  // flow (dispute, contact support). Gate that with a confirm step.
+  const needsDismissConfirm =
+    status === 'underpaid' || status === 'msisdn_mismatch_review' || status === 'expired';
+
+  const onDismissClick = () => {
+    if (needsDismissConfirm) {
+      setConfirmDismiss(true);
+    } else {
+      clearPendingPurchase();
+      setExpanded(false);
+    }
+  };
+
+  const onDismissConfirmed = () => {
+    clearPendingPurchase();
+    setConfirmDismiss(false);
+    setExpanded(false);
+  };
+
   return (
     <>
       <button
@@ -139,9 +162,9 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
             </div>
             <button
               type="button"
-              onClick={() => { clearPendingPurchase(); setExpanded(false); }}
+              onClick={() => { setExpanded(false); setConfirmDismiss(false); }}
               className="-mt-1 -mr-1 p-1.5 text-charcoal-400 hover:text-brand-700 rounded-full transition-colors"
-              aria-label={t('verifyPill.dismiss')}
+              aria-label={t('verifyPill.close')}
             >
               <X size={16} />
             </button>
@@ -158,6 +181,43 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
             onContactSupport={() => setDisputeOpen(true)}
             onFileDispute={() => setDisputeOpen(true)}
           />
+
+          {confirmDismiss ? (
+            <div className="mt-3 pt-3 border-t border-charcoal-100">
+              <div className="text-[12.5px] font-semibold text-brand-700">
+                {t('verifyPill.dismissConfirmTitle')}
+              </div>
+              <div className="mt-1 text-[12px] text-charcoal-600 leading-snug">
+                {t('verifyPill.dismissConfirmBody')}
+              </div>
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDismiss(false)}
+                  className="px-3 py-1 rounded-full text-[12px] font-semibold text-charcoal-500 hover:text-brand-700"
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={onDismissConfirmed}
+                  className="px-3 py-1 rounded-full text-[12px] font-semibold bg-brand-700 hover:bg-brand-800 text-white transition-colors"
+                >
+                  {t('verifyPill.dismissConfirm')}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 pt-3 border-t border-charcoal-100 text-right">
+              <button
+                type="button"
+                onClick={onDismissClick}
+                className="text-[12px] text-charcoal-500 hover:text-brand-700 underline underline-offset-2"
+              >
+                {t('verifyPill.dismiss')}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
