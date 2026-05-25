@@ -101,18 +101,38 @@ class Dispatcher {
   }
 
   Future<void> _dispatchOne(ProcessedSms row) async {
+    final isReversal = row.state == ProcessedSmsState.reversing;
     developer.log(
       'dispatch id=${row.id} trxId=${row.trxId} attempt=${row.attemptCount} '
-      'amount=${row.amountTaka} hasMsisdn=${row.senderMsisdn != null}',
+      'amount=${row.amountTaka} hasMsisdn=${row.senderMsisdn != null} '
+      'reversal=$isReversal',
       name: 'dispatcher',
     );
     await dao.markSending(row.id, clock.now());
-    final response = await webhookClient.post(
-      trxId: row.trxId,
-      senderMsisdn: row.senderMsisdn,
-      amountTaka: row.amountTaka,
-    );
-    final transition = applyResponse(row, response, now: clock.now());
+
+    final WebhookResponse response;
+    if (isReversal) {
+      response = await webhookClient.postReversal(trxId: row.trxId);
+    } else {
+      response = await webhookClient.post(
+        trxId: row.trxId,
+        senderMsisdn: row.senderMsisdn,
+        amountTaka: row.amountTaka,
+      );
+    }
+
+    final transition = isReversal
+        ? applyReversalResponse(row, response, now: clock.now())
+        : applyResponse(row, response, now: clock.now());
+
+    // Side-effect: when a confirm-purchase row gives up after 24h of 404s,
+    // dump the SMS to the server's orphan-inbound-sms endpoint so the operator
+    // can reconcile it. Best-effort, single attempt — the state transition
+    // commits regardless.
+    if (!isReversal && _isOrphanGiveUp(row, response)) {
+      await _dumpOrphan(row);
+    }
+
     developer.log(
       'dispatch id=${row.id} → ${transition.nextState.db} '
       '(notify=${transition.notify != null})',
@@ -134,6 +154,41 @@ class Dispatcher {
           stackTrace: st,
         );
       }
+    }
+  }
+
+  /// True iff `applyResponse` will turn this row into terminal `failed` because
+  /// 404 retries are exhausted. Mirrors the give-up logic inside
+  /// `applyResponse` — kept as a separate predicate so `_dispatchOne` can fire
+  /// the orphan POST before the transition is persisted.
+  bool _isOrphanGiveUp(ProcessedSms row, WebhookResponse response) {
+    if (response.statusCode != 404) return false;
+    final newAttempt = row.attemptCount + 1;
+    final past24h = clock.now().difference(row.createdAt) > kTransientGiveUp;
+    return newAttempt >= kWaitingUserMaxAttempts || past24h;
+  }
+
+  Future<void> _dumpOrphan(ProcessedSms row) async {
+    try {
+      final r = await webhookClient.postOrphan(
+        trxId: row.trxId,
+        senderMsisdn: row.senderMsisdn,
+        amountTaka: row.amountTaka,
+        rawBody: row.rawBody,
+        smsTimestamp: row.smsTimestamp,
+      );
+      developer.log(
+        'orphan dump id=${row.id} → status=${r.statusCode} '
+        'err=${r.errorTag ?? "none"}',
+        name: 'dispatcher',
+      );
+    } catch (e, st) {
+      developer.log(
+        'orphan dump failed for id=${row.id}: $e',
+        name: 'dispatcher',
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 
@@ -244,6 +299,24 @@ class Dispatcher {
     }
 
     if (code == 409) {
+      // Migration 007: the server now distinguishes two 409 cases by `code` in
+      // the JSON body. `msisdn_mismatch` is the pre-existing case;
+      // `underpaid` was added when the server started rejecting SMS amounts
+      // less than the pending row's expected amount.
+      final responseCode = _bodyCode(response.body);
+      if (responseCode == 'underpaid') {
+        return DispatchTransition(
+          nextState: ProcessedSmsState.mismatch,
+          nextAttemptAt: null,
+          incrementAttempts: true,
+          lastError: 'HTTP 409: underpaid',
+          notify: const NotificationSpec(
+            title: 'Underpayment',
+            body:
+                'Customer sent less than required — open admin panel to recover.',
+          ),
+        );
+      }
       return DispatchTransition(
         nextState: ProcessedSmsState.mismatch,
         nextAttemptAt: null,
@@ -304,6 +377,119 @@ class Dispatcher {
     );
   }
 
+  /// Pure transition function for `/api/reverse-purchase`. A reversing row
+  /// terminates as `ignoredRefund` (server had no matching completed row, or
+  /// successfully recorded the reversal). Transient failures retry with the
+  /// same backoff as confirm-purchase. Persistent failures (400/401/503) drop
+  /// to `ignoredRefund` after notifying — the operator can replay manually
+  /// from the admin panel; a stuck reversal must not block other dispatches.
+  static DispatchTransition applyReversalResponse(
+    ProcessedSms row,
+    WebhookResponse response, {
+    required DateTime now,
+  }) {
+    final newAttempt = row.attemptCount + 1;
+    final age = now.difference(row.createdAt);
+    final past24h = age > kTransientGiveUp;
+
+    if (response.isNetworkError) {
+      if (past24h) {
+        return const DispatchTransition(
+          nextState: ProcessedSmsState.ignoredRefund,
+          nextAttemptAt: null,
+          incrementAttempts: true,
+          lastError: 'Reversal: gave up after 24h of network errors',
+          notify: NotificationSpec(
+            title: 'Reversal dispatch failed',
+            body:
+                'A bKash reversal could not reach the server in 24h. Open the admin panel.',
+          ),
+        );
+      }
+      return DispatchTransition(
+        nextState: ProcessedSmsState.reversing,
+        nextAttemptAt: now.add(transientBackoff(newAttempt)),
+        incrementAttempts: true,
+        lastError: 'reversal network: ${response.errorTag ?? "unknown"}',
+      );
+    }
+
+    final code = response.statusCode!;
+
+    if (code == 200) {
+      return const DispatchTransition(
+        nextState: ProcessedSmsState.ignoredRefund,
+        nextAttemptAt: null,
+        incrementAttempts: true,
+        lastError: null,
+        notify: NotificationSpec(
+          title: 'Refund recorded',
+          body: 'A bKash reversal was applied — credits were rolled back.',
+        ),
+      );
+    }
+
+    if (code == 404) {
+      // Server says no matching completed row. Fine — the operator will pick
+      // it up via the admin panel. Terminal, no notification (this is the
+      // common case for stray reversal SMS that never matched a purchase).
+      return const DispatchTransition(
+        nextState: ProcessedSmsState.ignoredRefund,
+        nextAttemptAt: null,
+        incrementAttempts: true,
+        lastError: 'Reversal: no matching completed purchase',
+      );
+    }
+
+    if (code == 400 || code == 401 || code == 503) {
+      return DispatchTransition(
+        nextState: ProcessedSmsState.ignoredRefund,
+        nextAttemptAt: null,
+        incrementAttempts: true,
+        lastError: 'Reversal HTTP $code: ${_snippet(response.body)}',
+        notify: NotificationSpec(
+          title: 'Reversal dispatch failed',
+          body: code == 401
+              ? 'HMAC secret rejected on reversal. Open Settings.'
+              : 'Reversal POST returned $code. Open the admin panel.',
+        ),
+      );
+    }
+
+    if (code >= 500 || code == 408 || code == 429) {
+      if (past24h) {
+        return DispatchTransition(
+          nextState: ProcessedSmsState.ignoredRefund,
+          nextAttemptAt: null,
+          incrementAttempts: true,
+          lastError: 'Reversal: gave up after 24h. Last status: $code',
+          notify: const NotificationSpec(
+            title: 'Reversal dispatch failed',
+            body:
+                'A bKash reversal did not succeed in 24h. Open the admin panel.',
+          ),
+        );
+      }
+      return DispatchTransition(
+        nextState: ProcessedSmsState.reversing,
+        nextAttemptAt: now.add(transientBackoff(newAttempt)),
+        incrementAttempts: true,
+        lastError: 'Reversal HTTP $code: ${_snippet(response.body)}',
+      );
+    }
+
+    return DispatchTransition(
+      nextState: ProcessedSmsState.ignoredRefund,
+      nextAttemptAt: null,
+      incrementAttempts: true,
+      lastError: 'Reversal unexpected HTTP $code: ${_snippet(response.body)}',
+      notify: const NotificationSpec(
+        title: 'Reversal dispatch failed',
+        body: 'Unexpected response while reporting a reversal.',
+      ),
+    );
+  }
+
   static bool _isAlreadyConfirmed(String? body) {
     if (body == null || body.isEmpty) return false;
     try {
@@ -312,6 +498,19 @@ class Dispatcher {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Returns the `code` field from a JSON response body, or null if the body
+  /// is empty / unparseable / lacks `code`.
+  static String? _bodyCode(String? body) {
+    if (body == null || body.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['code'] is String) {
+        return decoded['code'] as String;
+      }
+    } catch (_) {}
+    return null;
   }
 
   static String _snippet(String? body) {

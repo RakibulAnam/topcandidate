@@ -8,6 +8,8 @@ import 'package:another_telephony/telephony.dart';
 
 import '../diagnostics.dart';
 import '../dispatch/dispatcher.dart';
+import '../dispatch/webhook_client.dart';
+import '../settings/settings_repository.dart';
 import '../sms/bkash_parser.dart';
 import '../sms/sms_kind.dart';
 import '../storage/database.dart';
@@ -66,6 +68,15 @@ class SmsListener {
     final parsed = BkashSms.parse(body);
     if (parsed == null) {
       developer.log('fg: parse returned null', name: 'sms_listener.$isolate');
+      // Best-effort observability dump — operator updates the parser later.
+      // No DB row, no retry. See spec/01-server-contract.md "Other webhooks".
+      _dumpParserFailure(
+        client: dispatcher.webhookClient,
+        rawBody: body,
+        smsTimestamp: message.date != null
+            ? DateTime.fromMillisecondsSinceEpoch(message.date!)
+            : DateTime.now(),
+      );
       return;
     }
     developer.log(
@@ -91,7 +102,11 @@ class SmsListener {
         'fg: inserted id=$id kind=${parsed.kind}',
         name: 'sms_listener.$isolate',
       );
-      if (parsed.kind == BkashSmsKind.received) {
+      // Kick the dispatcher when the row was inserted in a dispatchable state.
+      // Reversal SMS now go through the dispatcher (POST /api/reverse-purchase)
+      // since migration 007; previously they terminated as ignoredRefund.
+      if (parsed.kind == BkashSmsKind.received ||
+          parsed.kind == BkashSmsKind.refund) {
         developer.log('fg: kicking dispatcher', name: 'sms_listener.$isolate');
         dispatcher.tick().then((processed) {
           developer.log(
@@ -161,6 +176,20 @@ Future<void> backgroundMessageHandler(SmsMessage message) async {
   final parsed = BkashSms.parse(body);
   if (parsed == null) {
     developer.log('bg: parse returned null', name: 'sms_listener.bg');
+    // Best-effort observability dump. Build a fresh WebhookClient — this
+    // isolate has no long-lived dispatcher.
+    final settings = SettingsRepository();
+    final webhook = HttpWebhookClient(
+      urlProvider: settings.webhookUrl,
+      secretProvider: settings.hmacSecret,
+    );
+    _dumpParserFailure(
+      client: webhook,
+      rawBody: body,
+      smsTimestamp: message.date != null
+          ? DateTime.fromMillisecondsSinceEpoch(message.date!)
+          : DateTime.now(),
+    );
     return;
   }
   developer.log(
@@ -197,4 +226,29 @@ Future<void> backgroundMessageHandler(SmsMessage message) async {
       stackTrace: st,
     );
   }
+}
+
+/// Fire-and-forget POST to `/api/admin/parser-failures`. Best-effort: a
+/// failure here is just an observability gap, not a payment issue.
+void _dumpParserFailure({
+  required WebhookClient client,
+  required String rawBody,
+  required DateTime smsTimestamp,
+}) {
+  client
+      .postParserFailure(rawBody: rawBody, smsTimestamp: smsTimestamp)
+      .then((r) {
+    developer.log(
+      'dump status=${r.statusCode} err=${r.errorTag ?? "none"} '
+      'bodyLen=${rawBody.length}',
+      name: 'parser_failure_dump',
+    );
+  }).catchError((Object e, StackTrace st) {
+    developer.log(
+      'dump failed: $e',
+      name: 'parser_failure_dump',
+      error: e,
+      stackTrace: st,
+    );
+  });
 }

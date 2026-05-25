@@ -24,7 +24,9 @@ class ProcessedSmsDao implements DispatcherDao {
   }) async {
     final state = switch (parsed.kind) {
       BkashSmsKind.received => ProcessedSmsState.queued,
-      BkashSmsKind.refund => ProcessedSmsState.ignoredRefund,
+      // Migration 007: reversal SMS are dispatched to /api/reverse-purchase
+      // rather than swallowed as audit-only. See spec/04-state-machine.md.
+      BkashSmsKind.refund => ProcessedSmsState.reversing,
       BkashSmsKind.sent => ProcessedSmsState.ignoredSent,
       BkashSmsKind.ibankingDeposit => ProcessedSmsState.ignoredIbanking,
       BkashSmsKind.unknown => ProcessedSmsState.failed,
@@ -59,7 +61,7 @@ class ProcessedSmsDao implements DispatcherDao {
     final rows = await _raw.query(
       'processed_sms',
       where:
-          "state IN ('queued','retrying','waiting_user') "
+          "state IN ('queued','retrying','waiting_user','reversing') "
           "AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
       whereArgs: [now.millisecondsSinceEpoch],
       orderBy: 'id ASC',

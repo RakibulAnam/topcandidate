@@ -43,6 +43,8 @@ ThemeData buildDarkTheme() {
       return (bg: const Color(0xFFFFF3E0), fg: const Color(0xFF8C5A00));
     case ProcessedSmsState.waitingUser:
       return (bg: const Color(0xFFEDE7F6), fg: const Color(0xFF512DA8));
+    case ProcessedSmsState.reversing:
+      return (bg: const Color(0xFFFFF3E0), fg: const Color(0xFF8C5A00));
     case ProcessedSmsState.done:
       return (bg: const Color(0xFFE7F5EC), fg: const Color(0xFF1B5E20));
     case ProcessedSmsState.failed:

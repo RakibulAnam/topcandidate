@@ -19,6 +19,37 @@ abstract class WebhookClient {
 
   /// Posts an empty `{}` body — used by the Settings "Test webhook" button.
   Future<WebhookResponse> postRaw(Map<String, dynamic> body);
+
+  /// Sibling endpoints added in web migration 007. All three use the same
+  /// HMAC convention as [post]; the URL is derived from the operator's
+  /// `/api/confirm-purchase` base by swapping the path segment.
+
+  /// `POST /api/orphan-inbound-sms` — dump an unmatchable SMS for operator
+  /// reconciliation. Called after `waiting_user` exhausts its 24h budget.
+  Future<WebhookResponse> postOrphan({
+    required String trxId,
+    required String? senderMsisdn,
+    required int amountTaka,
+    required String rawBody,
+    required DateTime smsTimestamp,
+  });
+
+  /// `POST /api/reverse-purchase` — notify the server of a bKash reversal
+  /// SMS. Server flips the matching `completed` row to `refunded`.
+  Future<WebhookResponse> postReversal({
+    required String trxId,
+    String? reason,
+  });
+
+  /// `POST /api/admin/parser-failures` — dump an SMS the parser could not
+  /// classify so the operator can update `bkash_parser.dart`. Best-effort
+  /// observability; no retry.
+  Future<WebhookResponse> postParserFailure({
+    required String rawBody,
+    String? senderMsisdn,
+    DateTime? smsTimestamp,
+    String? reason,
+  });
 }
 
 class HttpWebhookClient implements WebhookClient {
@@ -52,13 +83,86 @@ class HttpWebhookClient implements WebhookClient {
   }
 
   @override
-  Future<WebhookResponse> postRaw(Map<String, dynamic> body) async {
-    final url = await urlProvider();
+  Future<WebhookResponse> postRaw(Map<String, dynamic> body) {
+    return _postToPath(body, path: null);
+  }
+
+  @override
+  Future<WebhookResponse> postOrphan({
+    required String trxId,
+    required String? senderMsisdn,
+    required int amountTaka,
+    required String rawBody,
+    required DateTime smsTimestamp,
+  }) {
+    return _postToPath(
+      <String, dynamic>{
+        'transactionId': trxId,
+        'senderMsisdn': senderMsisdn,
+        'amountTaka': amountTaka,
+        'rawBody': rawBody,
+        'smsTimestamp': smsTimestamp.toUtc().toIso8601String(),
+      },
+      path: '/api/orphan-inbound-sms',
+    );
+  }
+
+  @override
+  Future<WebhookResponse> postReversal({
+    required String trxId,
+    String? reason,
+  }) {
+    return _postToPath(
+      <String, dynamic>{
+        'transactionId': trxId,
+        'reason': ?reason,
+      },
+      path: '/api/reverse-purchase',
+    );
+  }
+
+  @override
+  Future<WebhookResponse> postParserFailure({
+    required String rawBody,
+    String? senderMsisdn,
+    DateTime? smsTimestamp,
+    String? reason,
+  }) {
+    return _postToPath(
+      <String, dynamic>{
+        'rawBody': rawBody,
+        'senderMsisdn': ?senderMsisdn,
+        'smsTimestamp': ?smsTimestamp?.toUtc().toIso8601String(),
+        'reason': ?reason,
+      },
+      path: '/api/admin/parser-failures',
+    );
+  }
+
+  /// Shared POST core. When [path] is null the operator's configured URL is
+  /// used as-is (confirm-purchase). When non-null, the configured URL's path
+  /// is replaced with [path] so sibling endpoints share a single base.
+  Future<WebhookResponse> _postToPath(
+    Map<String, dynamic> body, {
+    required String? path,
+  }) async {
+    final configured = await urlProvider();
     final secret = await secretProvider();
-    if (url == null || url.isEmpty || secret == null || secret.isEmpty) {
+    if (configured == null ||
+        configured.isEmpty ||
+        secret == null ||
+        secret.isEmpty) {
       return const WebhookResponse(
         statusCode: null,
         errorTag: 'unconfigured',
+      );
+    }
+
+    final target = path == null ? configured : _rewritePath(configured, path);
+    if (target == null) {
+      return const WebhookResponse(
+        statusCode: null,
+        errorTag: 'bad_url',
       );
     }
 
@@ -69,15 +173,16 @@ class HttpWebhookClient implements WebhookClient {
     // can contain customer MSISDN / TrxID and the HMAC reveals secret usage
     // patterns. Lengths and the URL host are enough to debug shape problems.
     developer.log(
-      'POST host=${Uri.tryParse(url)?.host ?? "?"} bodyLen=${encoded.length} '
-      'sigLen=${signature.length}',
+      'POST host=${Uri.tryParse(target)?.host ?? "?"} '
+      'path=${Uri.tryParse(target)?.path ?? "?"} '
+      'bodyLen=${encoded.length} sigLen=${signature.length}',
       name: 'webhook',
     );
 
     try {
       final response = await _client
           .post(
-            Uri.parse(url),
+            Uri.parse(target),
             headers: {
               'Content-Type': 'application/json',
               'X-Bkash-Webhook-Signature': signature,
@@ -110,6 +215,15 @@ class HttpWebhookClient implements WebhookClient {
       );
       return WebhookResponse(statusCode: null, errorTag: tag);
     }
+  }
+
+  /// Swap the path of [base] (operator-configured URL ending in
+  /// `/api/confirm-purchase`) for [newPath]. Returns null if [base] cannot
+  /// be parsed.
+  static String? _rewritePath(String base, String newPath) {
+    final uri = Uri.tryParse(base);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
+    return uri.replace(path: newPath).toString();
   }
 
   String _sign(String body, String secret) {
