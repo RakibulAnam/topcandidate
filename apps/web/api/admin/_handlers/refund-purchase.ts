@@ -8,7 +8,7 @@
 // Headers:  X-Admin-Key
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase, requireReason } from '../_lib/adminAuth.js';
+import { requireAdmin, adminSupabase, requireReason, recordAuditAction } from '../_lib/adminAuth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -31,6 +31,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const reason = requireReason(req.body, res);
   if (reason === null) return;
 
+  const { data: before } = await supabase
+    .from('purchases')
+    .select('id, status, credits_granted, user_id')
+    .eq('payment_reference', transactionId.trim())
+    .maybeSingle();
+
   const { data, error } = await supabase.rpc('operator_refund_purchase', {
     p_transaction_id: transactionId.trim(),
     p_reason: reason,
@@ -48,6 +54,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const row = Array.isArray(data) ? data[0] : data;
+  await recordAuditAction(supabase, {
+    action: 'refund_purchase',
+    targetKind: 'purchase',
+    targetId: before?.id ?? null,
+    before: before ? { status: before.status, credits_granted: before.credits_granted } : null,
+    after: { status: 'refunded', newBalance: row?.new_balance },
+    reason,
+  });
   res.status(200).json({
     success: true,
     userId: row?.user_id,

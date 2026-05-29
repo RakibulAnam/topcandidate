@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (error) {
     console.error('[admin/disputes] query failed:', error.message);
-    res.status(500).json({ error: 'Query failed.' });
+    res.status(500).json({ error: `Supabase: ${error.message}`, code: error.code ?? null, hint: error.hint ?? null });
     return;
   }
 

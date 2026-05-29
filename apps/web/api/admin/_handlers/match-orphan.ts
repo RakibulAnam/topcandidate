@@ -9,7 +9,7 @@
 // Headers:  X-Admin-Key
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase, requireReason } from '../_lib/adminAuth.js';
+import { requireAdmin, adminSupabase, requireReason, recordAuditAction } from '../_lib/adminAuth.js';
 
 interface Body {
   smsId?: string;
@@ -86,6 +86,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq('id', smsId);
 
   const row = Array.isArray(data) ? data[0] : data;
+  await recordAuditAction(supabase, {
+    action: 'match_orphan',
+    targetKind: 'purchase',
+    targetId: purchaseId,
+    before: { status_before: null, sms_id: smsId },
+    after: { status: row?.status_out, observed_total: row?.observed_total, new_balance: row?.new_balance },
+    reason,
+  });
   res.status(200).json({
     success: true,
     status: row?.status_out,

@@ -35,8 +35,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const { data, error } = await supabase
       .from('unmatched_inbound_sms')
-      .select('id, payment_reference, sender_msisdn, raw_body, sms_timestamp, created_at')
+      .select('id, payment_reference, sender_msisdn, raw_body, sms_timestamp, reviewed_at, created_at')
       .like('payment_reference', 'PARSE_FAIL_%')
+      .is('reviewed_at', null)
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) {

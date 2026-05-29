@@ -9,7 +9,7 @@
 // Headers:  X-Admin-Key
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { requireAdmin, adminSupabase, recordAuditAction } from '../_lib/adminAuth.js';
 
 interface Body {
   disputeId?: string;
@@ -44,6 +44,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  const { data: before } = await supabase
+    .from('purchase_disputes')
+    .select('id, status, user_id, payment_reference')
+    .eq('id', disputeId)
+    .maybeSingle();
+
   const { error } = await supabase.rpc('resolve_purchase_dispute', {
     p_dispute_id: disputeId,
     p_resolution: resolution,
@@ -56,5 +62,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  await recordAuditAction(supabase, {
+    action: 'resolve_dispute',
+    targetKind: 'dispute',
+    targetId: disputeId,
+    before: before ? { status: before.status } : null,
+    after: { status: resolution },
+    reason: operatorNote.trim(),
+  });
   res.status(200).json({ success: true });
 }

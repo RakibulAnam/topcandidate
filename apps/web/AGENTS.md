@@ -93,7 +93,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | **Customer purchase status pill** — navbar widget polling `/api/my-purchase-status` after submit | `VerifyingPurchasePill.tsx`, `purchaseStatusClient.ts` | shipped |
 | **Purchase history (customer)** — read-only table on Dashboard | `PurchaseHistorySection.tsx` | shipped |
 | **Customer dispute filing** | `/api/dispute-purchase`, dispute dialog inside `VerifyingPurchasePill` | shipped |
-| **Operator admin SPA** — Pending / Orphans / Disputes / Parser-failures tabs | `/admin`, `src/presentation/admin/AdminScreen.tsx` | shipped — gated by `ADMIN_API_KEY` |
+| **Operator admin SPA** — Dashboard (with action queue) / Users (search + detail + grant/deduct/flag/notes) / Purchases (filter + detail + confirm/refund/expire/reopen/grant-override/note) / Orphans / Disputes / Parser-failures (select + mark reviewed + JSON corpus export) / Audit log / Settings | `/admin`, `src/presentation/admin/AdminScreen.tsx` (shell) + `DashboardTab` / `UsersTab` / `PurchasesTab` / `OrphansTab` / `DisputesTab` / `ParserFailuresTab` / `AuditLogTab` / `SettingsTab` | shipped — gated by `ADMIN_API_KEY`; ⌘K palette jumps by TrxID / user UUID / tab name |
 | **Mobile-callable webhooks** (HMAC) — orphan dump, reversal, parser failure | `/api/orphan-inbound-sms`, `/api/reverse-purchase`, `/api/admin/parser-failures` (POST) | shipped — Flutter watcher must be updated to call these |
 | **Cron expiry** — flips pending rows > 24h old to `expired` | `/api/cron/expire-pending` (manual / Pro-tier Vercel Cron) + `007_optional_pg_cron.sql` (Supabase pg_cron, the default path on Hobby) | shipped — see §13 "Cron cadence" |
 
@@ -236,7 +236,9 @@ pending ─────► completed             (happy path; observed >= expect
 
 Every transition writes to `purchase_state_changes` (actor + reason + from/to). Overpayments log to `purchase_overpayments`. Top-ups link via `purchase_topups`. The Flutter watcher dumps unmatchable SMS to `unmatched_inbound_sms` for operator reconciliation through the `/admin` SPA. The operator runbook is at [`ADMIN.md`](ADMIN.md).
 
-**Operator surface (`/admin`)** is gated by `ADMIN_API_KEY` (timing-safe compare on `X-Admin-Key`). The SPA lives at `src/presentation/admin/AdminScreen.tsx` — single file, four tabs, no react-router. App.tsx short-circuits at the outer `App` component when `window.location.pathname.startsWith('/admin')` so the panel mounts before `AuthProvider` (the operator doesn't sign in via Supabase). Adding new admin endpoints: drop them in `api/admin/`, gate via `requireAdmin(req, res)` from `api/admin/_lib/adminAuth.ts`. All write endpoints require a non-empty `reason` for the audit log.
+**Operator surface (`/admin`)** is gated by `ADMIN_API_KEY` (timing-safe compare on `X-Admin-Key`). The SPA shell is `src/presentation/admin/AdminScreen.tsx`; tabs are individual files (`DashboardTab.tsx`, `UsersTab.tsx`, `PurchasesTab.tsx`, `OrphansTab.tsx`, `DisputesTab.tsx`, `ParserFailuresTab.tsx`, `AuditLogTab.tsx`, `SettingsTab.tsx`) with a single design-system primitives module in `ui.tsx` and a fetch wrapper in `adminApi.ts`. **Layout**: left sidebar with grouped sections (Overview / Operations / Records / System), top bar with breadcrumb + ⌘K trigger, mobile-friendly off-canvas drawer below `lg`. **No react-router** — selection state lives in the shell and detail subviews are rendered by their parent tab (back is `setSelected(null)`). App.tsx short-circuits at the outer `App` component when `window.location.pathname.startsWith('/admin')` so the panel mounts before `AuthProvider` (the operator doesn't sign in via Supabase). The admin SPA mounts its own `<Toaster />` for action feedback (separate from the customer-facing one in `App.tsx`).
+
+**Adding new admin endpoints**: ALL admin endpoints route through the single dispatcher at `api/admin/[action].ts` (we are at Vercel Hobby's 12-function cap; adding a top-level `api/admin/*.ts` file would blow it). Drop the handler at `api/admin/_handlers/<name>.ts`, register it in the `HANDLERS` map in `[action].ts`, then call from the client via `api.call('<name>', { method, body, query })`. URL convention is flat — never `/api/admin/users/:id/grant-credits`; instead `/api/admin/grant-credits` with `userId` in the body. Every endpoint gates via `requireAdmin(req, res)` from `_lib/adminAuth.ts`. Every write endpoint requires a non-empty `reason`, and ends with `await recordAuditAction(supabase, { action, targetKind, targetId, before, after, reason })` — that helper is the project's canonical way to record an operator action in `admin_audit_log`. The audit write is NOT in the same transaction as the underlying RPC; see migration 009 header for the rationale and how to verify nothing got lost (`purchase_state_changes` is the cross-check for purchase rows).
 
 ---
 
@@ -404,19 +406,50 @@ api/                                    Vercel Functions — server-side AI prox
   ├── my-purchase-status.ts             GET  — customer pill polls this (auth required)
   ├── cron/expire-pending.ts            GET  — Bearer CRON_SECRET; 15-min Vercel Cron
   ├── admin/                            All gated by X-Admin-Key (ADMIN_API_KEY)
-  │   ├── [action].ts                   Dynamic-route dispatcher — single Vercel function (consolidated 2026-05-24 to stay under Hobby's 12-function cap). URLs unchanged.
-  │   ├── _lib/adminAuth.ts             requireAdmin + requireReason + adminSupabase
+  │   ├── [action].ts                   Dynamic-route dispatcher — single Vercel function. Migration 009 added ~18 actions; all live here, not as separate files (Hobby's 12-function cap).
+  │   ├── _lib/adminAuth.ts             requireAdmin + requireReason + adminSupabase + recordAuditAction
   │   └── _handlers/                    Per-action implementations (underscore prefix → not routed by Vercel)
   │       ├── dashboard.ts              GET — stat tiles
-  │       ├── pending.ts                GET — stuck non-terminal rows
-  │       ├── orphans.ts                GET — unmatched SMS + pending candidates
+  │       ├── action-queue.ts           GET — unified "needs attention" feed (dashboard)
+  │       ├── pending.ts                GET — stuck non-terminal rows (legacy; superseded by action-queue but kept for compat)
+  │       ├── orphans.ts                GET — unmatched SMS + pending candidates (excludes PARSE_FAIL_*)
   │       ├── disputes.ts               GET — customer disputes
-  │       ├── parser-failures.ts        GET (admin) + POST (HMAC) — bKash SMS the parser couldn't classify
+  │       ├── parser-failures.ts        GET (admin, unreviewed only) + POST (HMAC) — bKash SMS the parser couldn't classify
+  │       ├── parser-mark-reviewed.ts   POST — bulk-mark reviewed
+  │       ├── parser-export.ts          GET — JSON corpus download for Dart parser tests
+  │       ├── orphan-mark-ignored.ts    POST — drop a personal SMS that snuck through
   │       ├── confirm-purchase.ts       POST — operator manual confirm (P0-B)
   │       ├── refund-purchase.ts        POST — operator manual refund
+  │       ├── expire-purchase.ts        POST — force a pending/underpaid/mismatch row to expired
+  │       ├── reopen-purchase.ts        POST — flip expired/failed back to pending
+  │       ├── grant-override.ts         POST — for underpaid/mismatch/expired: grant pack anyway
+  │       ├── purchase-note.ts          POST — audit-only note on a purchase
   │       ├── match-orphan.ts           POST — link orphan SMS to pending row
-  │       └── resolve-dispute.ts        POST — close a dispute
+  │       ├── resolve-dispute.ts        POST — close a dispute
+  │       ├── users.ts                  GET — list/search users (email substring or UUID prefix)
+  │       ├── user-detail.ts            GET — profile + purchases + resumes + AI-usage + notes + audit
+  │       ├── grant-credits.ts          POST — operator grant
+  │       ├── deduct-credits.ts         POST — operator deduct (allows negative balance)
+  │       ├── user-note.ts              POST — append profile_notes row
+  │       ├── flag-user.ts              POST — toggle profiles.flagged_at
+  │       ├── purchases.ts              GET — filterable list (status[], age, q)
+  │       ├── purchase-detail.ts        GET — purchase + customer + state changes + topups + overpayments + linked SMS + audit
+  │       ├── audit-log.ts              GET — admin_audit_log feed
+  │       └── settings.ts               GET env health + POST run-expiry-now
   └── _lib/                             auth.ts, rateLimit.ts, aiFactory.ts, webhookAuth.ts
+
+src/presentation/admin/                  Operator SPA at /admin (English-only, no i18n)
+  ├── AdminScreen.tsx                    Shell — Gate, left sidebar (grouped Overview/Operations/Records/System), top bar, tab routing, cross-tab navigation, ⌘K palette, Sonner Toaster
+  ├── adminApi.ts                        AdminApi class + taka/ageMin helpers + ADMIN_KEY_STORAGE constant
+  ├── ui.tsx                             Design-system primitives — Card / Section / PageHeader / Button / SearchInput / FilterChip / Skeleton / EmptyState / ErrorState / StatusPill (with dot) / DataTable / KeyValue / JsonDiff / ReasonModal / Timeline / Toast helpers (toastSuccess/toastError/withToast) / useDebounced hook
+  ├── DashboardTab.tsx                   Tiles (poll 30s, skeleton placeholders) + unified action queue using DataTable
+  ├── UsersTab.tsx                       Instant-search list (debounced 250ms, inline spinner, slash-to-focus) + UserDetail subview (header card with credit adjuster + 4 sub-tabs: purchases / resumes / audit / notes)
+  ├── PurchasesTab.tsx                   Status multi-select + age single-select chips + instant search + PurchaseDetail subview (lifecycle Timeline + audit list + state-driven action panel)
+  ├── OrphansTab.tsx                     Unmatched SMS DataTable — match to pending dropdown OR mark ignored
+  ├── DisputesTab.tsx                    Open/resolved/rejected chip filter + resolve/reject with operator note
+  ├── ParserFailuresTab.tsx              Multi-select cards + bulk mark reviewed + JSON corpus export
+  ├── AuditLogTab.tsx                    Append-only feed with action-name search + target-kind chips + JSON diff per row
+  └── SettingsTab.tsx                    Env health cards (present/missing only — never values), last-confirm card, recent activity, manual cron trigger
 
 src/infrastructure/api/purchaseClient.ts  Typed client for /api/purchase — used by PurchaseModal
 src/infrastructure/auth/AuthContext.tsx Supabase Auth context/provider/hook
@@ -437,7 +470,7 @@ supabase/migrations/                    Incremental changes (run in SQL editor i
 
 All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 
-- `profiles` — user profile (linked 1:1 with `auth.users`), trigger `handle_new_user` auto-creates on signup. Includes `toolkit_credits integer not null default 0` — current balance for paid tailored generations. **No client-facing UPDATE policy for that column**; mutations only via security-definer RPCs.
+- `profiles` — user profile (linked 1:1 with `auth.users`), trigger `handle_new_user` auto-creates on signup. Includes `toolkit_credits integer not null default 0` — current balance for paid tailored generations. **No client-facing UPDATE policy for that column**; mutations only via security-definer RPCs. `flagged_at` (added by migration 009) is the operator-set fraud flag; null = clean, non-null = flagged.
 - `experiences`, `educations`, `projects`, `skills`, `extracurriculars`, `awards`, `certifications`, `affiliations`, `publications`, `languages`, `references_list` — profile sub-tables. **Note:** the `references` table is named `references_list` because `references` is a reserved keyword in Postgres.
 - `applications` — legacy, partially unused (the current code persists generated output to `generated_resumes`)
 - `generated_resumes` — final snapshots
@@ -447,6 +480,9 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
   - `company text GENERATED ALWAYS AS ((data -> 'targetJob' ->> 'company')) STORED` — extracted for efficient dashboard search (added migration 006)
 - `purchases` — audit trail for the monetization flow. One row per purchase event (`credits_granted`, `amount_taka`, `payment_reference`, `status`). RLS allows users to SELECT their own; INSERT only via the `process_mock_purchase` RPC (no direct INSERT policy).
 - `ai_call_log` — per-user daily-cap audit trail (existing).
+- `admin_audit_log` (migration 009) — append-only operator action log. Layered alongside `purchase_state_changes`: that table tracks purchase-row transitions only (and is written by Flutter + customer paths too); `admin_audit_log` covers every operator action on ANY target (user, purchase, dispute, orphan SMS, parser failure, system) with `before_state` / `after_state` JSON snapshots + reason. Written by the shared `recordAuditAction()` helper after each admin endpoint's underlying RPC succeeds. Not in the same transaction as the action — see migration 009 header for trade-off.
+- `profile_notes` (migration 009) — operator-private free-text notes on customer profiles. Append-only. Service-role only.
+- `unmatched_inbound_sms.reviewed_at` (migration 009) — operator marks a parser failure or orphan SMS reviewed without matching it (`matched_to_purchase_id` = "matched to a row"; `reviewed_at` = "I've seen this, drop it from the queue").
 - RPC `public.delete_user()` — deletes all user-owned rows (including `purchases`) then the auth user
 
 **Credit-system RPCs** (all `SECURITY DEFINER` with `set search_path = public, pg_temp`):
@@ -465,6 +501,8 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 - `supabase/migrations/007_transaction_flow_hardening.sql` — expands `purchases.status` enum (+ `expired`, `underpaid`, `msisdn_mismatch_review`), adds `observed_amount_taka`, adds the audit/aggregation tables (`purchase_topups`, `purchase_overpayments`, `unmatched_inbound_sms`, `purchase_disputes`, `purchase_state_changes`), rebuilds `confirm_purchase` v2 (amount + msisdn checks + audit logging), adds operator RPCs (`operator_confirm_purchase`, `operator_refund_purchase`, `apply_purchase_topup`, `record_orphan_sms`, `record_purchase_reversal`, `record_purchase_dispute`, `resolve_purchase_dispute`), adds `expire_stale_pending_purchases()` for cron
 - `supabase/migrations/007_optional_pg_cron.sql` — opt-in `pg_cron` schedule for the 15-min pending expiry. Only run if the extension is enabled (Supabase Database → Extensions). Skip if you're using the Vercel Cron entry instead.
 - `supabase/migrations/008_lock_credit_rpcs.sql` — closes the `refund_toolkit_credit` self-grant exploit. Drops the 0-arg `consume/refund_toolkit_credit()` and replaces with `(p_user_id uuid)` versions that are service-role only. `/api/optimize.ts` updated to call them via `SUPABASE_SERVICE_ROLE_KEY`.
+- `supabase/migrations/009_admin_panel.sql` — adds the full admin panel surface: `admin_audit_log` + `profile_notes` tables; `profiles.flagged_at` and `unmatched_inbound_sms.reviewed_at` columns; `record_admin_action()` shared audit RPC; operator-only credit RPCs (`admin_grant_credits` / `admin_deduct_credits`, deduct allows negative balance); operator-only purchase RPCs (`admin_expire_purchase` / `admin_reopen_purchase` / `admin_grant_override`); pg_trgm GIN index on `profiles.email` for the Users tab substring search.
+- `supabase/migrations/010_align_profiles_columns.sql` — schema-drift catch-up. `schema.sql` declared `profiles.created_at` and `profiles.updated_at` from day one but no prior migration ever added them, so databases provisioned from an early `schema.sql` revision were missing both. The admin Users tab orders by `created_at`, which is where the drift surfaced. Adds both columns idempotently and backfills `created_at` from `auth.users.created_at` so existing rows have a meaningful signup timestamp.
 
 **Running migrations**: open the Supabase SQL editor and paste the migration file contents. All migrations are idempotent (`add column if not exists`, `create index if not exists`, `create or replace function`).
 
@@ -648,7 +686,7 @@ Agents: **do not build these unless the user asks.**
 
 - **Operator email digest for stuck pending rows** (case #20 from `topcandidate-audit-2026-05-08/PROMPT-transaction-flow-edge-cases.md`). The cron-driven `expired` flip handles the 24h cliff, and the admin dashboard tile surfaces the oldest pending row at every page load. The proactive ping (e.g. "any pending row > 12h triggers an email") is NOT wired — the repo has no email provider. Add when the operator picks one (Resend / Postmark / SES).
 
-- **Larger admin surface from `topcandidate-audit-2026-05-08/PROMPT-admin-panel.md`** — Users tab, audit-log tab, profile_notes, flag-user, dashboard "action queue". The /admin SPA shipped here covers Pending / Orphans / Disputes / Parser-failures (the recovery-critical screens). The remaining tabs are pure additive surface and can land in a separate PR without changing any of the data model.
+- ~~**Larger admin surface from `topcandidate-audit-2026-05-08/PROMPT-admin-panel.md`**~~ — **SHIPPED 2026-05-30 via migration 009**. Users tab + UserDetail (grant/deduct/flag/notes), Purchases tab + PurchaseDetail (full lifecycle + state-driven action panel), Audit log tab (with JSON diffs), Settings tab (env health + manual cron trigger), Dashboard action queue, parser-failures mark-reviewed + corpus export, ⌘K palette. Deviations from the spec, all intentional: (a) single `api/admin/[action].ts` dispatcher with flat `/api/admin/<verb>` URLs instead of nested `users/:id/grant-credits` paths (Vercel Hobby 12-function cap); (b) no react-router — selection state lives in the shell; (c) one shared `record_admin_action` RPC instead of one per action — same auditing contract, one place to evolve; (d) no Vitest harness — `AGENTS.md` rule against inventing one. The manual checklist in `ADMIN.md` is the verification surface.
 
 - **Tests.** No test harness — Vitest, Playwright, pgTAP would each be new SDK additions. The 2026-05-08 PROMPT-transaction-flow-edge-cases asked for them; we deferred them per `apps/web/AGENTS.md` §13's "do not invent a test harness without asking" rule. Migration 007's RPCs are all idempotent and were written against the spec's edge cases; the per-state branches in `confirm_purchase` and `apply_purchase_topup` are the highest-value targets when a harness is added.
 
