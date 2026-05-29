@@ -14,12 +14,32 @@ URL must match `^https?://.+/api/confirm-purchase$`. The operator pastes the ful
 
 ## Headers
 
-| Header | Value |
-| --- | --- |
-| `Content-Type` | `application/json` |
-| `X-Bkash-Webhook-Signature` | hex-encoded **HMAC-SHA256** of the **raw request body**, using the operator-supplied shared secret. |
+| Header | Value | Status |
+| --- | --- | --- |
+| `Content-Type` | `application/json` | required |
+| `X-Bkash-Webhook-Signature` | hex-encoded **HMAC-SHA256** of the **signed string**, using the operator-supplied shared secret. | required |
+| `X-Bkash-Webhook-Timestamp` | UTC ISO-8601 timestamp of when the watcher sent the request (e.g. `2026-05-31T14:23:09.512Z`). | **v2 (recommended)** — see Replay protection below |
 
-The HMAC is computed over the exact byte sequence of the body. **Do not** re-serialize parsed JSON before hashing — that produces a different byte sequence and fails verification.
+### Signed string
+
+- **v2 (recommended):** the literal byte sequence `<timestamp>.<rawBody>` — timestamp from the header, then an ASCII period, then the raw body bytes.
+- **v1 (legacy):** the raw body bytes only. Accepted only when the timestamp header is absent AND the server's `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` env flag is unset.
+
+The HMAC is computed over the exact byte sequence. **Do not** re-serialize parsed JSON before hashing — that produces a different byte sequence and fails verification.
+
+### Replay protection (added migration 011, 2026-05-31)
+
+When the watcher sends `X-Bkash-Webhook-Timestamp`:
+
+1. The server rejects requests whose timestamp differs from server time by more than **±5 minutes** (response: `401`, reason logged as `timestamp_skew`).
+2. The server computes a nonce as `sha256("<timestamp>:<rawBody>")` (note: colon separator here, not period — separate from the signature input). It atomically inserts the nonce into the `webhook_nonces` table; on conflict the request is rejected as a replay (`401`, reason logged as `replay`).
+3. Nonces expire from the store after 10 minutes (2× the window); the timestamp-skew rejection covers anything older.
+
+When the watcher omits the timestamp header, the server falls back to the v1 verification (legacy body-only HMAC) **and logs a console warning**. Operators rolling out v2 should:
+
+1. Deploy the web server with `webhookAuth.ts` v2 support (no env var needed for backward-compat).
+2. Ship a Flutter watcher build that sends the v2 headers.
+3. Once every active operator install is on the new watcher, flip `BKASH_WEBHOOK_REQUIRE_TIMESTAMP=true` in Vercel env — the server then rejects v1 requests with `401`.
 
 ## Request body
 
@@ -51,7 +71,12 @@ The HMAC is computed over the exact byte sequence of the body. **Do not** re-ser
 
 ### Idempotency (mandatory)
 
-A second POST with the same `transactionId` after credits were granted **must** return the 200-idempotent response, not a fresh credit grant. This is the only replay protection in the protocol — there is no per-request nonce.
+A second POST with the same `transactionId` after credits were granted **must** return the 200-idempotent response, not a fresh credit grant. This is the **outcome-level** replay protection — once a payment is confirmed, replaying the same TrxID is harmless because the DB-level `confirm_purchase` RPC detects the existing `completed` row and short-circuits.
+
+Per-**request** replay protection is enforced by the v2 timestamp+nonce machinery (see Headers → Replay protection). Both layers exist on purpose:
+
+- The timestamp+nonce protection rejects identical signed requests **before** they reach the DB — useful against an attacker replaying a captured request to spam our pipeline.
+- The TrxID-level idempotency handles the legitimate case of the watcher retrying because it didn't see our 200 — those retries land with a *fresh* timestamp + nonce (different signed string), so the v2 protection lets them through, and the DB-level idempotency makes the outcome correct.
 
 ### 404 is load-bearing
 

@@ -1103,3 +1103,35 @@ revoke execute on function admin_grant_override(uuid, text) from public, anon, a
 -- pg_trgm index for fast substring search on email in the admin Users tab.
 create extension if not exists pg_trgm;
 create index if not exists profiles_email_trgm_idx on profiles using gin (email gin_trgm_ops);
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Migration 011 — webhook replay-protection nonce store
+-- ────────────────────────────────────────────────────────────────────────
+-- Backs the timestamp+nonce verification added to /api/_lib/webhookAuth.ts.
+-- See `supabase/migrations/011_webhook_nonces.sql` for the rationale.
+create table if not exists webhook_nonces (
+  nonce      text primary key,
+  created_at timestamp with time zone default timezone('utc', now()) not null,
+  source     text not null default 'bkash'
+);
+alter table webhook_nonces enable row level security;
+create index if not exists webhook_nonces_created_idx on webhook_nonces(created_at);
+
+create or replace function acquire_webhook_nonce(p_nonce text, p_source text default 'bkash')
+returns boolean language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  insert into webhook_nonces (nonce, source) values (p_nonce, p_source)
+    on conflict (nonce) do nothing;
+  return FOUND;
+end; $$;
+revoke execute on function acquire_webhook_nonce(text, text) from public, anon, authenticated;
+
+create or replace function prune_webhook_nonces() returns integer
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_deleted integer;
+begin
+  delete from webhook_nonces where created_at < timezone('utc', now()) - interval '10 minutes';
+  get diagnostics v_deleted = ROW_COUNT;
+  return v_deleted;
+end; $$;
+revoke execute on function prune_webhook_nonces() from public, anon, authenticated;

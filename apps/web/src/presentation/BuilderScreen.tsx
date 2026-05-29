@@ -147,6 +147,20 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     setActiveResumeId(currentResumeId);
   }, [currentResumeId]);
 
+  // Autosave draft to localStorage — 500 ms after the last change. Without
+  // this, a user who fills 6 steps and closes the tab loses everything
+  // (App.tsx reads `service.loadDraft()` on mount, but nothing was writing).
+  // We skip saving once a resume has been generated (activeResumeId set) —
+  // that row lives in Supabase and is the source of truth.
+  useEffect(() => {
+    if (!resumeService) return;
+    if (activeResumeId) return; // generated resume — Supabase owns it now
+    const handle = window.setTimeout(() => {
+      resumeService.saveDraft(resumeData);
+    }, 500);
+    return () => window.clearTimeout(handle);
+  }, [resumeService, resumeData, activeResumeId]);
+
   const [isGeneralResume, setIsGeneralResume] = useState(false);
   const [canRegenerate, setCanRegenerate] = useState(true);
   const [cooldownEndsAt, setCooldownEndsAt] = useState<Date | null>(null);
@@ -601,15 +615,25 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     if (!validateStep(step, true)) {
       return;
     }
-    setErrors({}); // clear on success
+    setErrors({});
 
-    if (step === AppStep.USER_TYPE && (!resumeData.visibleSections || resumeData.visibleSections.length === 0)) {
+    // Pre-compute the next visible-sections so the same value drives BOTH
+    // the state write AND the immediate visible-steps lookup. Without this,
+    // the lookup on the next line reads the stale `resumeData.visibleSections`
+    // (React batches the setResumeData call), causing the user's first
+    // step-forward from USER_TYPE to navigate via getVisibleSteps's
+    // implicit defaults instead of the explicit ones we just set —
+    // resulting in a transient inconsistency.
+    let nextSections = resumeData.visibleSections;
+    if (step === AppStep.USER_TYPE && (!nextSections || nextSections.length === 0)) {
       const defaults = ['education', 'skills', 'projects'];
       if (resumeData.userType === 'experienced') defaults.push('experience');
+      if (resumeData.userType === 'student') defaults.push('extracurriculars');
+      nextSections = defaults;
       setResumeData(prev => ({ ...prev, visibleSections: defaults }));
     }
 
-    const visibleSteps = getVisibleSteps(resumeData.userType, resumeData.visibleSections);
+    const visibleSteps = getVisibleSteps(resumeData.userType, nextSections);
     const currentIndex = visibleSteps.findIndex(s => s.id === step);
 
     if (currentIndex < visibleSteps.length - 1) {
@@ -623,15 +647,23 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const handleBack = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setErrors({});
-    
+
     const visibleSteps = getVisibleSteps(resumeData.userType, resumeData.visibleSections);
     const currentIndex = visibleSteps.findIndex(s => s.id === step);
 
+    // If we're on PREVIEW, currentIndex is -1 (PREVIEW isn't in the
+    // visible-steps list). Send the user back to the last visible step so
+    // they can edit before regenerating.
+    if (step === AppStep.PREVIEW) {
+      setStep(visibleSteps[visibleSteps.length - 1].id);
+      return;
+    }
+
     if (currentIndex > 0) {
       setStep(visibleSteps[currentIndex - 1].id);
-    } else if (step === AppStep.PREVIEW) {
-      setStep(visibleSteps[visibleSteps.length - 1].id);
     }
+    // currentIndex === 0 → we're on the first step; no back navigation
+    // (the screen's Exit Builder button is the way out).
   };
 
   const handleGenerate = async (opts?: { skipCreditCheck?: boolean }) => {
@@ -834,7 +866,21 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         credits={credits}
         onBuyCredits={() => setPurchaseModalOpen(true)}
       />
-      <BuilderStepper steps={visibleSteps} currentStep={step} />
+      <BuilderStepper
+        steps={visibleSteps}
+        currentStep={step}
+        onJumpToStep={(targetStep) => {
+          // Backward jumps only — guarded inside the stepper too, but
+          // we double-check here. Forward jumps would skip validation.
+          const targetIdx = visibleSteps.findIndex(s => s.id === targetStep);
+          const currentIdx = visibleSteps.findIndex(s => s.id === step);
+          if (targetIdx >= 0 && targetIdx < currentIdx) {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            setErrors({});
+            setStep(targetStep);
+          }
+        }}
+      />
 
       <main className="flex-1 max-w-3xl mx-auto w-full p-4 md:p-8">
         <div className="bg-white rounded-xl shadow-sm border border-charcoal-100 p-6 md:p-10 min-h-[500px] relative">

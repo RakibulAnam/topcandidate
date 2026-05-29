@@ -42,9 +42,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import {
   readRawBody,
-  verifyBkashSignature,
+  verifyWebhook,
   webhookSecretConfigured,
-  getSignatureHeader,
+  getServiceRoleClient,
 } from './_lib/webhookAuth.js';
 
 // Vercel default behavior parses the JSON body before our handler runs,
@@ -83,7 +83,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const rawBody = await readRawBody(req);
-  if (!verifyBkashSignature(rawBody, getSignatureHeader(req))) {
+  const verification = await verifyWebhook(req, rawBody, getServiceRoleClient());
+  if (!verification.ok) {
+    console.warn(`[confirm-purchase] verification failed: ${verification.reason}`);
     res.status(401).json({ error: 'Invalid or missing signature.' });
     return;
   }

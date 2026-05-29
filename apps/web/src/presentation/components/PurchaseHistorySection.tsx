@@ -1,7 +1,9 @@
 // PurchaseHistorySection — read-only list of the user's bKash purchases.
 //
 // Rendered at the bottom of the dashboard. RLS lets the user see their own
-// rows only; we don't expose anything privileged here.
+// rows only; we don't expose anything privileged here. Reads go through
+// `purchaseRepository` (Clean Architecture: presentation never imports
+// the Supabase client directly).
 //
 // Status badge colors follow the project palette — no blue/indigo/purple:
 //   completed              → emerald (positive terminal)
@@ -13,7 +15,8 @@
 //   failed                 → red
 
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../../infrastructure/supabase/client';
+import { purchaseRepository } from '../../infrastructure/config/dependencies';
+import type { Purchase } from '../../domain/repositories/IPurchaseRepository';
 import { useT } from '../i18n/LocaleContext';
 
 type T = ReturnType<typeof useT>;
@@ -31,16 +34,6 @@ function statusLabel(t: T, status: string): string {
   }
 }
 
-interface PurchaseRow {
-  id: string;
-  payment_reference: string | null;
-  amount_taka: number;
-  observed_amount_taka: number | null;
-  credits_granted: number;
-  status: string;
-  created_at: string;
-}
-
 const STATUS_BADGE: Record<string, string> = {
   completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   pending: 'bg-charcoal-100 text-brand-700 border-charcoal-300',
@@ -53,22 +46,19 @@ const STATUS_BADGE: Record<string, string> = {
 
 export const PurchaseHistorySection: React.FC = () => {
   const t = useT();
-  const [rows, setRows] = useState<PurchaseRow[]>([]);
+  const [rows, setRows] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from('purchases')
-        .select('id, payment_reference, amount_taka, observed_amount_taka, credits_granted, status, created_at')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (!cancelled) {
-        if (!error) setRows((data ?? []) as PurchaseRow[]);
-        setLoading(false);
-      }
-    })();
+    purchaseRepository.listMyPurchases(20)
+      .then((data) => { if (!cancelled) setRows(data); })
+      .catch((err) => {
+        // Don't surface to the user — the dashboard is fine without this
+        // section. Log so we can debug if anyone reports a missing list.
+        console.warn('[purchase-history] failed to load:', err);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -95,21 +85,21 @@ export const PurchaseHistorySection: React.FC = () => {
             {rows.map((r) => (
               <tr key={r.id} className="border-t border-charcoal-100">
                 <td className="px-4 py-2.5 text-charcoal-600 whitespace-nowrap">
-                  {new Date(r.created_at).toLocaleDateString()}
+                  {new Date(r.createdAt).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-2.5 font-mono text-[12px] text-brand-700">
-                  {r.payment_reference ?? '—'}
+                  {r.paymentReference ?? '—'}
                 </td>
                 <td className="px-4 py-2.5 text-right text-brand-700 tabular-nums">
-                  ৳{r.amount_taka}
-                  {r.observed_amount_taka != null && r.observed_amount_taka !== r.amount_taka && (
+                  ৳{r.amountTaka}
+                  {r.observedAmountTaka != null && r.observedAmountTaka !== r.amountTaka && (
                     <span className="ml-1 text-[11px] text-charcoal-500">
-                      {t('purchaseHistory.observedAmount', { observed: r.observed_amount_taka })}
+                      {t('purchaseHistory.observedAmount', { observed: r.observedAmountTaka })}
                     </span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-right text-brand-700 tabular-nums">
-                  {r.status === 'completed' ? `+${r.credits_granted}` : '—'}
+                  {r.status === 'completed' ? `+${r.creditsGranted}` : '—'}
                 </td>
                 <td className="px-4 py-2.5">
                   <span className={[

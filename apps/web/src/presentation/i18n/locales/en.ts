@@ -671,6 +671,7 @@ export const en = {
     errName: 'Name is required',
     errPosition: 'Position is required',
     errPhone: 'Phone is required',
+    jumpBackTo: 'Jump back to',
     stepsUserType: 'User Type',
     stepsSections: 'Sections',
     stepsTargetJob: 'Target Job',

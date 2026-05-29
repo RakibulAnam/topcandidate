@@ -657,6 +657,7 @@ export const bn: Dictionary = {
     errPhone: 'ফোন নম্বর লিখুন',
     errEmailInvalid: 'একটি সঠিক ইমেইল ঠিকানা লিখুন',
     errPhoneInvalid: 'একটি সঠিক ফোন নম্বর লিখুন',
+    jumpBackTo: 'ফিরে যান',
     stepsUserType: 'ব্যবহারকারীর ধরন',
     stepsSections: 'সেকশন',
     stepsTargetJob: 'টার্গেট চাকরি',
