@@ -567,7 +567,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     }
 
     setErrors(newErrors);
-    
+
     // Field-level errors (red borders + inline messages) carry the detail —
     // the toast just nudges the user to look up. The fallback toast covers
     // steps that fail without setting any inline error (e.g. "add at least
@@ -575,11 +575,25 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     if (!isValid && showToast) {
       if (Object.keys(newErrors).length > 0) {
         toast.error(t('builder.fieldsErrorToast'));
+        // Scroll the first invalid field into view + focus it. The audit
+        // (2026-05-30 C9) flagged that long forms felt opaque on failed
+        // validation because the user couldn't tell which field broke.
+        requestAnimationFrame(() => {
+          const firstInvalid = document.querySelector<HTMLElement>('[aria-invalid="true"]');
+          if (firstInvalid) {
+            firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Focus only if it's a focusable input — avoid stealing focus
+            // from a wrapping label or generic div.
+            if ('focus' in firstInvalid && typeof firstInvalid.focus === 'function') {
+              try { firstInvalid.focus({ preventScroll: true }); } catch { /* ignore */ }
+            }
+          }
+        });
       } else {
         toast.error(t('builder.fieldsErrorFallback'));
       }
     }
-    
+
     return isValid;
   };
 

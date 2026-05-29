@@ -33,8 +33,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Please describe the issue (min 10 chars).' });
     return;
   }
+  if (notes.trim().length > 2000) {
+    res.status(400).json({ error: 'Description too long (max 2,000 chars).' });
+    return;
+  }
 
   const supabase = userClient(auth.jwt);
+
+  // Per-user 24h rate limit (audit M6). Anti-spam guard. RLS scopes the
+  // count to auth.uid() so this is per-caller automatically.
+  const dayAgoIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: recent } = await supabase
+    .from('purchase_disputes')
+    .select('id', { count: 'exact', head: true })
+    .gte('created_at', dayAgoIso);
+  if ((recent ?? 0) >= 3) {
+    res.status(429).json({
+      error: 'You have filed several disputes recently. Please wait — our team is reviewing them. Contact support if urgent.',
+      code: 'too_many_disputes',
+    });
+    return;
+  }
+
   const { data, error } = await supabase.rpc('record_purchase_dispute', {
     p_transaction_id: transactionId.trim(),
     p_notes: notes.trim(),

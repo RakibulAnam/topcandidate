@@ -6,163 +6,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TOP CANDIDATE — The complete toolkit to land the job</title>
   <meta name="description" content="Tailored resumes, cover letters, hiring-manager outreach, interview prep, and 1:1 mock interviews with people who do the hiring." />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-            display: ['Fraunces', 'Georgia', 'serif'],
-            serif: ['Merriweather', 'Georgia', 'serif'],
-          },
-          colors: {
-            // Editorial Ink — primary brand. Warm near-black, the colour of fresh ink on cream paper.
-            brand: {
-              50: '#F2F1ED',
-              100: '#DFDDD5',
-              200: '#BAB6A7',
-              300: '#928C77',
-              400: '#6B6650',
-              500: '#494532',
-              600: '#2F2D20',
-              700: '#1A1812',
-              800: '#0E0D09',
-              900: '#040402',
-            },
-            // Saffron Gold — single accent used for CTAs, highlights, and the "candidate" wordmark.
-            accent: {
-              50: '#FEF5E7',
-              100: '#FBE3B7',
-              200: '#F7CC81',
-              300: '#F1B14C',
-              400: '#E59321',
-              500: '#C57B17',
-              600: '#9C6113',
-              700: '#73470F',
-              800: '#4A2D09',
-              900: '#241605',
-            },
-            // Stone — warm neutrals (replaces the cool gray "charcoal" tokens used elsewhere in app).
-            charcoal: {
-              50: '#FAFAF7',
-              100: '#F2F1EB',
-              200: '#E5E2D8',
-              300: '#CFCBBC',
-              400: '#9F998A',
-              500: '#6B6759',
-              600: '#4D4A40',
-              700: '#363328',
-              800: '#1F1D17',
-              900: '#0D0C09',
-            }
-          }
-        }
-      }
-    }
-  </script>
+
+  <!-- Brand fonts. Tailwind + global styles live in src/index.css (loaded by Vite). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700;9..144,800&family=Merriweather:wght@300;400;700&family=Hind+Siliguri:wght@300;400;500;600;700&family=Tiro+Bangla:ital@0;1&display=swap"
     rel="stylesheet">
-  <style>
-    body {
-      font-family: 'Inter', 'Hind Siliguri', ui-sans-serif, system-ui, sans-serif;
-      background-color: #FAFAF7;
-      color: #1A1812;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    .font-display {
-      font-family: 'Fraunces', 'Tiro Bangla', Georgia, serif;
-      font-optical-sizing: auto;
-      letter-spacing: -0.02em;
-    }
-
-    .font-serif {
-      font-family: 'Merriweather', Georgia, serif;
-    }
-
-    /* Bengali locale: prefer Bengali-first font stacks so glyphs render correctly.
-       English digits / Latin words inside Bengali strings still fall back to Inter. */
-    html[data-locale="bn"] body {
-      font-family: 'Hind Siliguri', 'Inter', ui-sans-serif, system-ui, sans-serif;
-    }
-
-    html[data-locale="bn"] .font-display {
-      font-family: 'Tiro Bangla', 'Fraunces', Georgia, serif;
-      letter-spacing: 0;
-    }
-
-    /* Subtle paper grain — used sparingly on hero / large blank surfaces */
-    .bg-paper {
-      background-color: #FAFAF7;
-      background-image:
-        radial-gradient(circle at 1px 1px, rgba(26, 24, 18, 0.04) 1px, transparent 0);
-      background-size: 22px 22px;
-    }
-
-    @media print {
-      @page {
-        margin: 0;
-        size: A4;
-      }
-
-      body {
-        margin: 0;
-        padding: 0;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-
-      .no-print {
-        display: none !important;
-      }
-
-      .print-only {
-        display: block !important;
-      }
-
-      #resume-preview,
-      #cover-letter-preview {
-        width: 100% !important;
-        min-height: auto !important;
-        margin: 0 !important;
-        padding: 15mm !important;
-        box-shadow: none !important;
-        page-break-inside: avoid;
-      }
-
-      * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-
-      header,
-      section {
-        page-break-inside: avoid;
-      }
-    }
-  </style>
-  <script type="importmap">
-{
-  "imports": {
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "docx": "https://esm.sh/docx@8.5.0",
-    "file-saver": "https://esm.sh/file-saver@2.0.5"
-  }
-}
-</script>
-  <link rel="stylesheet" href="/index.css">
 </head>
 
 <body class="bg-charcoal-50 text-brand-700">
+  <noscript>
+    <div style="max-width:560px;margin:10vh auto;padding:32px;border:1px solid #E5E2D8;border-radius:16px;font-family:Inter,system-ui,sans-serif;color:#1A1812;">
+      <h1 style="font-family:Fraunces,Georgia,serif;margin:0 0 12px 0;">JavaScript required</h1>
+      <p style="margin:0;color:#6B6759;">TOP CANDIDATE needs JavaScript to tailor your resume. Please enable it and reload the page.</p>
+    </div>
+  </noscript>
   <div id="root"></div>
   <script type="module" src="/src/index.tsx"></script>
 </body>

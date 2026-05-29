@@ -7,7 +7,7 @@ import {
     Language, Reference, UserType
 } from '../domain/entities/Resume';
 import { toast } from 'sonner';
-import { Loader2, Save, Trash2, AlertTriangle, Sparkles } from 'lucide-react';
+import { Loader2, Save, Trash2, AlertTriangle, Sparkles, ChevronRight } from 'lucide-react';
 import { ExperienceSection } from './components/profile/ExperienceSection';
 import { ProjectSection } from './components/profile/ProjectSection';
 import { EducationSection } from './components/profile/EducationSection';
@@ -244,20 +244,29 @@ export const ProfileScreen = () => {
                 </div>
             )}
 
-            <div className="flex gap-2 overflow-x-auto mb-8 border-b border-charcoal-200 pb-1 scrollbar-hide">
-                {TAB_IDS.map(tab => (
-                    <button
-                        key={tab}
-                        type="button"
-                        onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap flex-shrink-0 ${activeTab === tab
-                            ? 'text-brand-600 border-b-2 border-brand-600'
-                            : 'text-charcoal-500 hover:text-charcoal-700'
-                            }`}
-                    >
-                        {t(TAB_KEYS[tab])}
-                    </button>
-                ))}
+            {/* Tab rail with right-edge fade hint so users can tell on mobile there's more (audit). */}
+            <div className="relative mb-8 border-b border-charcoal-200">
+                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide" role="tablist">
+                    {TAB_IDS.map(tab => (
+                        <button
+                            key={tab}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 rounded-sm ${activeTab === tab
+                                ? 'text-brand-600 border-b-2 border-brand-600'
+                                : 'text-charcoal-500 hover:text-charcoal-700'
+                                }`}
+                        >
+                            {t(TAB_KEYS[tab])}
+                        </button>
+                    ))}
+                </div>
+                {/* Right-edge scroll hint on mobile (chevron only — gradients are off-brand per CLAUDE.md). */}
+                <div className="pointer-events-none absolute top-1.5 right-0 h-7 w-7 flex items-center justify-end pr-1 text-charcoal-400 md:hidden bg-charcoal-50" aria-hidden="true">
+                    <ChevronRight size={14} />
+                </div>
             </div>
 
             <div className="bg-white rounded-xl shadow-sm border border-charcoal-100 p-6">

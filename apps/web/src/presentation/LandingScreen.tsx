@@ -20,6 +20,7 @@ import { LanguageToggle } from './i18n/LanguageToggle';
 
 interface Props {
     onGetStarted: () => void;
+    onOpenTerms?: () => void;
 }
 
 /**
@@ -88,7 +89,7 @@ const SectionEyebrow = ({ children }: { children: React.ReactNode }) => (
 const FEATURE_ICONS = [FileText, Mail, ArrowUpRight, Linkedin, MessageSquare, Users] as const;
 const TESTIMONIAL_INITIALS = ['PK', 'MT', 'LR'] as const;
 
-export const LandingScreen = ({ onGetStarted }: Props) => {
+export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
     const t = useT();
     const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -488,6 +489,11 @@ export const LandingScreen = ({ onGetStarted }: Props) => {
                         <a href="#mock-interviews" className="hover:text-brand-700 transition-colors">{t('landing.navMockInterviews')}</a>
                         <a href="#how" className="hover:text-brand-700 transition-colors">{t('landing.navHow')}</a>
                         <a href="#proof" className="hover:text-brand-700 transition-colors">{t('landing.navProof')}</a>
+                        {onOpenTerms && (
+                            <button type="button" onClick={onOpenTerms} className="hover:text-brand-700 transition-colors">
+                                {t('login.tosLink')}
+                            </button>
+                        )}
                     </div>
                     <p className="text-xs text-brand-400">{t('landing.footerCopyright', { year: new Date().getFullYear() })}</p>
                 </div>

@@ -37,7 +37,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useT } from '../i18n/LocaleContext';
-import { supabase } from '../../infrastructure/supabase/client';
 import { purchasePackage, type PackageId } from '../../infrastructure/api/purchaseClient';
 import { ApiCallError } from '../../infrastructure/ai/proxy/ProxyClients';
 import { writePendingPurchase } from '../../infrastructure/api/purchaseStatusClient';

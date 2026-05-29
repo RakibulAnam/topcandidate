@@ -36,6 +36,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // mimeType whitelist (audit M3). Without this, an attacker with a valid
+  // JWT can pass arbitrary base64 and a plausible mime to waste AI quota.
+  const ALLOWED_MIMES = new Set([
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+  ]);
+  if (!ALLOWED_MIMES.has(mimeType)) {
+    res.status(415).json({ error: `Unsupported file type: ${mimeType}. Use PDF or Word.`, code: 'unsupported_media_type' });
+    return;
+  }
+
   try {
     await assertWithinLimit(auth.userId, auth.jwt);
   } catch (err) {
@@ -46,9 +59,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     throw err;
   }
 
+  // Log up-front — failed calls count toward the daily cap (audit C5).
+  await logCall(auth.userId, auth.jwt, 'extract_resume');
+
   try {
     const result = await resumeExtractor.extract(fileData, mimeType);
-    await logCall(auth.userId, auth.jwt, 'extract_resume');
     res.status(200).json({ result });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Extraction failed';

@@ -46,10 +46,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Missing resume data' });
     return;
   }
+  if (data.targetJob?.description && data.targetJob.description.length > 20_000) {
+    res.status(413).json({ error: 'Job description is too long (max 20,000 characters).', code: 'jd_too_long' });
+    return;
+  }
+
+  // Log up-front — failed calls count toward the daily cap (audit C5).
+  await logCall(auth.userId, auth.jwt, 'optimize');
 
   try {
     const optimized = await resumeOptimizer.optimize(data);
-    await logCall(auth.userId, auth.jwt, 'optimize');
     res.status(200).json({ optimized });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Optimizer failed';

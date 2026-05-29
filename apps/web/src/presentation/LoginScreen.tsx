@@ -1,26 +1,79 @@
+// LoginScreen — auth landing for unauthenticated users.
+//
+// LAYOUT (OAuth-ready, 2026-05-31)
+// ================================
+// The screen is structured so a future "Continue with Google" button slots
+// in above the email form without a rewrite. The flow today:
+//
+//   ┌────────────────────────────────────────┐
+//   │  TOP CANDIDATE        EN | বাং         │   ← brand + language
+//   ├────────────────────────────────────────┤
+//   │  Welcome back / Create account / Reset │   ← contextual title
+//   │  subtitle                              │
+//   ├────────────────────────────────────────┤
+//   │  [error banner — only if auth failed]  │
+//   │  [info  banner — reset link sent etc.] │
+//   ├────────────────────────────────────────┤
+//   │  ┌─── OAuth slot (future) ──────────┐  │   ← Google button lands here
+//   │  │ <Continue with Google> button    │  │     when we ship OAuth (PR
+//   │  └──────────────────────────────────┘  │     `pending-work/oauth-google-signin.md`)
+//   │  ── or continue with email ──          │   ← divider, only renders
+//   ├────────────────────────────────────────┤     when 2+ methods exist
+//   │  [email auth form: name/email/pass]    │
+//   │  [Continue / Sign up / Send reset]     │
+//   ├────────────────────────────────────────┤
+//   │  switch mode  ·  Terms of Service      │
+//   └────────────────────────────────────────┘
+//
+// EMAIL VERIFICATION POLICY
+// =========================
+// Email confirmation is OFF in Supabase by default — see AuthContext header.
+// On signup, the user is logged in immediately and the AuthProvider redirects
+// them through to the dashboard. We do NOT branch on
+// `needsEmailConfirmation` here; the flag is kept in the AuthContext return
+// type for forward-compatibility only.
+
 import React, { useState } from 'react';
-import { supabase } from '../infrastructure/supabase/client';
 import { toast } from 'sonner';
-import { Mail, Lock, Loader2, ArrowRight, AlertCircle, XCircle } from 'lucide-react';
+import { Mail, Lock, Loader2, ArrowRight, AlertCircle, XCircle, CheckCircle2, User as UserIcon } from 'lucide-react';
 import { validateEmail } from '../application/validation/emailValidator';
+import { useAuth } from '../infrastructure/auth/AuthContext';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 
-export const LoginScreen = () => {
+type Mode = 'login' | 'signup' | 'forgot';
+
+interface LoginScreenProps {
+    onOpenTerms?: () => void;
+}
+
+// Set to true once the OAuth PR (see `pending-work/oauth-google-signin.md`)
+// lands. When true, the screen renders the Google CTA + OR divider above
+// the email form. Today: false — only email auth is offered, and the
+// divider is hidden so the layout doesn't look incomplete.
+const OAUTH_GOOGLE_ENABLED = false;
+
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
     const t = useT();
-    const [isLogin, setIsLogin] = useState(true);
+    const { signIn, signUp, requestPasswordReset } = useAuth();
+    const [mode, setMode] = useState<Mode>('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [fullName, setFullName] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // UX States
     const [passwordError, setPasswordError] = useState('');
     const [emailError, setEmailError] = useState('');
     const [authError, setAuthError] = useState<string | null>(null);
+    const [info, setInfo] = useState<string | null>(null);
+
+    const isLogin = mode === 'login';
+    const isSignup = mode === 'signup';
+    const isForgot = mode === 'forgot';
 
     const clearErrors = () => {
         setAuthError(null);
+        setInfo(null);
         if (passwordError) setPasswordError('');
         if (emailError) setEmailError('');
     };
@@ -29,6 +82,24 @@ export const LoginScreen = () => {
         e.preventDefault();
         clearErrors();
 
+        // Password-reset path — no password field.
+        if (isForgot) {
+            if (!email) {
+                setEmailError(t('login.emailRequired'));
+                return;
+            }
+            setLoading(true);
+            try {
+                await requestPasswordReset(email);
+                setInfo(t('login.resetEmailSent'));
+            } catch (error) {
+                setAuthError(error instanceof Error ? error.message : t('login.authFailedFallback'));
+            } finally {
+                setLoading(false);
+            }
+            return;
+        }
+
         if (password.length < 6) {
             setPasswordError(t('login.weakPassword'));
             return;
@@ -36,12 +107,9 @@ export const LoginScreen = () => {
 
         setLoading(true);
 
-        // Client-side Validation
-        // Email gate runs only on signup — login should accept whatever the
-        // user originally registered with, even if our rules later tightened.
-        // The disposable-domain list is lazy-loaded, so this awaits a fetch
-        // on the first check; that's why we toggle `loading` first.
-        if (!isLogin) {
+        // Signup-only: format + disposable-domain gate. Login accepts whatever
+        // the user originally registered with even if our rules later tightened.
+        if (isSignup) {
             const result = await validateEmail(email);
             if (!result.valid) {
                 setEmailError(result.reason);
@@ -52,34 +120,29 @@ export const LoginScreen = () => {
 
         try {
             if (isLogin) {
-                const { error } = await supabase.auth.signInWithPassword({
-                    email,
-                    password,
-                });
-                if (error) throw error;
+                await signIn(email, password);
                 toast.success(t('login.signInSuccess'));
-                // AuthProvider will handle redirect
+                // AuthProvider handles the redirect via onAuthStateChange.
             } else {
-                const { error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        data: {
-                            full_name: fullName,
-                        },
-                    },
-                });
-
-                if (error) throw error;
+                // signUp returns `needsEmailConfirmation` — we ignore it on
+                // purpose. Email-confirm is OFF in Supabase, so the response
+                // always includes a session and the AuthProvider redirects
+                // immediately. If the operator re-enables confirmation later,
+                // wire a "check your inbox" banner here off the flag.
+                await signUp({ email, password, fullName });
                 toast.success(t('login.signUpSuccess'));
             }
         } catch (error) {
-            console.error("Auth error:", error);
             const message = error instanceof Error ? error.message : t('login.authFailedFallback');
             setAuthError(message);
         } finally {
             setLoading(false);
         }
+    };
+
+    const switchMode = (next: Mode) => {
+        clearErrors();
+        setMode(next);
     };
 
     return (
@@ -96,22 +159,22 @@ export const LoginScreen = () => {
                     </div>
 
                     <div className="text-center mb-8">
-                        <h1 className="text-xl font-semibold text-charcoal-800 mb-2">
-                            {isLogin ? t('login.welcomeBack') : t('login.createAccount')}
+                        <h1 className="font-display text-2xl font-semibold text-brand-700 mb-2">
+                            {isLogin ? t('login.welcomeBack') : isSignup ? t('login.createAccount') : t('login.resetPassword')}
                         </h1>
                         <p className="text-sm text-charcoal-500">
-                            {isLogin ? t('login.welcomeSubtitle') : t('login.createSubtitle')}
+                            {isLogin ? t('login.welcomeSubtitle') : isSignup ? t('login.createSubtitle') : t('login.resetSubtitle')}
                         </p>
                     </div>
 
-                    {/* Auth Error Alert using API response */}
+                    {/* Error alert */}
                     {authError && (
-                        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+                        <div className="mb-5 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3" role="alert">
                             <XCircle className="text-red-500 shrink-0 mt-0.5" size={20} />
                             <div className="flex-1">
                                 <h3 className="text-sm font-semibold text-red-800">{t('login.authFailedTitle')}</h3>
                                 <p className="text-sm text-red-600 mt-1">
-                                    {authError === "Invalid login credentials"
+                                    {authError === 'Invalid login credentials'
                                         ? t('login.invalidCredentials')
                                         : authError}
                                 </p>
@@ -119,115 +182,195 @@ export const LoginScreen = () => {
                         </div>
                     )}
 
-                    <form onSubmit={handleAuth} className="space-y-4">
-                        {!isLogin && (
+                    {/* Info banner (reset link sent) */}
+                    {info && (
+                        <div className="mb-5 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3" role="status">
+                            <CheckCircle2 className="text-emerald-500 shrink-0 mt-0.5" size={20} />
+                            <p className="text-sm text-emerald-700 flex-1">{info}</p>
+                        </div>
+                    )}
+
+                    {/*
+                     * ── OAuth methods slot (Phase 2) ─────────────────────────
+                     * When OAUTH_GOOGLE_ENABLED becomes true, render the
+                     * "Continue with Google" CTA here and show the OR divider.
+                     * Spec: `pending-work/oauth-google-signin.md`.
+                     */}
+                    {OAUTH_GOOGLE_ENABLED && !isForgot && (
+                        <>
+                            {/* <ContinueWithGoogleButton /> goes here */}
+                            <div className="flex items-center gap-3 my-5" aria-hidden="true">
+                                <div className="flex-1 h-px bg-charcoal-200" />
+                                <span className="text-[11px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">
+                                    {t('login.orContinueWithEmail')}
+                                </span>
+                                <div className="flex-1 h-px bg-charcoal-200" />
+                            </div>
+                        </>
+                    )}
+
+                    {/* Email auth form */}
+                    <form onSubmit={handleAuth} className="space-y-4" noValidate>
+                        {isSignup && (
                             <div>
-                                <label className="block text-sm font-medium text-charcoal-700 mb-1">{t('login.fullName')}</label>
+                                <label htmlFor="auth-fullName" className="block text-sm font-medium text-charcoal-700 mb-1">
+                                    {t('login.fullName')}
+                                </label>
                                 <div className="relative">
                                     <input
+                                        id="auth-fullName"
                                         type="text"
-                                        required={!isLogin}
+                                        autoComplete="name"
+                                        required
                                         value={fullName}
-                                        onChange={(e) => {
-                                            setFullName(e.target.value);
-                                            clearErrors();
-                                        }}
-                                        className="w-full px-4 py-2 pl-10 border border-charcoal-300 rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:border-brand-500 outline-none transition-colors"
+                                        onChange={(e) => { setFullName(e.target.value); clearErrors(); }}
+                                        className="w-full h-11 pl-10 pr-3 border border-charcoal-300 rounded-xl focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:border-accent-500 outline-none transition-colors"
                                         placeholder={t('login.fullNamePlaceholder')}
                                     />
-                                    <div className="absolute left-3 top-2.5 text-charcoal-400">
-                                        <ArrowRight size={18} />
-                                    </div>
+                                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400" size={18} aria-hidden="true" />
                                 </div>
                             </div>
                         )}
 
                         <div>
-                            <label className="block text-sm font-medium text-charcoal-700 mb-1">{t('login.email')}</label>
+                            <label htmlFor="auth-email" className="block text-sm font-medium text-charcoal-700 mb-1">
+                                {t('login.email')}
+                            </label>
                             <div className="relative">
                                 <input
+                                    id="auth-email"
                                     type="email"
+                                    autoComplete={isSignup ? 'email' : 'username'}
                                     required
                                     value={email}
-                                    onChange={(e) => {
-                                        setEmail(e.target.value);
-                                        clearErrors();
-                                    }}
-                                    className={`w-full px-4 py-2 pl-10 border rounded-lg outline-none transition-colors ${emailError || authError
-                                            ? 'border-red-500 focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:border-red-500'
-                                            : 'border-charcoal-300 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:border-brand-500'
+                                    onChange={(e) => { setEmail(e.target.value); clearErrors(); }}
+                                    aria-invalid={!!(emailError || authError)}
+                                    className={`w-full h-11 pl-10 pr-3 border rounded-xl outline-none transition-colors ${emailError || authError
+                                        ? 'border-red-500 focus-visible:ring-2 focus-visible:ring-red-200'
+                                        : 'border-charcoal-300 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:border-accent-500'
                                         }`}
                                     placeholder={t('login.emailPlaceholder')}
                                 />
-                                <div className="absolute left-3 top-2.5 text-charcoal-400">
-                                    <Mail size={18} />
-                                </div>
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400" size={18} aria-hidden="true" />
                             </div>
                             {emailError && (
-                                <p className="mt-1 text-sm text-red-500 font-medium flex items-center gap-1 animate-pulse">
-                                    <AlertCircle size={14} />
+                                <p className="mt-1.5 text-[12px] text-red-600 font-medium flex items-center gap-1.5">
+                                    <AlertCircle size={14} aria-hidden="true" />
                                     {emailError}
                                 </p>
                             )}
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-charcoal-700 mb-1">{t('login.password')}</label>
-                            <div className="relative">
-                                <input
-                                    type="password"
-                                    required
-                                    value={password}
-                                    onChange={(e) => {
-                                        setPassword(e.target.value);
-                                        clearErrors();
-                                    }}
-                                    className={`w-full px-4 py-2 pl-10 border rounded-lg outline-none transition-colors ${passwordError || authError
-                                            ? 'border-red-500 focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:border-red-500'
-                                            : 'border-charcoal-300 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:border-brand-500'
-                                        }`}
-                                    placeholder={t('login.passwordPlaceholder')}
-                                />
-                                <div className="absolute left-3 top-2.5 text-charcoal-400">
-                                    <Lock size={18} />
+                        {!isForgot && (
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label htmlFor="auth-password" className="block text-sm font-medium text-charcoal-700">
+                                        {t('login.password')}
+                                    </label>
+                                    {isLogin && (
+                                        <button
+                                            type="button"
+                                            onClick={() => switchMode('forgot')}
+                                            className="text-xs font-semibold text-brand-600 hover:text-brand-500 hover:underline"
+                                        >
+                                            {t('login.forgotPasswordLink')}
+                                        </button>
+                                    )}
                                 </div>
+                                <div className="relative">
+                                    <input
+                                        id="auth-password"
+                                        type="password"
+                                        autoComplete={isSignup ? 'new-password' : 'current-password'}
+                                        required
+                                        value={password}
+                                        onChange={(e) => { setPassword(e.target.value); clearErrors(); }}
+                                        aria-invalid={!!(passwordError || authError)}
+                                        className={`w-full h-11 pl-10 pr-3 border rounded-xl outline-none transition-colors ${passwordError || authError
+                                            ? 'border-red-500 focus-visible:ring-2 focus-visible:ring-red-200'
+                                            : 'border-charcoal-300 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:border-accent-500'
+                                            }`}
+                                        placeholder={t('login.passwordPlaceholder')}
+                                    />
+                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-charcoal-400" size={18} aria-hidden="true" />
+                                </div>
+                                {passwordError && (
+                                    <p className="mt-1.5 text-[12px] text-red-600 font-medium flex items-center gap-1.5">
+                                        <AlertCircle size={14} aria-hidden="true" />
+                                        {passwordError}
+                                    </p>
+                                )}
                             </div>
-                            {passwordError && (
-                                <p className="mt-1 text-sm text-red-500 font-medium flex items-center gap-1 animate-pulse">
-                                    <AlertCircle size={14} />
-                                    {passwordError}
-                                </p>
-                            )}
-                        </div>
+                        )}
 
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full bg-brand-600 text-white py-2.5 rounded-lg font-semibold hover:bg-brand-700 focus-visible:ring-4 focus-visible:ring-brand-200 transition-colors flex items-center justify-center gap-2"
+                            className="w-full h-11 mt-2 bg-brand-700 text-white rounded-xl font-semibold hover:bg-brand-800 focus-visible:ring-4 focus-visible:ring-accent-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                         >
                             {loading ? (
                                 <Loader2 className="animate-spin" size={20} />
                             ) : (
                                 <>
-                                    {isLogin ? t('login.signIn') : t('login.signUp')}
+                                    {isLogin
+                                        ? t('login.continueWithEmail')
+                                        : isSignup
+                                            ? t('login.signUp')
+                                            : t('login.sendResetLink')}
                                     <ArrowRight size={18} />
                                 </>
                             )}
                         </button>
                     </form>
 
-                    <div className="mt-6 text-center text-sm text-charcoal-600">
-                        {isLogin ? t('login.noAccount') : t('login.hasAccount')}{' '}
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setIsLogin(!isLogin);
-                                clearErrors();
-                            }}
-                            className="font-semibold text-brand-600 hover:text-brand-500 hover:underline"
-                        >
-                            {isLogin ? t('login.switchToSignUp') : t('login.switchToSignIn')}
-                        </button>
+                    {/* Footer — mode switcher + ToS */}
+                    <div className="mt-6 space-y-3 text-center">
+                        <div className="text-sm text-charcoal-600">
+                            {isForgot ? (
+                                <button
+                                    type="button"
+                                    onClick={() => switchMode('login')}
+                                    className="font-semibold text-brand-600 hover:text-brand-500 hover:underline"
+                                >
+                                    {t('login.backToSignIn')}
+                                </button>
+                            ) : (
+                                <>
+                                    {isLogin ? t('login.noAccount') : t('login.hasAccount')}{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => switchMode(isLogin ? 'signup' : 'login')}
+                                        className="font-semibold text-brand-600 hover:text-brand-500 hover:underline"
+                                    >
+                                        {isLogin ? t('login.switchToSignUp') : t('login.switchToSignIn')}
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
+                        {isSignup && (
+                            <p className="text-[11px] text-charcoal-500 leading-relaxed">
+                                {t('login.tosBlurb')}{' '}
+                                <button
+                                    type="button"
+                                    onClick={onOpenTerms}
+                                    className="font-semibold text-brand-700 hover:text-accent-600 underline underline-offset-2"
+                                >
+                                    {t('login.tosLink')}
+                                </button>
+                                .
+                            </p>
+                        )}
+
+                        {!isSignup && onOpenTerms && (
+                            <button
+                                type="button"
+                                onClick={onOpenTerms}
+                                className="text-[11px] text-charcoal-500 hover:text-brand-700 underline underline-offset-2"
+                            >
+                                {t('login.tosLink')}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

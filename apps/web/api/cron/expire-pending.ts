@@ -3,10 +3,11 @@
 // Calls expire_stale_pending_purchases() — flips pending rows older than 24h
 // to 'expired' and writes audit rows. Idempotent.
 //
-// Auth: CRON_SECRET in the `Authorization: Bearer <secret>` header. Vercel
-// Cron sends this header automatically when CRON_SECRET is set as an env var.
-// We also accept it via `?secret=` for manual triggers (e.g. operator
-// kicking it from a terminal). Both paths timing-safe compare.
+// Auth: CRON_SECRET in the `Authorization: Bearer <secret>` header.
+// Vercel Cron sends this header automatically when CRON_SECRET is set as an
+// env var. Manual triggers must also use the header — query-string secrets
+// leak via browser history, referer headers, and server access logs, so the
+// `?secret=` fallback was removed (2026-05-30 audit, C4).
 //
 // Cadence: every 15 min in vercel.json. Operators on Hobby (1/day max for
 // Vercel Cron) can run this via pg_cron instead — see
@@ -39,10 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const bearer = typeof header === 'string' && header.startsWith('Bearer ')
     ? header.slice('Bearer '.length).trim()
     : null;
-  const qSecret = req.query.secret;
-  const querySecret = Array.isArray(qSecret) ? qSecret[0] : qSecret;
-  const presented = bearer ?? (typeof querySecret === 'string' ? querySecret : '');
-  if (!presented || !safeEqual(presented, CRON_SECRET)) {
+  if (!bearer || !safeEqual(bearer, CRON_SECRET)) {
     res.status(401).json({ error: 'unauthorized' });
     return;
   }
