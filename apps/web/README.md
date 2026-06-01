@@ -1,61 +1,108 @@
-# TOP CANDIDATE
+# TOP CANDIDATE — web
 
-The complete toolkit to land the job. Paste a job description; get an ATS-tailored resume, a real cover letter, a cold outreach email to the hiring manager, a LinkedIn connection note, and a prep sheet of the 6–8 questions you'll actually be asked — all in one run.
+Paste a job description, get a complete application package: ATS-tailored resume, cover letter, cold outreach email to the hiring manager, LinkedIn note, and an interview-prep sheet of the 6–8 questions you'll actually be asked.
 
-> **For AI agents** (Claude Code, Cursor, Antigravity, etc.): the canonical context document is [`AGENTS.md`](./AGENTS.md). Start there.
-> Claude Code-specific rules are in [`CLAUDE.md`](./CLAUDE.md).
+> **For AI agents** (Claude Code, Cursor, etc.): the canonical context document is [`AGENTS.md`](./AGENTS.md). Claude Code-specific rules in [`CLAUDE.md`](./CLAUDE.md). Operator runbook in [`ADMIN.md`](./ADMIN.md).
 
----
+## Stack
+
+React 19 + TypeScript 5.8 + Vite 6 + Tailwind v4 + Supabase + Vercel Functions. Clean Architecture across `src/domain/` → `src/application/` → `src/infrastructure/` → `src/presentation/`. All AI calls server-side via `api/*` Vercel Functions; provider keys never reach the client.
 
 ## Quick start
 
 ```bash
 npm install
-cp .env.example .env     # fill in the three env vars below
-npm run dev
+cp .env.example .env     # then fill in the values per the comments
+npm run dev              # Vite dev server (frontend only; API routes will 404)
+npm run dev:full         # `vercel dev` — frontend + serverless functions
+npm run build            # tsc + Vite production build
 ```
 
-### Required env vars
+## Required environment variables
 
-| Variable | Where to get it |
+See [`.env.example`](./.env.example) for the full annotated list. In short:
+
+### Server-only (never `VITE_`-prefixed — bundled into Vercel Functions, not the client)
+
+| Variable | What it does |
 |---|---|
-| `VITE_GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
-| `VITE_SUPABASE_URL` | Supabase Project Settings → API |
-| `VITE_SUPABASE_ANON_KEY` | Supabase Project Settings → API |
+| `GROQ_API_KEY` | Primary resume optimizer. Free at https://console.groq.com/keys (1,000 RPD). |
+| `GEMINI_API_KEY` | Fallback optimizer + all toolkit generators (cover letter, outreach, LinkedIn, interview prep, resume extractor). Free at https://aistudio.google.com/app/apikey (20 RPD). |
+| `SUPABASE_SERVICE_ROLE_KEY` | Bypasses RLS. Used only by `/api/confirm-purchase`, `/api/cron/expire-pending`, and the admin dispatcher. |
+| `BKASH_WEBHOOK_SECRET` | HMAC-SHA256 secret shared with the Flutter SMS-watcher in `apps/mobile/`. Generate with `openssl rand -hex 32`. |
+| `ADMIN_API_KEY` | Gates `/admin` and `/api/admin/*`. Generate with `openssl rand -hex 32`. |
+| `CRON_SECRET` | Bearer auth on `/api/cron/expire-pending`. Vercel Cron sends this automatically when configured. Generate with `openssl rand -hex 32`. |
 
-### Database
+### Client-visible (`VITE_`-prefixed — bundled into the browser)
 
-Run `supabase/schema.sql` in the Supabase SQL editor, then every file under `supabase/migrations/` in order. All migrations are idempotent.
+| Variable | What it does |
+|---|---|
+| `VITE_SUPABASE_URL` | Supabase Project Settings → API. |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon key. Public by design; RLS gates every table. |
+| `VITE_BKASH_PAYMENT_NUMBER` | Operator's bKash number, shown in the purchase modal. |
 
-## Build
+**Never put `VITE_GEMINI_API_KEY` or `VITE_GROQ_API_KEY` in your env.** AI keys are server-only; the proxy at `/api/*` is the only thing that talks to providers. If you see a `VITE_GEMINI_API_KEY` instruction in an older doc, ignore it — it predates the proxy migration.
+
+## Database
+
+Run `supabase/schema.sql` once on a fresh Supabase project, **then every file in `supabase/migrations/` in numerical order**. Each migration is idempotent (`add column if not exists` etc.) so re-running is safe.
+
+At time of writing, the full set is:
+- `001_add_toolkit_column.sql`
+- `002_add_languages_and_references.sql`
+- `003_add_ai_call_log.sql`
+- `004_add_toolkit_credits.sql`
+- `005_lock_toolkit_credits_and_bkash_pending.sql`
+- `006_add_company_generated_column.sql`
+- `007_transaction_flow_hardening.sql`
+- `007_optional_pg_cron.sql` *(enable `pg_cron` first in Supabase Extensions; needed on Vercel Hobby where sub-daily cron isn't available)*
+- `008_lock_credit_rpcs.sql`
+- `009_admin_panel.sql`
+- `010_align_profiles_columns.sql`
+
+See [`DEPLOYING.md`](./DEPLOYING.md) for the full first-deploy walk-through.
+
+## Verification
 
 ```bash
-npm run build       # tsc + vite build
-npm run preview     # serve dist/
+npm run build          # tsc (part of Vite) + production bundle — must pass clean
+
+# Server-only smoke for /api/admin/* and the AI factory. `vite build` tree-shakes
+# server-only files, so a syntax error in those files passes `npm run build`
+# undetected. This catches it.
+node_modules/.bin/tsx -e "(async () => { await import('./api/admin/[action].ts'); await import('./api/_lib/aiFactory.ts'); console.log('ok'); })();"
 ```
 
-No test suite. Verification is `npm run build` passing + a manual browser pass.
+There is no automated test suite. Verification = the two commands above + a manual browser pass.
 
 ## What's in the box
 
-- **Resume** — tailored summary, bullets, skills; 4 ATS-safe single-column templates; export to PDF or Word
-- **Cover letter** — role-specific body paragraphs; export to PDF or Word
-- **Outreach email** — cold email to the hiring manager (subject + body); copy-to-clipboard
-- **LinkedIn note** — ≤ 280-char tailored connection request
-- **Interview prep** — 6–8 questions with *why asked* and *how to answer*, expandable cards, per-question copy
-- **Master profile** — one-time capture; drives auto-generated resumes and prefills the builder
-- **General Resume** — a generic, profile-based resume with a 24-hour regen cooldown
+- Multi-step Builder (Personal info → Sections → Experience → Projects → Education → Skills → Extras → Languages → References → Generate → Preview)
+- Two AI optimizer providers (Groq primary, Gemini fallback) with automatic cooldown
+- One combined toolkit generator (cover letter + outreach email + LinkedIn note + interview prep) — the "2-call hot path"
+- bKash purchase flow with HMAC-signed Flutter watcher confirmation (see `apps/mobile/`)
+- Operator admin SPA at `/admin` (Dashboard / Users / Purchases / Disputes / Orphans / Parser failures / Audit log / Settings)
+- Locale toggle (English + Bengali) with locale-aware font stacks
 
-## Stack
+## Project structure
 
-React 19 · TypeScript 5.8 · Vite 6 · Tailwind (CDN) · Google Gemini 2.5 Flash · Supabase (Auth + Postgres + RLS) · docx · jspdf / html2pdf.js · Lucide · Sonner · date-fns
-
-Clean Architecture: `domain → application → infrastructure (impl) ← presentation`. Full details in [`AGENTS.md`](./AGENTS.md).
-
-## Deploying
-
-See [`DEPLOYING.md`](./DEPLOYING.md) — Vercel + Supabase, with the migration step called out.
-
-## License
-
-MIT
+```
+apps/web/
+├── api/                    Vercel Functions (server)
+│   ├── admin/[action].ts   Admin dispatcher — single function, ~28 sub-handlers
+│   ├── confirm-purchase.ts bKash webhook (HMAC-gated)
+│   ├── optimize.ts         Paid hot-path (optimizer + combined toolkit)
+│   ├── optimize-general.ts Free path (optimizer only)
+│   ├── toolkit-item.ts     Per-item retry (free)
+│   └── ...
+├── src/
+│   ├── domain/             Entities + use cases (no dependencies)
+│   ├── application/        Services that orchestrate use cases
+│   ├── infrastructure/     Supabase, AI providers, repositories, DI
+│   └── presentation/       React screens + components
+├── supabase/
+│   ├── schema.sql          Fresh-DB bootstrap
+│   └── migrations/         Numbered, idempotent
+├── docs/                   Cross-app contracts + ADRs
+└── topcandidate-audit-*/   Audit history
+```

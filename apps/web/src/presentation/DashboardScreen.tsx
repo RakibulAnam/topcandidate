@@ -27,12 +27,13 @@ import { PurchaseModal } from './components/PurchaseModal';
 import { PurchaseHistorySection } from './components/PurchaseHistorySection';
 import { CreditsBadge } from './components/CreditsBadge';
 import { VerifyingPurchasePill } from './components/Layout/VerifyingPurchasePill';
+import type { ResumeData } from '../domain/entities';
 
 interface Props {
     onCreateNew: () => void;
     onEditProfile: () => void;
     onOpenApplication: (id: string) => void;
-    onOpenResume?: (id: string, data?: any) => void;
+    onOpenResume?: (id: string, data?: ResumeData) => void;
 }
 
 type ResumeListItem = { id: string; title: string; date: string; updatedAt?: string; company?: string };
@@ -418,7 +419,7 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                             </div>
 
                             {(tailoredTotal > 0 || debouncedSearch) && (
-                                <div className="relative sm:w-72">
+                                <div className="relative w-full sm:w-72">
                                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-charcoal-400" size={16} />
                                     <input
                                         type="text"
@@ -471,8 +472,17 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                                             return (
                                                 <li
                                                     key={resume.id}
-                                                    className="relative bg-white rounded-2xl border border-charcoal-200 p-5 hover:border-brand-700 hover:shadow-md transition-all cursor-pointer group"
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-label={t('dashboard.open') + ' ' + displayTitle}
+                                                    className="relative bg-white rounded-2xl border border-charcoal-200 p-5 hover:border-brand-700 hover:shadow-md transition-all cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
                                                     onClick={() => onOpenResume?.(resume.id)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter' || e.key === ' ') {
+                                                            e.preventDefault();
+                                                            onOpenResume?.(resume.id);
+                                                        }
+                                                    }}
                                                 >
                                                     <div className="flex items-start gap-3">
                                                         <div className="w-10 h-10 rounded-xl bg-charcoal-50 border border-charcoal-200 text-brand-700 flex items-center justify-center shrink-0 group-hover:bg-accent-50 group-hover:border-accent-200 group-hover:text-accent-600 transition-colors">

@@ -13,7 +13,7 @@
 // 503 server not configured.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase, requireReason } from '../_lib/adminAuth.js';
+import { requireAdmin, adminSupabase, requireReason, recordAuditAction } from '../_lib/adminAuth.js';
 
 interface Body {
   transactionId?: string;
@@ -44,6 +44,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const reason = requireReason(req.body, res);
   if (reason === null) return;
 
+  // Snapshot the purchase row before the RPC for the audit diff.
+  const { data: before } = await supabase
+    .from('purchases')
+    .select('id, status, observed_amount_taka, amount_taka, user_id')
+    .eq('payment_reference', transactionId.trim())
+    .maybeSingle();
+
   const { data, error } = await supabase.rpc('operator_confirm_purchase', {
     p_transaction_id: transactionId.trim(),
     p_override_msisdn_check: !!overrideMsisdnCheck,
@@ -63,6 +70,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const row = Array.isArray(data) ? data[0] : data;
+  await recordAuditAction(supabase, {
+    action: 'confirm_purchase',
+    targetKind: 'purchase',
+    targetId: before?.id ?? null,
+    before: before ? { status: before.status, observed_amount_taka: before.observed_amount_taka } : null,
+    after: { status: 'completed', credits_granted: row?.credits_granted, override_msisdn: !!overrideMsisdnCheck, override_amount: !!overrideAmountCheck },
+    reason,
+  });
   res.status(200).json({
     success: true,
     userId: row?.user_id,

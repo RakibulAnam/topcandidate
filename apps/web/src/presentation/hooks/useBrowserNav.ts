@@ -6,7 +6,9 @@ export type NavScreen =
   | 'DASHBOARD'
   | 'PROFILE'
   | 'PROFILE_SETUP'
-  | 'BUILDER';
+  | 'BUILDER'
+  | 'RESET_PASSWORD'
+  | 'LEGAL_TERMS';
 
 export interface NavState {
   screen: NavScreen;
@@ -19,6 +21,8 @@ const SCREEN_PATHS: Record<NavScreen, string> = {
   PROFILE: '/profile',
   PROFILE_SETUP: '/profile-setup',
   BUILDER: '/builder',
+  RESET_PASSWORD: '/auth/reset-password',
+  LEGAL_TERMS: '/legal/terms',
 };
 
 const pathToScreen = (path: string): NavScreen | null => {

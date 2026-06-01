@@ -11,9 +11,15 @@ interface StepInfo {
 interface BuilderStepperProps {
     steps: StepInfo[];
     currentStep: AppStep;
+    /**
+     * Optional click-to-jump handler. Only completed steps (those before
+     * the current step) are clickable; forward jumps are blocked so the
+     * user can't skip required validation.
+     */
+    onJumpToStep?: (step: AppStep) => void;
 }
 
-export const BuilderStepper = ({ steps, currentStep }: BuilderStepperProps) => {
+export const BuilderStepper = ({ steps, currentStep, onJumpToStep }: BuilderStepperProps) => {
     const t = useT();
     const currentStepIndex = steps.findIndex(s => s.id === currentStep);
     const progress = steps.length > 0 ? ((currentStepIndex + 1) / steps.length) * 100 : 0;
@@ -27,30 +33,53 @@ export const BuilderStepper = ({ steps, currentStep }: BuilderStepperProps) => {
                     {steps.map((s, idx) => {
                         const isActive = s.id === currentStep;
                         const isCompleted = idx < currentStepIndex;
+                        const canJump = isCompleted && !!onJumpToStep;
+
+                        const dot = (
+                            <div
+                                className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors duration-200 border ${
+                                    isActive
+                                        ? 'bg-accent-500 border-accent-500 text-brand-800 ring-4 ring-accent-100'
+                                        : isCompleted
+                                            ? 'bg-brand-700 border-brand-700 text-accent-300'
+                                            : 'bg-white border-charcoal-300 text-charcoal-500'
+                                }`}
+                            >
+                                {isCompleted ? <Check size={13} strokeWidth={3} /> : idx + 1}
+                            </div>
+                        );
+                        const label = (
+                            <div
+                                className={`mt-2 text-[10px] font-semibold uppercase tracking-[0.14em] whitespace-nowrap ${
+                                    isActive
+                                        ? 'text-brand-700'
+                                        : isCompleted
+                                            ? 'text-brand-500'
+                                            : 'text-charcoal-400'
+                                }`}
+                            >
+                                {s.title}
+                            </div>
+                        );
+
                         return (
                             <div key={s.id} className="flex flex-col items-center relative z-10 bg-white px-2">
-                                <div
-                                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold transition-colors duration-200 border ${
-                                        isActive
-                                            ? 'bg-accent-500 border-accent-500 text-brand-800 ring-4 ring-accent-100'
-                                            : isCompleted
-                                                ? 'bg-brand-700 border-brand-700 text-accent-300'
-                                                : 'bg-white border-charcoal-300 text-charcoal-500'
-                                    }`}
-                                >
-                                    {isCompleted ? <Check size={13} strokeWidth={3} /> : idx + 1}
-                                </div>
-                                <div
-                                    className={`mt-2 text-[10px] font-semibold uppercase tracking-[0.14em] whitespace-nowrap ${
-                                        isActive
-                                            ? 'text-brand-700'
-                                            : isCompleted
-                                                ? 'text-brand-500'
-                                                : 'text-charcoal-400'
-                                    }`}
-                                >
-                                    {s.title}
-                                </div>
+                                {canJump ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onJumpToStep!(s.id)}
+                                        aria-label={`${t('builder.jumpBackTo')} ${s.title}`}
+                                        className="flex flex-col items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
+                                    >
+                                        {dot}
+                                        {label}
+                                    </button>
+                                ) : (
+                                    <>
+                                        {dot}
+                                        {label}
+                                    </>
+                                )}
                             </div>
                         );
                     })}

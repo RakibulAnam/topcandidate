@@ -964,3 +964,174 @@ begin
   return v_affected;
 end; $$;
 revoke execute on function expire_stale_pending_purchases() from public, anon, authenticated;
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Migration 009 — admin panel surface
+-- ────────────────────────────────────────────────────────────────────────
+
+-- Append-only operator action log. Layered alongside purchase_state_changes
+-- (which tracks purchase-row transitions only). admin_audit_log covers
+-- every operator action on every target.
+create table if not exists admin_audit_log (
+  id           uuid default uuid_generate_v4() primary key,
+  actor        text not null default 'operator',
+  action       text not null,
+  target_kind  text not null,
+  target_id    uuid,
+  before_state jsonb,
+  after_state  jsonb,
+  reason       text,
+  created_at   timestamp with time zone default timezone('utc'::text, now())
+);
+alter table admin_audit_log enable row level security;
+create index if not exists admin_audit_log_target_idx on admin_audit_log(target_kind, target_id, created_at desc);
+create index if not exists admin_audit_log_action_idx on admin_audit_log(action, created_at desc);
+create index if not exists admin_audit_log_created_idx on admin_audit_log(created_at desc);
+
+-- Operator-private notes on customer profiles.
+create table if not exists profile_notes (
+  id         uuid default uuid_generate_v4() primary key,
+  user_id    uuid references profiles(id) on delete cascade not null,
+  note       text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+alter table profile_notes enable row level security;
+create index if not exists profile_notes_user_idx on profile_notes(user_id, created_at desc);
+
+alter table profiles add column if not exists flagged_at timestamp with time zone;
+create index if not exists profiles_flagged_idx on profiles(flagged_at) where flagged_at is not null;
+
+alter table unmatched_inbound_sms add column if not exists reviewed_at timestamp with time zone;
+
+-- Single shared audit-write RPC, called by every admin endpoint after its
+-- underlying RPC succeeds. Not in the same transaction as the action —
+-- see migration 009 header for trade-off.
+create or replace function record_admin_action(
+  p_action text, p_target_kind text, p_target_id uuid,
+  p_before jsonb, p_after jsonb, p_reason text
+) returns uuid language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_id uuid;
+begin
+  if p_action is null or p_target_kind is null then raise exception 'action_and_target_kind_required'; end if;
+  insert into admin_audit_log (action, target_kind, target_id, before_state, after_state, reason)
+    values (p_action, p_target_kind, p_target_id, p_before, p_after, p_reason)
+    returning id into v_id;
+  return v_id;
+end; $$;
+revoke execute on function record_admin_action(text, text, uuid, jsonb, jsonb, text) from public, anon, authenticated;
+
+-- Operator credit adjustments. Distinct from consume/refund (migration 008)
+-- which are tied to the optimizer hot path. Deduct allows negative balance.
+create or replace function admin_grant_credits(p_user_id uuid, p_amount integer)
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_new_balance integer;
+begin
+  if p_user_id is null then raise exception 'user_id_required'; end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'amount_must_be_positive'; end if;
+  update profiles set toolkit_credits = toolkit_credits + p_amount where id = p_user_id returning toolkit_credits into v_new_balance;
+  if v_new_balance is null then raise exception 'user_not_found'; end if;
+  return v_new_balance;
+end; $$;
+revoke execute on function admin_grant_credits(uuid, integer) from public, anon, authenticated;
+
+create or replace function admin_deduct_credits(p_user_id uuid, p_amount integer)
+returns integer language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_new_balance integer;
+begin
+  if p_user_id is null then raise exception 'user_id_required'; end if;
+  if p_amount is null or p_amount <= 0 then raise exception 'amount_must_be_positive'; end if;
+  update profiles set toolkit_credits = toolkit_credits - p_amount where id = p_user_id returning toolkit_credits into v_new_balance;
+  if v_new_balance is null then raise exception 'user_not_found'; end if;
+  return v_new_balance;
+end; $$;
+revoke execute on function admin_deduct_credits(uuid, integer) from public, anon, authenticated;
+
+-- Operator purchase RPCs.
+create or replace function admin_expire_purchase(p_purchase_id uuid, p_reason text)
+returns text language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_status text;
+begin
+  if p_purchase_id is null then raise exception 'purchase_id_required'; end if;
+  select status into v_status from purchases where id = p_purchase_id for update;
+  if not found then raise exception 'purchase_not_found'; end if;
+  if v_status not in ('pending','underpaid','msisdn_mismatch_review') then
+    raise exception 'not_expirable' using hint = format('Cannot expire row in status %s.', v_status);
+  end if;
+  update purchases set status = 'expired' where id = p_purchase_id;
+  insert into purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+    values (p_purchase_id, v_status, 'expired', 'operator', p_reason);
+  return 'expired';
+end; $$;
+revoke execute on function admin_expire_purchase(uuid, text) from public, anon, authenticated;
+
+create or replace function admin_reopen_purchase(p_purchase_id uuid, p_reason text)
+returns text language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_status text;
+begin
+  if p_purchase_id is null then raise exception 'purchase_id_required'; end if;
+  select status into v_status from purchases where id = p_purchase_id for update;
+  if not found then raise exception 'purchase_not_found'; end if;
+  if v_status not in ('expired','failed') then
+    raise exception 'not_reopenable' using hint = format('Cannot reopen row in status %s.', v_status);
+  end if;
+  update purchases set status = 'pending', created_at = timezone('utc'::text, now()) where id = p_purchase_id;
+  insert into purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+    values (p_purchase_id, v_status, 'pending', 'operator', p_reason);
+  return 'pending';
+end; $$;
+revoke execute on function admin_reopen_purchase(uuid, text) from public, anon, authenticated;
+
+create or replace function admin_grant_override(p_purchase_id uuid, p_reason text)
+returns table (user_id uuid, new_balance integer, credits_granted integer)
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_purchase purchases%rowtype; v_balance integer;
+begin
+  if p_purchase_id is null then raise exception 'purchase_id_required'; end if;
+  select * into v_purchase from purchases where id = p_purchase_id for update;
+  if not found then raise exception 'purchase_not_found'; end if;
+  if v_purchase.status not in ('underpaid','msisdn_mismatch_review','expired') then
+    raise exception 'not_grantable' using hint = format('Cannot grant override on status %s.', v_purchase.status);
+  end if;
+  update purchases set status = 'completed' where id = v_purchase.id;
+  update profiles set toolkit_credits = toolkit_credits + v_purchase.credits_granted where id = v_purchase.user_id returning toolkit_credits into v_balance;
+  insert into purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+    values (v_purchase.id, v_purchase.status, 'completed', 'operator', coalesce(p_reason, 'operator override'));
+  return query select v_purchase.user_id, v_balance, v_purchase.credits_granted;
+end; $$;
+revoke execute on function admin_grant_override(uuid, text) from public, anon, authenticated;
+
+-- pg_trgm index for fast substring search on email in the admin Users tab.
+create extension if not exists pg_trgm;
+create index if not exists profiles_email_trgm_idx on profiles using gin (email gin_trgm_ops);
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Migration 011 — webhook replay-protection nonce store
+-- ────────────────────────────────────────────────────────────────────────
+-- Backs the timestamp+nonce verification added to /api/_lib/webhookAuth.ts.
+-- See `supabase/migrations/011_webhook_nonces.sql` for the rationale.
+create table if not exists webhook_nonces (
+  nonce      text primary key,
+  created_at timestamp with time zone default timezone('utc', now()) not null,
+  source     text not null default 'bkash'
+);
+alter table webhook_nonces enable row level security;
+create index if not exists webhook_nonces_created_idx on webhook_nonces(created_at);
+
+create or replace function acquire_webhook_nonce(p_nonce text, p_source text default 'bkash')
+returns boolean language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  insert into webhook_nonces (nonce, source) values (p_nonce, p_source)
+    on conflict (nonce) do nothing;
+  return FOUND;
+end; $$;
+revoke execute on function acquire_webhook_nonce(text, text) from public, anon, authenticated;
+
+create or replace function prune_webhook_nonces() returns integer
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_deleted integer;
+begin
+  delete from webhook_nonces where created_at < timezone('utc', now()) - interval '10 minutes';
+  get diagnostics v_deleted = ROW_COUNT;
+  return v_deleted;
+end; $$;
+revoke execute on function prune_webhook_nonces() from public, anon, authenticated;

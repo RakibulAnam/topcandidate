@@ -79,7 +79,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Missing or invalid resume data' });
     return;
   }
+  // Server-side payload cap (M4 from the 2026-05-30 audit). Gemini's context
+  // window can handle far more, but we cap to keep AI cost bounded and to
+  // refuse pathological inputs early. 20k chars ≈ 5k tokens, far past the
+  // longest real JD we've seen in production.
+  if (data.targetJob.description.length > 20_000) {
+    console.warn(`[optimize ${rid}] 413 jd too long jdLen=${data.targetJob.description.length}`);
+    res.status(413).json({ error: 'Job description is too long (max 20,000 characters).', code: 'jd_too_long' });
+    return;
+  }
   console.info(`[optimize ${rid}] payload ok jdLen=${data.targetJob.description.length} exp=${data.experience?.length ?? 0} proj=${data.projects?.length ?? 0} skills=${data.skills?.length ?? 0}`);
+
+  // Log the attempt BEFORE we run AI (C5 from the audit). Counting only on
+  // success let a user with a valid JWT spam-fail the optimizer endlessly,
+  // burning Groq's 1,000-RPD shared quota. Logging up-front means failed
+  // attempts count toward the per-user daily cap (default 20/day). We still
+  // refund the toolkit credit on optimizer failure below.
+  await logCall(auth.userId, auth.jwt, 'optimize');
 
   // ── Credit gate ───────────────────────────────────────────────────────────
   // Atomically decrement the user's toolkit_credits balance before running AI.
@@ -180,9 +196,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     };
   }
-
-  // Log on success — only counts toward the user's daily cap if optimizer ran.
-  await logCall(auth.userId, auth.jwt, 'optimize');
 
   console.info(`[optimize ${rid}] 200 total=${Date.now() - t0}ms`);
   res.status(200).json({ optimized, toolkit });

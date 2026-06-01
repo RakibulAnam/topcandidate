@@ -23,12 +23,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .from('unmatched_inbound_sms')
     .select('id, payment_reference, sender_msisdn, amount_taka, raw_body, sms_timestamp, created_at')
     .is('matched_to_purchase_id', null)
+    .is('reviewed_at', null)
+    .not('payment_reference', 'like', 'PARSE_FAIL_%')
     .order('created_at', { ascending: false })
     .limit(200);
 
   if (error) {
     console.error('[admin/orphans] query failed:', error.message);
-    res.status(500).json({ error: 'Query failed.' });
+    res.status(500).json({ error: `Supabase: ${error.message}`, code: error.code ?? null, hint: error.hint ?? null });
     return;
   }
 

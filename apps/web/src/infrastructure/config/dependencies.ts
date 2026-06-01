@@ -19,6 +19,7 @@ import { ResumeService } from '../../application/services/ResumeService';
 import { SupabaseResumeRepository } from '../repositories/SupabaseResumeRepository';
 import { SupabaseProfileRepository } from '../repositories/SupabaseProfileRepository';
 import { SupabaseApplicationRepository } from '../repositories/SupabaseApplicationRepository';
+import { SupabasePurchaseRepository } from '../repositories/SupabasePurchaseRepository';
 
 const resumeOptimizer = new ProxyResumeOptimizer();
 const generalResumeOptimizer = new ProxyGeneralResumeOptimizer();
@@ -35,6 +36,7 @@ export const resumeExtractor = new ProxyResumeExtractor();
 // Supabase Repositories
 export const profileRepository = new SupabaseProfileRepository();
 export const applicationRepository = new SupabaseApplicationRepository();
+export const purchaseRepository = new SupabasePurchaseRepository();
 
 export const createResumeService = () => {
   return new ResumeService(

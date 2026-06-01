@@ -1,8 +1,33 @@
 // HTTP client that signs the body with HMAC-SHA256 and POSTs to the operator
 // webhook. See spec/01-server-contract.md.
+//
+// WEBHOOK PROTOCOL v2 (2026-05-31)
+// ================================
+// The server now expects two headers and a "timestamp.body" signed string:
+//
+//   X-Bkash-Webhook-Timestamp: <UTC ISO-8601 with milliseconds, e.g. 2026-05-31T14:23:09.512Z>
+//   X-Bkash-Webhook-Signature: hex(HMAC-SHA256(secret, "<timestamp>.<body>"))
+//
+// The literal ASCII period between timestamp and body is mandatory — without
+// it an attacker could swap timestamp/body chunks at the boundary while
+// keeping a valid HMAC.
+//
+// The server applies a ±5 min window to the timestamp and stores a nonce
+// derived from "<timestamp>:<body>" (colon separator there, deliberately
+// different) to detect replays. See:
+//   - docs/architecture/webhook-replay-protection.md (the why)
+//   - docs/contracts/webhook-confirm-purchase.md      (the canonical contract)
+//   - apps/web/api/_lib/webhookAuth.ts                (the server impl)
+//
+// Backward compatibility: the server still accepts the legacy v1 path (no
+// timestamp, signature over raw body only) until the operator flips
+// BKASH_WEBHOOK_REQUIRE_TIMESTAMP=true in Vercel env. We ship v2 from this
+// release; once every operator install is on v1.2.0+, the operator can
+// flip the env var to enforce v2 server-side.
 
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -58,8 +83,10 @@ class HttpWebhookClient implements WebhookClient {
     required this.secretProvider,
     http.Client? client,
     Duration timeout = const Duration(seconds: 30),
+    DateTime Function()? timestampProvider,
   }) : _client = client ?? http.Client(),
-       _timeout = timeout;
+       _timeout = timeout,
+       _timestampProvider = timestampProvider ?? DateTime.now;
 
   /// Lazy provider so a stale URL/secret in memory after settings change
   /// can't ship a wrong payload.
@@ -67,6 +94,11 @@ class HttpWebhookClient implements WebhookClient {
   final Future<String?> Function() secretProvider;
   final http.Client _client;
   final Duration _timeout;
+
+  /// Injection seam for v2 signature tests — defaults to `DateTime.now`
+  /// in production. Tests pass a fixed value so signatures are
+  /// reproducible.
+  final DateTime Function() _timestampProvider;
 
   @override
   Future<WebhookResponse> post({
@@ -167,7 +199,11 @@ class HttpWebhookClient implements WebhookClient {
     }
 
     final encoded = jsonEncode(body);
-    final signature = _sign(encoded, secret);
+    // Generate timestamp AFTER the body — keeps the signed window as
+    // small as possible (server enforces ±5 min). UTC + millisecond
+    // precision + 'Z' suffix is exactly what the server parses.
+    final timestamp = _timestampProvider().toUtc().toIso8601String();
+    final signature = _signV2(timestamp, encoded, secret);
 
     // Diagnostic only. Never log the body, signature, or secret — they
     // can contain customer MSISDN / TrxID and the HMAC reveals secret usage
@@ -175,7 +211,8 @@ class HttpWebhookClient implements WebhookClient {
     developer.log(
       'POST host=${Uri.tryParse(target)?.host ?? "?"} '
       'path=${Uri.tryParse(target)?.path ?? "?"} '
-      'bodyLen=${encoded.length} sigLen=${signature.length}',
+      'bodyLen=${encoded.length} sigLen=${signature.length} '
+      'tsLen=${timestamp.length}',
       name: 'webhook',
     );
 
@@ -185,6 +222,7 @@ class HttpWebhookClient implements WebhookClient {
             Uri.parse(target),
             headers: {
               'Content-Type': 'application/json',
+              'X-Bkash-Webhook-Timestamp': timestamp,
               'X-Bkash-Webhook-Signature': signature,
             },
             body: encoded,
@@ -226,9 +264,22 @@ class HttpWebhookClient implements WebhookClient {
     return uri.replace(path: newPath).toString();
   }
 
-  String _sign(String body, String secret) {
+  /// v2 signature: `hex(HMAC-SHA256(secret, "{timestamp}.{body}"))`.
+  /// The dot separator is part of the protocol — do not change.
+  ///
+  /// We feed three byte chunks (timestamp, period, body) sequentially into
+  /// the HMAC accumulator rather than concatenating into one String first.
+  /// For typical webhook bodies (<2 KB) the difference is negligible but
+  /// the pattern stays the same as concatenating `"$timestamp.$body"`.
+  String _signV2(String timestamp, String body, String secret) {
     final mac = Hmac(sha256, utf8.encode(secret));
-    return mac.convert(utf8.encode(body)).toString();
+    final tsBytes = utf8.encode(timestamp);
+    final bodyBytes = utf8.encode(body);
+    final buffer = Uint8List(tsBytes.length + 1 + bodyBytes.length);
+    buffer.setRange(0, tsBytes.length, tsBytes);
+    buffer[tsBytes.length] = 0x2e; // ASCII '.'
+    buffer.setRange(tsBytes.length + 1, buffer.length, bodyBytes);
+    return mac.convert(buffer).toString();
   }
 
   String _classifyError(Object e) {

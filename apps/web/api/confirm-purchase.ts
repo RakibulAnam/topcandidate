@@ -28,9 +28,10 @@
 //   client sent. This eliminates any byte-exactness drift between Flutter's
 //   `jsonEncode` and Node's `JSON.stringify` (insertion order, charset,
 //   whitespace). The Flutter watcher's audit (see
-//   `companion-app/WHAT_IT_DOES.md`) confirms it computes HMAC over the
+//   `../../apps/mobile/WHAT_IT_DOES.md`) confirms it computes HMAC over the
 //   string it then sends as the body — so verifying against the raw bytes
-//   is the only sound approach.
+//   is the only sound approach. Canonical contract:
+//   `../../docs/contracts/webhook-confirm-purchase.md`.
 // - On success we call the `confirm_purchase` RPC under the service-role
 //   key — that key bypasses RLS and is the only identity that can EXECUTE
 //   `confirm_purchase` per migration 005.
@@ -39,7 +40,12 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { createHmac, timingSafeEqual } from 'crypto';
+import {
+  readRawBody,
+  verifyWebhook,
+  webhookSecretConfigured,
+  getServiceRoleClient,
+} from './_lib/webhookAuth.js';
 
 // Vercel default behavior parses the JSON body before our handler runs,
 // which loses the original byte sequence. We need the raw bytes to verify
@@ -52,49 +58,11 @@ export const config = {
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-const BKASH_WEBHOOK_SECRET = process.env.BKASH_WEBHOOK_SECRET ?? '';
 
 interface ConfirmBody {
   transactionId?: string;
   senderMsisdn?: string | null;
   amountTaka?: number;
-}
-
-async function readRawBody(req: VercelRequest): Promise<string> {
-  // Preferred path: bodyParser was disabled (via `config` above), so the
-  // request stream is fresh and we can HMAC the exact bytes the watcher
-  // sent. This is the only way to be truly byte-exact across any future
-  // change on either end.
-  //
-  // Fallback path: in some environments (notably `vercel dev` on
-  // @vercel/node v5) the auto-parser may consume the stream before our
-  // handler runs, leaving `req.body` populated and the stream exhausted.
-  // In that case we re-serialize the parsed body. For Flutter's
-  // `jsonEncode(map)` payloads — three string/number/null fields in a
-  // fixed key order — Node's `JSON.parse → JSON.stringify` round-trip is
-  // byte-equivalent (insertion order is preserved by both ends), so the
-  // HMAC still verifies correctly. The Flutter agent's audit of
-  // `lib/dispatch/webhook_client.dart` confirms this.
-  if (typeof req.body === 'string') return req.body;
-  if (req.body && typeof req.body === 'object') return JSON.stringify(req.body);
-  const chunks: Buffer[] = [];
-  for await (const chunk of req as AsyncIterable<Buffer | string>) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-function verifySignature(rawBody: string, providedHex: string | undefined): boolean {
-  if (!providedHex || !BKASH_WEBHOOK_SECRET) return false;
-  const expected = createHmac('sha256', BKASH_WEBHOOK_SECRET).update(rawBody, 'utf8').digest();
-  let provided: Buffer;
-  try {
-    provided = Buffer.from(providedHex, 'hex');
-  } catch {
-    return false;
-  }
-  if (provided.length !== expected.length) return false;
-  return timingSafeEqual(provided, expected);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -108,17 +76,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(503).json({ error: 'Webhook is not configured on the server.' });
     return;
   }
-  if (!BKASH_WEBHOOK_SECRET) {
+  if (!webhookSecretConfigured()) {
     console.error('[confirm-purchase] BKASH_WEBHOOK_SECRET not configured');
     res.status(503).json({ error: 'Webhook is not configured on the server.' });
     return;
   }
 
   const rawBody = await readRawBody(req);
-  const sigHeader = req.headers['x-bkash-webhook-signature'];
-  const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
-
-  if (!verifySignature(rawBody, sig)) {
+  const verification = await verifyWebhook(req, rawBody, getServiceRoleClient());
+  if (!verification.ok) {
+    console.warn(`[confirm-purchase] verification failed: ${verification.reason}`);
     res.status(401).json({ error: 'Invalid or missing signature.' });
     return;
   }

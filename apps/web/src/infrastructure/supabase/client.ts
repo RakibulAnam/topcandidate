@@ -9,14 +9,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.warn('Missing Supabase environment variables. Check .env');
 }
 
-// Fallback for development to prevent crash if keys are missing
+// Fallback for development to prevent crash if keys are missing.
+// In production the warning above will fire and any network call will fail
+// loudly — we'd rather get a clear error at first request than a runtime
+// crash at import time.
 const url = supabaseUrl || 'https://placeholder.supabase.co';
 const key = supabaseAnonKey || 'placeholder';
-
-console.log('Supabase Config:', {
-    url: supabaseUrl,
-    keyLength: supabaseAnonKey?.length,
-    hasKey: !!supabaseAnonKey
-});
 
 export const supabase = createClient(url, key);

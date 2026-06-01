@@ -17,17 +17,52 @@ POST https://<operator-domain>/api/confirm-purchase
 
 The full URL is supplied by the operator at runtime via the Settings tab.
 
-## Headers
+## Headers (protocol v2 — 2026-05-31)
 
-| Header                         | Value                                                         |
-| ------------------------------ | ------------------------------------------------------------- |
-| `Content-Type`                 | `application/json`                                            |
-| `X-Bkash-Webhook-Signature`    | hex-encoded HMAC-SHA256 of the **raw request body** using the |
-|                                | operator-supplied shared secret (UTF-8 bytes of the secret).  |
+| Header                         | Value                                                                              |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
+| `Content-Type`                 | `application/json`                                                                 |
+| `X-Bkash-Webhook-Timestamp`    | UTC ISO-8601 with millisecond precision and trailing `Z` (e.g. `2026-05-31T14:23:09.512Z`). |
+| `X-Bkash-Webhook-Signature`    | hex-encoded HMAC-SHA256 of `<timestamp>.<rawBody>` — literal ASCII period between them. |
 
-The HMAC must be computed over the exact byte sequence that is sent on the
-wire, with no whitespace normalization. Use `utf8.encode(jsonString)` and
-serialize with `jsonEncode(map)`.
+### Signed string
+
+The watcher signs the byte sequence:
+
+```
+<X-Bkash-Webhook-Timestamp>  + 0x2e (ASCII '.')  + <raw request body>
+```
+
+The HMAC is computed over the EXACT bytes that ship — no whitespace
+normalization, no re-encoding. Use `utf8.encode(jsonString)` for both the
+timestamp and the body; concatenate the byte arrays (or feed them
+sequentially into the HMAC accumulator).
+
+### Replay protection (server-side)
+
+The server enforces:
+
+1. **Timestamp window**: rejects requests whose timestamp is more than
+   ±5 minutes from server time. The watcher generates timestamps with
+   `DateTime.now().toUtc().toIso8601String()` — Android keeps NTP-synced
+   clocks reliably enough that we never approach the window.
+2. **Nonce**: the server computes `sha256("<timestamp>:<rawBody>")` (note
+   the COLON, not period) and atomically inserts it into a nonce table.
+   Duplicate nonces are rejected as replays. A watcher retry of the same
+   request body with the same timestamp will fail — retries MUST generate
+   a fresh timestamp (which produces a fresh nonce).
+
+The watcher does not need to know about the nonce. Just refresh the
+timestamp on every retry.
+
+### Backward compatibility
+
+While the operator's web server is on the rollout window
+(`BKASH_WEBHOOK_REQUIRE_TIMESTAMP=false`), the server also accepts the
+legacy v1 path — a body-only HMAC without a timestamp. We ship v2 from
+v1.2.0+; once the operator flips the env var to `true`, legacy requests
+are rejected. The watcher does NOT need a legacy fallback — v2 works
+under both server configurations.
 
 ## Request body
 

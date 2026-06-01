@@ -14,9 +14,9 @@ import { createClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 import {
   readRawBody,
-  verifyBkashSignature,
+  verifyWebhook,
   webhookSecretConfigured,
-  getSignatureHeader,
+  getServiceRoleClient,
 } from '../../_lib/webhookAuth.js';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
 
@@ -35,8 +35,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const { data, error } = await supabase
       .from('unmatched_inbound_sms')
-      .select('id, payment_reference, sender_msisdn, raw_body, sms_timestamp, created_at')
+      .select('id, payment_reference, sender_msisdn, raw_body, sms_timestamp, reviewed_at, created_at')
       .like('payment_reference', 'PARSE_FAIL_%')
+      .is('reviewed_at', null)
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) {
@@ -60,7 +61,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const raw = await readRawBody(req);
-  if (!verifyBkashSignature(raw, getSignatureHeader(req))) {
+  const verification = await verifyWebhook(req, raw, getServiceRoleClient());
+  if (!verification.ok) {
+    console.warn(`[admin/parser-failures] verification failed: ${verification.reason}`);
     res.status(401).json({ error: 'Invalid or missing signature.' });
     return;
   }

@@ -55,9 +55,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     throw err;
   }
 
+  // Log up-front — failed calls count toward the daily cap (audit C5).
+  await logCall(auth.userId, auth.jwt, 'toolkit_item');
+
   try {
     const result = await runItem(kind, data);
-    await logCall(auth.userId, auth.jwt, 'toolkit_item');
     console.info(`[toolkit-item ${rid}] 200 kind=${kind} total=${Date.now() - t0}ms`);
     res.status(200).json({ result });
   } catch (err) {

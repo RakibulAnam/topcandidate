@@ -13,9 +13,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import {
   readRawBody,
-  verifyBkashSignature,
+  verifyWebhook,
   webhookSecretConfigured,
-  getSignatureHeader,
+  getServiceRoleClient,
 } from './_lib/webhookAuth.js';
 
 export const config = { api: { bodyParser: false } };
@@ -42,7 +42,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const raw = await readRawBody(req);
-  if (!verifyBkashSignature(raw, getSignatureHeader(req))) {
+  const verification = await verifyWebhook(req, raw, getServiceRoleClient());
+  if (!verification.ok) {
+    console.warn(`[orphan-inbound-sms] verification failed: ${verification.reason}`);
     res.status(401).json({ error: 'Invalid or missing signature.' });
     return;
   }

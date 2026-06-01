@@ -96,3 +96,63 @@ export function requireReason(
   }
   return reason.trim();
 }
+
+/**
+ * Surface a Supabase error to the admin client. Includes the underlying
+ * message, code, and hint so the operator can diagnose schema / RLS /
+ * migration issues without having to dig through server logs.
+ *
+ * Safe to expose: the admin key has already authenticated; nothing here
+ * leaks customer PII (Supabase error messages are about SQL state, not
+ * row contents).
+ */
+export function sendSupabaseError(
+  res: VercelResponse,
+  error: { message?: string; code?: string | null; hint?: string | null },
+  context: string,
+  status = 500
+): void {
+  console.error(`[admin/${context}] ${error.message ?? 'unknown error'}`);
+  res.status(status).json({
+    error: error.message ?? 'Database error.',
+    code: error.code ?? null,
+    hint: error.hint ?? null,
+    context,
+  });
+}
+
+/**
+ * Write an entry to admin_audit_log via record_admin_action RPC. Called
+ * AFTER the underlying action's RPC succeeds. Not in the same transaction
+ * as the action — see migration 009 header for the trade-off rationale.
+ *
+ * `before` / `after` are JSON snapshots of the affected row. For actions
+ * with no row diff (e.g. note-add), use null for both.
+ *
+ * Audit failures are logged but never break the caller — the action
+ * already succeeded. Missing audit rows surface as gaps in the audit-log
+ * tab UI, cross-checkable against purchase_state_changes for purchase rows.
+ */
+export async function recordAuditAction(
+  supabase: SupabaseClient,
+  params: {
+    action: string;
+    targetKind: 'user' | 'purchase' | 'dispute' | 'orphan_sms' | 'parser_failure' | 'system';
+    targetId: string | null;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    reason: string | null;
+  }
+): Promise<void> {
+  const { error } = await supabase.rpc('record_admin_action', {
+    p_action: params.action,
+    p_target_kind: params.targetKind,
+    p_target_id: params.targetId,
+    p_before: params.before,
+    p_after: params.after,
+    p_reason: params.reason,
+  });
+  if (error) {
+    console.error('[admin] audit write failed (action proceeded):', params.action, error.message);
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Toaster, toast } from 'sonner';
 import { ResumeData, AppStep } from '../domain/entities';
 import { BuilderScreen } from './BuilderScreen';
@@ -16,7 +16,13 @@ import { ProfileSetupScreen } from './ProfileSetupScreen';
 import { ResumeSourceDialog } from './components/ResumeSourceDialog';
 import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
-import { AdminScreen } from './admin/AdminScreen';
+import { SetNewPasswordScreen } from './SetNewPasswordScreen';
+import { TermsOfService } from './legal/TermsOfService';
+import { supabase } from '../infrastructure/supabase/client';
+
+// Admin SPA is operator-only — customers never visit /admin. Lazy-load so
+// the admin code (~100KB+ gzipped) doesn't ship with every customer page.
+const AdminScreen = lazy(() => import('./admin/AdminScreen').then(m => ({ default: m.AdminScreen })));
 
 // Path-based admin route. The admin SPA does NOT use Supabase auth — it
 // gates on ADMIN_API_KEY pasted by the operator. We intercept before any
@@ -46,8 +52,21 @@ const DEFAULT_SECTIONS = [
   'extracurriculars', 'awards', 'certifications', 'affiliations', 'publications'
 ];
 
-const UNAUTHED_SCREENS: NavScreen[] = ['LANDING', 'LOGIN'];
+const UNAUTHED_SCREENS: NavScreen[] = ['LANDING', 'LOGIN', 'LEGAL_TERMS'];
 const AUTHED_SCREENS: NavScreen[] = ['DASHBOARD', 'PROFILE', 'PROFILE_SETUP', 'BUILDER'];
+
+// Recovery hash detection. Supabase appends `#access_token=...&type=recovery`
+// when the user clicks the password-reset link in their email. We watch for
+// (a) the hash on initial load and (b) the PASSWORD_RECOVERY auth event,
+// because the GoTrue client parses the hash slightly before our App.tsx
+// effect runs.
+function hasRecoveryHash(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash) return false;
+  const params = new URLSearchParams(hash);
+  return params.get('type') === 'recovery' || params.has('error_code');
+}
 
 const AppContent = () => {
   const { user, loading } = useAuth();
@@ -64,6 +83,25 @@ const AppContent = () => {
 
   const { navState, navigate } = useBrowserNav({ screen: 'LANDING' });
   const screen = navState.screen;
+
+  // Detect Supabase recovery link click. On first paint, if the URL hash
+  // includes `type=recovery` (or an error_code), route to the reset screen.
+  // We also listen to PASSWORD_RECOVERY in case the hash is consumed by
+  // GoTrue before our effect runs.
+  const [recoveryActive, setRecoveryActive] = useState<boolean>(() => hasRecoveryHash());
+  useEffect(() => {
+    if (recoveryActive) {
+      navigate({ screen: 'RESET_PASSWORD' }, { replace: true });
+    }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecoveryActive(true);
+        navigate({ screen: 'RESET_PASSWORD' }, { replace: true });
+      }
+    });
+    return () => subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try {
@@ -152,13 +190,41 @@ const AppContent = () => {
     );
   }
 
+  // Public legal page — viewable signed-in or out.
+  if (screen === 'LEGAL_TERMS') {
+    return <TermsOfService onBack={() => window.history.length > 1 ? window.history.back() : navigate({ screen: user ? 'DASHBOARD' : 'LANDING' }, { replace: true })} />;
+  }
+
+  // Password-reset landing — handled regardless of signed-in state because
+  // Supabase puts the recovery session in localStorage but we want the
+  // dedicated "set new password" UI, not the dashboard.
+  if (screen === 'RESET_PASSWORD' || recoveryActive) {
+    return (
+      <SetNewPasswordScreen
+        onDone={() => {
+          setRecoveryActive(false);
+          // After updateUser, the session is now a normal one — AuthProvider
+          // will surface user and route us in. Send the user to dashboard
+          // (or profile-setup if they're new).
+          navigate({ screen: 'DASHBOARD' }, { replace: true });
+        }}
+        onRequestNewLink={() => {
+          setRecoveryActive(false);
+          try { window.history.replaceState(null, '', window.location.pathname); } catch { /* ignore */ }
+          navigate({ screen: 'LOGIN' }, { replace: true });
+        }}
+      />
+    );
+  }
+
   if (!user) {
     if (screen === 'LOGIN') {
-      return <LoginScreen />;
+      return <LoginScreen onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })} />;
     }
     return (
       <LandingScreen
         onGetStarted={() => navigate({ screen: 'LOGIN' })}
+        onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })}
       />
     );
   }
@@ -330,7 +396,15 @@ export default function App() {
   // get to the key-paste gate without going through Supabase login. The
   // tradeoff: no i18n + no toasts on the admin surface, which is the design.
   if (isAdminPath()) {
-    return <AdminScreen />;
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center bg-charcoal-50">
+          <Loader2 className="animate-spin text-brand-600" size={32} />
+        </div>
+      }>
+        <AdminScreen />
+      </Suspense>
+    );
   }
   return (
     <LocaleProvider>
