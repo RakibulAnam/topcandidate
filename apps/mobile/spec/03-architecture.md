@@ -37,10 +37,9 @@ with a `crash.<isolate>` tag (otherwise background-isolate errors silently
 disappear from `flutter run` console).
 
 A persistent low-priority notification is required by Android to keep the
-service alive. The notification text is "bKash watcher running".
-
-A persistent low-priority notification is required by Android to keep the
-service alive. The notification text is "bKash watcher running".
+service alive. The notification title is "bKash watcher running" with body
+"Listening for bKash SMS and confirming purchases." (channel
+`bkash_watcher_service`, foreground notification id 1001).
 
 ## Boot sequence
 
@@ -77,14 +76,18 @@ service alive. The notification text is "bKash watcher running".
 [another_telephony receiver, registered in AndroidManifest]
         ↓
 [SmsListener.onSms(SmsMessage)]
-        ↓ filter: address == 'bKash' (case-insensitive)
+        ↓ filter: address.toLowerCase() contains 'bkash' (see spec/02)
         ↓
 [BkashSms.parse(body)]
-        ↓ null? → log + drop
-        ↓ classify == refund/sent? → insert with state ignored_refund / ignored_sent, do NOT dispatch
-        ↓ classify == received? continue
+        ↓ null? → dump to /api/admin/parser-failures (no DB row) + drop
         ↓
-[ProcessedSmsDao.insertQueued(parsed, deliveryTimestamp)]
+[ProcessedSmsDao.insertParsed(parsed, deliveryTimestamp)]
+        ↓ initial state by kind (see processed_sms_dao.dart):
+        ↓   received        → queued      (will dispatch to /api/confirm-purchase)
+        ↓   refund          → reversing   (will dispatch to /api/reverse-purchase)
+        ↓   sent            → ignored_sent     (audit-only, not dispatched)
+        ↓   ibankingDeposit → ignored_ibanking (audit-only, not dispatched)
+        ↓   unknown         → failed (last_error set; should be rare — parse() usually returns null first)
         ↓ ON CONFLICT (trx_id) DO NOTHING  (dedupe)
         ↓
 [Dispatcher.kick()]   ← signal: there's work to do
@@ -93,11 +96,11 @@ service alive. The notification text is "bKash watcher running".
 ## Dispatch path
 
 ```
-[Dispatcher.kick()  OR  Workmanager periodic tick (1 min)]
+[Dispatcher.kick()  OR  Workmanager periodic tick (15 min)]
         ↓
 [Dispatcher.tick()] ← idempotent, can be called concurrently with own lock
         ↓
-[ProcessedSmsDao.dueRows(now)]  → rows where state in {queued, retrying, waiting_user}
+[ProcessedSmsDao.dueRows(now)]  → rows where state in {queued, retrying, waiting_user, reversing}
                                   AND (next_attempt_at IS NULL OR next_attempt_at <= now)
         ↓
 [for each row]
@@ -223,8 +226,10 @@ if the plugin version is bumped.
 ## Workmanager schedule
 
 - One periodic task: name `bkash-watcher-tick`, interval 15 min (the floor on
-  most OEMs). We additionally call `dispatcher.kick()` immediately whenever
-  an SMS arrives, so the periodic task is only a safety net for retries.
+  most OEMs), with a `NetworkType.connected` constraint and
+  `ExistingPeriodicWorkPolicy.keep`. We additionally call `dispatcher.kick()`
+  immediately whenever an SMS arrives, so the periodic task is only a safety
+  net for retries.
 - The periodic task simply calls `Dispatcher.tick()`. It does NOT do any
   parsing.
 - We track the `workmanager` package at `^0.9.x`. Versions ≤ 0.5.2 reference

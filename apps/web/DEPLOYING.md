@@ -22,7 +22,7 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (Settings → API → reveal)
 
 2. **Enable email/password auth**: Authentication → Providers → Email → enable.
-   For production: turn on **Confirm email** so new accounts must verify the inbox before logging in.
+   Note: the app currently ships with **email confirmation OFF** — `signUp` returns an active session immediately and the client routes straight into the app, with no "check your inbox to activate" step. If you turn **Confirm email** on for production, be aware the current UI does not yet handle the unconfirmed-account state, so test the sign-up flow before relying on it.
 
 3. **Enable `pg_cron`**: Database → Extensions → enable `pg_cron`. Needed on Vercel Hobby (no sub-daily cron support).
 
@@ -42,6 +42,7 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
    008_lock_credit_rpcs.sql
    009_admin_panel.sql
    010_align_profiles_columns.sql
+   011_webhook_nonces.sql         (webhook replay protection — nonce table + timestamp window)
    ```
 
    Re-running is safe.
@@ -80,6 +81,7 @@ Save these. The bKash secret must be set as the matching value in the Flutter wa
 | `BKASH_WEBHOOK_SECRET` | **server** | The hex string from Step 2 |
 | `ADMIN_API_KEY` | **server** | The hex string from Step 2 |
 | `CRON_SECRET` | **server** | The hex string from Step 2 |
+| `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` | **server** (optional) | Set to `'true'` to enforce webhook v2 (timestamp + nonce replay protection). Leave unset to keep accepting the legacy signature path until the Flutter watcher is upgraded. |
 
    Use Vercel's **Production / Preview / Development** dropdown to scope each variable correctly. AI keys should be set in Preview too if you smoke-test PR previews.
 
@@ -146,8 +148,8 @@ The query-string secret fallback (`?secret=...`) was removed in the 2026-05-30 a
 
 ## Post-deploy hardening checklist
 
-- [ ] Email confirmation turned on in Supabase Auth Settings
-- [ ] All migrations applied in order (especially 008, 009, 010)
+- [ ] Decide on email confirmation. The app ships with it OFF (immediate session on sign-up); only turn it on if you've tested that the UI handles the unconfirmed state.
+- [ ] All migrations applied in order (especially 008, 009, 010, 011)
 - [ ] `ADMIN_API_KEY` set in Production only (not Preview, so accidental URL shares don't leak admin access)
 - [ ] Vercel security headers in place (already in `vercel.json` since 2026-05-30: HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
 - [ ] You can reach `/admin/dashboard` with the key and see live tiles

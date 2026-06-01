@@ -1,5 +1,7 @@
 # TOP CANDIDATE — OpenRouter Migration Plan
 
+> ⚠️ **STATUS: NOT IMPLEMENTED — proposal only (as of 2026-06-01).** None of this has shipped. The live code still uses **Groq + Gemini direct**: `api/_lib/aiFactory.ts` builds only `MultiProviderResumeOptimizer` (Groq primary → Gemini fallback) plus the Gemini toolkit/extractor generators. There is **no `OpenRouterClient`, no `OPENROUTER_API_KEY`, and no OpenRouter entry in `aiFactory.ts` or `dependencies.ts`**. `@google/genai` is still a dependency. Treat everything below as a forward-looking design doc, not a description of the current system. If you came here looking for how AI calls actually work today, see `AGENTS.md` §9.
+
 > Replace the current multi-provider AI stack (Groq + Gemini direct, with separate keys and separate billing) with **a single OpenRouter key** that fronts all models — DeepSeek, Llama 3.3, Gemini Flash, anything else. Add **prompt caching** on the giant static system prompts to cut input cost ~85%.
 >
 > Total engineering time: **~3–5 days of focused work**. Risk: medium (touches every AI call path). Rollback: easy — old generators stay in git until validated.

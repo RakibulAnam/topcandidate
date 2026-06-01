@@ -9,7 +9,7 @@ topcandidate/
 ├── apps/
 │   ├── web/         — Vite + React 19 + Vercel Functions + Supabase (the customer-facing product)
 │   └── mobile/      — Flutter Android-only bKash payment-confirmation watcher (operator-side)
-├── docs/            — Product, architecture, contracts, decisions, workflows (see docs/README is implicit; start at AGENTS.md)
+├── docs/            — Product, architecture, contracts, decisions, workflows (start at AGENTS.md)
 ├── AGENTS.md        — Entry point for AI coding agents
 ├── CLAUDE.md        — Claude Code-specific rules
 └── .claude/         — Shared Claude Code project settings
@@ -19,7 +19,7 @@ The two apps are loosely coupled by a single HTTPS webhook contract — see [`do
 
 ## Quick start
 
-- **Web:** `cd apps/web && npm install && npm run dev` (Vite on `:3000`). Build: `npm run build`. See [`docs/deployment/web-vercel.md`](docs/deployment/web-vercel.md).
+- **Web:** `cd apps/web && npm install && npm run dev` (Vite dev server). Build: `npm run build`. See [`docs/deployment/web-vercel.md`](docs/deployment/web-vercel.md).
 - **Mobile:** `cd apps/mobile && flutter pub get && flutter analyze && flutter test`. Android build: `flutter build apk`. See [`docs/deployment/mobile-android.md`](docs/deployment/mobile-android.md).
 
 ## Where to look

@@ -64,7 +64,8 @@ bkash_watcher/
 ├── lib/
 │   ├── main.dart              ← app entrypoint, service bootstrap
 │   ├── app.dart               ← root MaterialApp + theme
-│   ├── theme.dart             ← monochrome palette
+│   ├── theme.dart             ← monochrome palette + state badge colors
+│   ├── diagnostics.dart       ← installCrashLogging() per-isolate (see §9.4)
 │   ├── sms/
 │   │   ├── bkash_parser.dart  ← pure parser (no Flutter deps)
 │   │   └── sms_kind.dart      ← BkashSmsKind enum
@@ -160,8 +161,11 @@ VM without Flutter. Anything that pulls a Flutter import into `sms/` or
    app is single-tenant by hardware.
 3. **Do not store the HMAC secret in source, env files, or asset bundles.**
    The Settings tab is the only entry point.
-4. **Do not invent webhook endpoints.** `POST /api/confirm-purchase` is the
-   only call. The full contract is in `spec/01-server-contract.md`.
+4. **Do not invent webhook endpoints.** The watcher POSTs to exactly four:
+   `POST /api/confirm-purchase` (the configured URL) plus three siblings
+   derived by path-rewrite — `/api/orphan-inbound-sms`,
+   `/api/reverse-purchase`, `/api/admin/parser-failures`. The full contract
+   is in `spec/01-server-contract.md`. Don't add more.
 5. **Do not change the retry schedule without updating
    `spec/04-state-machine.md` first.** The backoff sequence is a contract
    with the operator's expectations.

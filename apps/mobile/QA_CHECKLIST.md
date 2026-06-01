@@ -773,4 +773,4 @@ Send the report to the developer along with any other context.
 
 ---
 
-Last reviewed: 2026-05-25. App version under test: **1.1.0+2**.
+Last reviewed: 2026-05-25. App version under test: **1.2.0+3**.

@@ -21,10 +21,12 @@ endpoint. See `WHAT_IT_DOES.md` for the wire contract.
 1. Foreground service listens for SMS where sender = `bKash`.
 2. Parses the body → extracts `TrxID`, `amountTaka`, `senderMsisdn`.
 3. POSTs `{transactionId, senderMsisdn, amountTaka}` to your webhook with
-   an `X-Bkash-Webhook-Signature` HMAC-SHA256 header.
+   `X-Bkash-Webhook-Timestamp` and `X-Bkash-Webhook-Signature` headers
+   (HMAC-SHA256 over `"<timestamp>.<body>"`, protocol v2).
 4. Retries on transient failures with exponential backoff, holds 404s for
-   24 h (in case the customer hasn't pasted their TrxID yet), and gives up
-   on 400/401/409/503.
+   24 h (in case the customer hasn't pasted their TrxID yet), fails on
+   400/401/503, and marks 409 (`msisdn_mismatch` / `underpaid`) as
+   `MISMATCH` for manual review.
 
 Full architecture in [`spec/03-architecture.md`](spec/03-architecture.md);
 full state machine in [`spec/04-state-machine.md`](spec/04-state-machine.md).
@@ -61,7 +63,7 @@ flutter run -d <your-android-device-id>
    - Enter your **Webhook URL** in the form
      `https://your-domain.example/api/confirm-purchase`.
    - Tap **Save URL**.
-   - Enter your **HMAC secret** (the same secret your web app expects in
+   - Enter your **HMAC secret** (the same secret your web app uses to verify
      the `X-Bkash-Webhook-Signature` HMAC). Tap **Save secret**.
    - Tap **Test webhook**. Green box → you're good. Red → see the message.
 3. Tap **Open settings** next to "Battery optimization disabled" and grant
@@ -94,9 +96,10 @@ Samsung froze the app; revisit step 4.
 | `DONE`     | Webhook returned 200. Credits granted. Terminal.                        |
 | `RETRYING` | Transient error (network or 5xx). Will retry with exponential backoff.  |
 | `WAITING`  | The web app says "I haven't seen this TrxID yet". Retry every 5 min.    |
+| `REVERSING`| Reversal SMS being POSTed to `/api/reverse-purchase`. Settles to `REFUND`.|
 | `FAILED`   | Hard failure (bad signature, server misconfig, gave up after 24 h).     |
 | `MISMATCH` | Customer claimed a different sender phone than the SMS. Manual review. |
-| `REFUND`   | Reversal SMS. Not POSTed. Stored for audit.                             |
+| `REFUND`   | Reversal SMS, settled (POSTed to `/api/reverse-purchase` then terminal). |
 | `SENT`     | Outbound payment ("Payment of Tk … to …"). Not POSTed. Audit-only.      |
 | `IBANKING` | Your own bank→wallet deposit. Not POSTed. Audit-only.                   |
 
@@ -124,7 +127,7 @@ loggers: `webhook`, `dispatcher`, `sms_listener`, `bg_service`.
 
 ## Spec / architecture
 
-See [`spec/`](spec/) — eight Markdown files, ~30 minutes to read. Start
+See [`spec/`](spec/) — ten Markdown files, ~30 minutes to read. Start
 with `spec/00-overview.md`.
 
 | File                                                 | Topic                            |

@@ -184,7 +184,7 @@ The Flutter watcher app is documented in `apps/mobile/AGENTS.md` and `apps/mobil
 Before exposing the purchase flow to real customers:
 
 - [ ] `ADMIN_API_KEY`, `CRON_SECRET`, `BKASH_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` all set in Vercel Production.
-- [ ] Apply migrations 001 through 009 in the Supabase SQL editor.
+- [ ] Apply migrations 001 through 011 in the Supabase SQL editor (010 backfills `profiles.created_at`/`updated_at` for the Users tab; 011 adds webhook replay protection).
 - [ ] Apply `007_optional_pg_cron.sql` in Supabase (required for the pending-expiry cron — Vercel Hobby can't run it).
 - [ ] Send yourself a small bKash payment end-to-end and watch the customer-side VerifyingPurchasePill complete.
 - [ ] Walk through the verification checklist above. Confirm the audit log captures every action.

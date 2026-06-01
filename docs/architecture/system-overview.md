@@ -15,7 +15,7 @@
                            │
                   Supabase Postgres
                   (auth, profiles, resumes,
-                   pending_purchase, ai_call_log)
+                   purchases, ai_call_log)
                            ▲
                            │  /api/confirm-purchase  (HMAC-SHA256)
                            │
@@ -35,14 +35,14 @@
 
 ## The only cross-app coupling
 
-The single webhook described in [`docs/contracts/webhook-confirm-purchase.md`](../contracts/webhook-confirm-purchase.md). Everything else is independent.
+The HMAC-signed webhook contract described in [`docs/contracts/webhook-confirm-purchase.md`](../contracts/webhook-confirm-purchase.md). The watcher calls four endpoints signed with the same `BKASH_WEBHOOK_SECRET` — `confirm-purchase`, `orphan-inbound-sms`, `reverse-purchase`, and `admin/parser-failures` (POST) — but `confirm-purchase` is the core of it. Everything else is independent.
 
 ## Trust boundaries
 
 - Browser ↔ Vercel: HTTPS, Supabase JWT bearer.
 - Vercel ↔ Supabase: service-role key, server-only.
 - Vercel ↔ Groq/Gemini: API keys, server-only.
-- Mobile ↔ Vercel: HTTPS + HMAC-SHA256 over raw request body.
+- Mobile ↔ Vercel: HTTPS + HMAC-SHA256. v2 protocol signs `<timestamp>.<body>` with a ±5 min window and a one-time nonce (replay protection); a legacy body-only path remains until `BKASH_WEBHOOK_REQUIRE_TIMESTAMP=true` is set.
 - Mobile ↔ Android SMS subsystem: Android permissions (`RECEIVE_SMS`, `READ_SMS`).
 
 ## Where each concern is documented

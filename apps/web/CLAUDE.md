@@ -19,12 +19,12 @@
 
 7. **`Preview.tsx` numeric sizes are in pt** and must match `PdfResumeExporter` exactly, so what the user sees on screen is what they download. Don't switch to px inside the resume render.
 
-8. **No test harness.** This repo has no `npm test`. Don't add one unsolicited. Verification = `npm run build` (tsc is part of Vite) + manual browser pass.
+8. **No test harness.** This repo has no `npm test`. Don't add one unsolicited. Verification = `npm run build` (just `vite build` — it transpiles TS but does **not** type-check) + manual browser pass.
 
 9. **Run a "mobile impact check" before declaring any non-trivial change done.** The mobile bKash watcher (`apps/mobile/`) is loosely coupled to the web app but cares about a narrow set of web surfaces. Before saying you're done, verify whether the change touches any of:
 
    - **The webhook handler** `api/confirm-purchase.ts` — payload schema, response codes (200 / 400 / 401 / 404 / 409 / 503 / 5xx), HMAC behavior, idempotency. Canonical contract: [`../../docs/contracts/webhook-confirm-purchase.md`](../../docs/contracts/webhook-confirm-purchase.md).
-   - **The `pending_purchase` table and rows the web creates** (`api/purchase.ts`, related Supabase columns / RLS, the `trx_id` lookup). Mobile expects to find these rows when it POSTs; schema changes that affect lookup or column names break the watcher.
+   - **The `purchases` table and rows the web creates** (`api/purchase.ts`, related Supabase columns / RLS, the `payment_reference` [bKash TrxID] lookup). Mobile expects to find these rows when it POSTs; schema changes that affect lookup or column names break the watcher.
    - **The shared `BKASH_WEBHOOK_SECRET`** env var — rotation requires coordinating with the operator's phone settings (see [`../../docs/contracts/webhook-confirm-purchase.md`](../../docs/contracts/webhook-confirm-purchase.md) for the rotation procedure).
    - **Customer-facing purchase status UI states** (waiting / confirming / confirmed / expired / mismatch). Mobile's `apps/mobile/WHAT_IT_DOES.md` §6 documents the expected user-visible flow.
 
@@ -38,7 +38,7 @@
 ## Verification commands
 
 ```bash
-npm run build          # tsc + vite build — must pass clean
+npm run build          # vite build — must pass clean (transpiles TS, does NOT type-check)
 
 # Smoke-test that the server-only API code path imports cleanly. `vite build`
 # only bundles client code and tree-shakes server-only files (api/_lib/aiFactory

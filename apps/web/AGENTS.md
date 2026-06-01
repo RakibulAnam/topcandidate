@@ -88,7 +88,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | General Resume (profile-based, 24h regen cooldown) | `ResumeService.generateGeneralResume()` | shipped |
 | Export (Word + PDF) for resume & cover letter | `src/infrastructure/export/` | shipped |
 | Resume extract (from uploaded PDF/Word) | `src/infrastructure/ai/GeminiResumeExtractor.ts` | shipped |
-| **Toolkit credits + mock purchase** — paid tier gating tailored generations | `profiles.toolkit_credits`, `api/optimize.ts` (gate), `api/purchase.ts` (mock), `PurchaseModal.tsx` | shipped (mock) — replace `api/purchase.ts` with a real payment-gateway webhook before launch |
+| **Toolkit credits + bKash purchase** — paid tier gating tailored generations | `profiles.toolkit_credits`, `api/optimize.ts` (gate), `api/purchase.ts` (records a real pending row via `initiate_purchase`), `PurchaseModal.tsx` | shipped — `api/purchase.ts` inserts a real `pending` purchase; credits are granted out-of-band by the HMAC `confirm-purchase` webhook, not here |
 | **Transaction state machine** — observable states for every bKash purchase outcome | `purchases.status`, migration 007, `confirm_purchase` v2 | shipped — `pending`/`completed`/`underpaid`/`msisdn_mismatch_review`/`expired`/`refunded`/`failed` |
 | **Customer purchase status pill** — navbar widget polling `/api/my-purchase-status` after submit | `VerifyingPurchasePill.tsx`, `purchaseStatusClient.ts` | shipped |
 | **Purchase history (customer)** — read-only table on Dashboard | `PurchaseHistorySection.tsx` | shipped |
@@ -147,7 +147,9 @@ Four layers, dependencies flow inward.
  │  api/toolkit-item      — single-item regenerate (free —   │
  │                          retry of an already-paid gen)    │
  │  api/extract-resume    — PDF/Word extract                 │
- │  api/purchase          — mock purchase (grants credits)   │
+ │  api/purchase          — records a real 'pending' bKash    │
+ │                          purchase (initiate_purchase RPC); │
+ │                          grants NO credits (webhook does)  │
  │  api/_lib/auth         — Supabase JWT verifier            │
  │  api/_lib/rateLimit    — daily cap (ai_call_log)          │
  │  api/_lib/aiFactory    — constructs:                      │
@@ -305,7 +307,7 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
  DashboardScreen ──► "New Application" ──► ResumeSourceDialog
                                           ├── "Use my profile" ──► prefill ResumeData from profileRepository
                                           └── "Start fresh"    ──► empty ResumeData
-                  ──► (credits bar above the action cards) ──► PurchaseModal (mock checkout) ──► /api/purchase
+                  ──► (credits bar above the action cards) ──► PurchaseModal (bKash checkout) ──► /api/purchase (records pending)
 
  BuilderScreen (multi-step form, driven by AppStep + getVisibleSteps())
    ── USER_TYPE  ── SECTIONS   ── TARGET_JOB    ── PERSONAL_INFO
@@ -366,7 +368,7 @@ src/presentation/components/Preview.tsx Resume/CL render + toolkit tabs sidebar
 src/presentation/components/Builder/ToolkitViewers.tsx
                                         Outreach email, LinkedIn note, Interview prep (copy-to-clipboard)
 src/presentation/components/FormSteps.tsx  All step forms (TargetJob, Experience, Projects, etc.)
-src/presentation/components/PurchaseModal.tsx  Mock checkout for the toolkit-credits pack (shared by Dashboard + Builder)
+src/presentation/components/PurchaseModal.tsx  bKash checkout for the toolkit-credits pack (shared by Dashboard + Builder)
 src/presentation/templates/TemplateRegistry.ts  4 ATS-safe template definitions (all single-column)
 
 src/application/services/ResumeService.ts   Orchestrator — call this from presentation
@@ -478,7 +480,7 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
   - `data jsonb` — `ResumeData` minus toolkit
   - `toolkit jsonb` — `JobToolkit` (outreach email / LinkedIn note / interview questions)
   - `company text GENERATED ALWAYS AS ((data -> 'targetJob' ->> 'company')) STORED` — extracted for efficient dashboard search (added migration 006)
-- `purchases` — audit trail for the monetization flow. One row per purchase event (`credits_granted`, `amount_taka`, `payment_reference`, `status`). RLS allows users to SELECT their own; INSERT only via the `process_mock_purchase` RPC (no direct INSERT policy).
+- `purchases` — audit trail for the monetization flow. One row per purchase event (`credits_granted`, `amount_taka`, `payment_reference` [bKash TrxID, UNIQUE], `status`). Status enum: `pending` / `completed` / `failed` / `expired` / `underpaid` / `msisdn_mismatch_review` / `refunded`. RLS allows users to SELECT their own; there is no direct INSERT policy — rows are created only via the `initiate_purchase` RPC (the older `process_mock_purchase` RPC was dropped in migration 005).
 - `ai_call_log` — per-user daily-cap audit trail (existing).
 - `admin_audit_log` (migration 009) — append-only operator action log. Layered alongside `purchase_state_changes`: that table tracks purchase-row transitions only (and is written by Flutter + customer paths too); `admin_audit_log` covers every operator action on ANY target (user, purchase, dispute, orphan SMS, parser failure, system) with `before_state` / `after_state` JSON snapshots + reason. Written by the shared `recordAuditAction()` helper after each admin endpoint's underlying RPC succeeds. Not in the same transaction as the action — see migration 009 header for trade-off.
 - `profile_notes` (migration 009) — operator-private free-text notes on customer profiles. Append-only. Service-role only.
@@ -503,6 +505,7 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 - `supabase/migrations/008_lock_credit_rpcs.sql` — closes the `refund_toolkit_credit` self-grant exploit. Drops the 0-arg `consume/refund_toolkit_credit()` and replaces with `(p_user_id uuid)` versions that are service-role only. `/api/optimize.ts` updated to call them via `SUPABASE_SERVICE_ROLE_KEY`.
 - `supabase/migrations/009_admin_panel.sql` — adds the full admin panel surface: `admin_audit_log` + `profile_notes` tables; `profiles.flagged_at` and `unmatched_inbound_sms.reviewed_at` columns; `record_admin_action()` shared audit RPC; operator-only credit RPCs (`admin_grant_credits` / `admin_deduct_credits`, deduct allows negative balance); operator-only purchase RPCs (`admin_expire_purchase` / `admin_reopen_purchase` / `admin_grant_override`); pg_trgm GIN index on `profiles.email` for the Users tab substring search.
 - `supabase/migrations/010_align_profiles_columns.sql` — schema-drift catch-up. `schema.sql` declared `profiles.created_at` and `profiles.updated_at` from day one but no prior migration ever added them, so databases provisioned from an early `schema.sql` revision were missing both. The admin Users tab orders by `created_at`, which is where the drift surfaced. Adds both columns idempotently and backfills `created_at` from `auth.users.created_at` so existing rows have a meaningful signup timestamp.
+- `supabase/migrations/011_webhook_nonces.sql` — webhook replay protection (protocol v2). Adds the `webhook_nonces` table; combined with a timestamp ±5min window enforced in `api/_lib/webhookAuth.ts`, this stops a captured HMAC-signed webhook body from being replayed. Enforced when `BKASH_WEBHOOK_REQUIRE_TIMESTAMP=true`; the legacy (no-timestamp) signature path still works until the watcher is upgraded.
 
 **Running migrations**: open the Supabase SQL editor and paste the migration file contents. All migrations are idempotent (`add column if not exists`, `create index if not exists`, `create or replace function`).
 
@@ -644,17 +647,20 @@ GEMINI_API_KEY           # https://aistudio.google.com/app/apikey  (20 RPD free)
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
 
-# Supabase service role — server-only. Bypasses RLS. Used ONLY by the
-# /api/confirm-purchase webhook (which is HMAC-gated by the Flutter app).
+# Supabase service role — server-only. Bypasses RLS. Used by the HMAC
+# webhooks (/api/confirm-purchase, /api/orphan-inbound-sms,
+# /api/reverse-purchase), /api/cron/expire-pending, /api/optimize (the
+# service-role-only credit RPCs from migration 008), and the /api/admin/* dispatcher.
 SUPABASE_SERVICE_ROLE_KEY
 
 # bKash purchase flow (no traditional payment gateway)
-VITE_BKASH_PAYMENT_NUMBER  # owner's bKash number, shown to users in PurchaseModal
-BKASH_WEBHOOK_SECRET       # 32-byte hex secret shared with the Flutter SMS-watcher
+VITE_BKASH_PAYMENT_NUMBER          # owner's bKash number, shown to users in PurchaseModal
+BKASH_WEBHOOK_SECRET               # 32-byte hex secret shared with the Flutter SMS-watcher
+BKASH_WEBHOOK_REQUIRE_TIMESTAMP    # optional; 'true' enforces webhook v2 (timestamp + nonce replay protection, migration 011)
 
 # Admin SPA + cron (server-only)
 ADMIN_API_KEY              # 32-byte hex; gates X-Admin-Key on /api/admin/* and the /admin SPA
-CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pending (Vercel Cron sends it)
+CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pending. NOTE: vercel.json has no `crons` block, so Vercel does not call this automatically — see §13 (pg_cron is the default path)
 ```
 
 **Vercel deployment notes:**

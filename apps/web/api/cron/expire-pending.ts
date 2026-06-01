@@ -9,9 +9,10 @@
 // leak via browser history, referer headers, and server access logs, so the
 // `?secret=` fallback was removed (2026-05-30 audit, C4).
 //
-// Cadence: every 15 min in vercel.json. Operators on Hobby (1/day max for
-// Vercel Cron) can run this via pg_cron instead — see
-// supabase/migrations/007_optional_pg_cron.sql.
+// Cadence: NOT scheduled by Vercel in this repo — vercel.json has no `crons`
+// block. Run on a schedule via Supabase pg_cron (supabase/migrations/
+// 007_optional_pg_cron.sql) or trigger manually from the admin Settings tab.
+// To use Vercel Cron, add a `crons` entry to vercel.json (Hobby allows 1/day).
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';

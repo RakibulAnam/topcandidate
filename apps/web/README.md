@@ -28,10 +28,11 @@ See [`.env.example`](./.env.example) for the full annotated list. In short:
 |---|---|
 | `GROQ_API_KEY` | Primary resume optimizer. Free at https://console.groq.com/keys (1,000 RPD). |
 | `GEMINI_API_KEY` | Fallback optimizer + all toolkit generators (cover letter, outreach, LinkedIn, interview prep, resume extractor). Free at https://aistudio.google.com/app/apikey (20 RPD). |
-| `SUPABASE_SERVICE_ROLE_KEY` | Bypasses RLS. Used only by `/api/confirm-purchase`, `/api/cron/expire-pending`, and the admin dispatcher. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Bypasses RLS. Used server-side by the HMAC webhooks (`/api/confirm-purchase`, `/api/orphan-inbound-sms`, `/api/reverse-purchase`), `/api/cron/expire-pending`, `/api/optimize` (the service-role-only credit RPCs from migration 008), and the admin dispatcher. |
 | `BKASH_WEBHOOK_SECRET` | HMAC-SHA256 secret shared with the Flutter SMS-watcher in `apps/mobile/`. Generate with `openssl rand -hex 32`. |
+| `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` | Optional. Set to `'true'` to enforce webhook protocol v2 (timestamp ±5min window + nonce replay protection, migration 011). Default (unset) accepts the legacy unsigned-timestamp path. |
 | `ADMIN_API_KEY` | Gates `/admin` and `/api/admin/*`. Generate with `openssl rand -hex 32`. |
-| `CRON_SECRET` | Bearer auth on `/api/cron/expire-pending`. Vercel Cron sends this automatically when configured. Generate with `openssl rand -hex 32`. |
+| `CRON_SECRET` | Bearer auth on `/api/cron/expire-pending`. Note: `vercel.json` has no `crons` block, so Vercel does NOT schedule this automatically — the expiry runs via Supabase pg_cron (migration `007_optional_pg_cron.sql`) or the admin Settings button. Generate with `openssl rand -hex 32`. |
 
 ### Client-visible (`VITE_`-prefixed — bundled into the browser)
 
@@ -59,6 +60,7 @@ At time of writing, the full set is:
 - `008_lock_credit_rpcs.sql`
 - `009_admin_panel.sql`
 - `010_align_profiles_columns.sql`
+- `011_webhook_nonces.sql` *(replay protection for the HMAC webhooks — nonce table + timestamp window)*
 
 See [`DEPLOYING.md`](./DEPLOYING.md) for the full first-deploy walk-through.
 
@@ -89,7 +91,7 @@ There is no automated test suite. Verification = the two commands above + a manu
 ```
 apps/web/
 ├── api/                    Vercel Functions (server)
-│   ├── admin/[action].ts   Admin dispatcher — single function, ~28 sub-handlers
+│   ├── admin/[action].ts   Admin dispatcher — single function, ~26 sub-handlers
 │   ├── confirm-purchase.ts bKash webhook (HMAC-gated)
 │   ├── optimize.ts         Paid hot-path (optimizer + combined toolkit)
 │   ├── optimize-general.ts Free path (optimizer only)
