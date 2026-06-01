@@ -237,8 +237,13 @@ operator request:
   (MIUI, ColorOS, Samsung One UI). We schedule at 15 min as a backstop only —
   `backgroundMessageHandler` now dispatches immediately after inserting the SMS
   (builds a `Dispatcher` and runs `tick()`), so a backgrounded SMS no longer
-  waits up to 15 min for the periodic tick. The 15-min Workmanager tick remains
-  as the safety net for retries.
+  waits up to 15 min for the periodic tick. Additionally, the **service isolate
+  runs a 15s `Timer.periodic` `dispatcher.tick()`**, so a row with a future
+  `next_attempt_at` (a `waiting_user` 404 that will later get `200
+  alreadyConfirmed`, or a transient retry) resolves within ~15s while the
+  service is alive — previously such a row could sit until the next SMS, an app
+  reopen, or the 15-min tick. The 15-min Workmanager tick is now only the
+  backstop for when the service has been killed.
 - `waiting_user` (HTTP 404) retries now follow an escalating backoff
   (`waitingUserBackoff(attempt)`: 20s, 40s, 1m, 2m for attempts 4-6, 5m for 7+),
   not the old fixed 5-min interval. `kWaitingUserMaxAttempts` (288) and the 24h
