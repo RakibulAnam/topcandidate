@@ -126,16 +126,26 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     if (busy || !txnIsValid) return;
     setPhase('submitting');
     try {
-      await purchasePackage({
+      const result = await purchasePackage({
         packageId: PACKAGE_ID,
         transactionId: trimmedTxn,
         senderMsisdn: senderMsisdn.trim() || undefined,
       });
 
-      // Hand off to the navbar VerifyingPurchasePill, which polls
-      // /api/my-purchase-status and surfaces the right action card per
-      // observed status (verifying / underpaid / mismatch / expired /
-      // completed). Survives navigation.
+      // Match-on-submit (migration 012): if the verified bKash SMS already
+      // arrived, the server settled the purchase synchronously. Show the
+      // confirmed overlay immediately instead of handing off to the pill.
+      if (result.status === 'completed') {
+        setPhase('confirmed');
+        toast.success(t('purchaseModal.successToast'));
+        // Hold the green check briefly, then refresh credits + close.
+        setTimeout(() => finishAndClose(), 1800);
+        return;
+      }
+
+      // Otherwise hand off to the navbar VerifyingPurchasePill, which subscribes
+      // to Supabase Realtime and surfaces the right action card per observed
+      // status (verifying / underpaid / mismatch / expired / completed).
       writePendingPurchase({ txnId: trimmedTxn, submittedAt: Date.now() });
 
       toast.success(t('purchaseModal.successToast'));

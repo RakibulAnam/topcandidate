@@ -15,7 +15,7 @@
 // the standard brand palette.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, X } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   clearPendingPurchase,
@@ -23,23 +23,29 @@ import {
   filePurchaseDispute,
   PENDING_PURCHASE_EVENT,
   readPendingPurchase,
+  subscribeToPurchase,
   type PendingPurchaseRecord,
   type PurchaseStatus,
   type PurchaseStatusResponse,
 } from '../../../infrastructure/api/purchaseStatusClient';
 import { useT } from '../../i18n/LocaleContext';
 
-const POLL_INTERVAL_MS = 10_000;
-const POLL_LIMIT_MS = 5 * 60 * 1000;
+// Slow fallback poll for the rare case the realtime socket drops. The primary
+// update path is the Supabase Realtime subscription (sub-second). No time cap —
+// the pill resolves whenever the grant lands.
+const FALLBACK_POLL_MS = 20_000;
 const TERMINAL: PurchaseStatus[] = ['completed', 'underpaid', 'msisdn_mismatch_review', 'expired', 'refunded', 'failed'];
 
 interface Props {
   /** Called when the customer clicks "Resubmit" on an expired pill so the
    *  shell can open PurchaseModal again. */
   onResubmit?: () => void;
+  /** Called once when the tracked purchase reaches 'completed' so the host can
+   *  refresh the credits badge without a page reload. */
+  onCredited?: () => void;
 }
 
-export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
+export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited }) => {
   const t = useT();
   const [pending, setPending] = useState<PendingPurchaseRecord | null>(() => readPendingPurchase());
   const [statusResp, setStatusResp] = useState<PurchaseStatusResponse | null>(null);
@@ -47,6 +53,11 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [confirmDismiss, setConfirmDismiss] = useState(false);
   const stopRef = useRef(false);
+  const creditedRef = useRef(false);
+  // Keep the latest onCredited without making it an effect dependency — hosts
+  // pass an inline arrow whose identity changes every render.
+  const onCreditedRef = useRef(onCredited);
+  onCreditedRef.current = onCredited;
 
   // Re-read when the modal writes / clears the key.
   useEffect(() => {
@@ -55,51 +66,54 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
     return () => window.removeEventListener(PENDING_PURCHASE_EVENT, onChange);
   }, []);
 
-  // Reset poll state whenever the underlying pending purchase changes.
+  // Reset tracking whenever the underlying pending purchase changes.
   useEffect(() => {
     stopRef.current = false;
+    creditedRef.current = false;
     setStatusResp(null);
     setExpanded(false);
     setConfirmDismiss(false);
   }, [pending?.txnId]);
 
-  // Poll loop.
+  // Push-based status tracking: an initial fetch (covers match-on-submit having
+  // already completed the purchase before this mounts), a Supabase Realtime
+  // subscription for sub-second updates, and a slow fallback poll for a dropped
+  // socket. No time cap — resolves whenever the grant lands.
   useEffect(() => {
     if (!pending) return;
-    const startedAt = pending.submittedAt;
+    let active = true;
 
-    const tick = async () => {
-      if (stopRef.current) return;
-      // ALWAYS do at least one poll regardless of age — covers the case
-      // where the localStorage entry is older than POLL_LIMIT_MS (page
-      // reloaded long after submit, admin-confirmed out of band, etc.).
-      // The age check only gates whether to keep polling after.
+    const refresh = async () => {
+      if (!active || stopRef.current) return;
       try {
         const s = await fetchPurchaseStatus(pending.txnId);
+        if (!active) return;
         setStatusResp(s);
         if (TERMINAL.includes(s.status)) {
           stopRef.current = true;
-          if (s.status === 'completed') {
-            // Auto-dismiss the pill 4s after a successful credit grant.
-            setTimeout(() => clearPendingPurchase(), 4000);
+          if (s.status === 'completed' && !creditedRef.current) {
+            creditedRef.current = true;
+            onCreditedRef.current?.();
+            // Auto-dismiss the pill shortly after a successful credit grant.
+            setTimeout(() => { if (active) clearPendingPurchase(); }, 4000);
           }
-          return;
         }
       } catch {
-        // Quiet — transient 404s are expected while the watcher is in flight.
-      }
-      // Non-terminal status. Stop polling if we've exceeded the active
-      // window — the pill stays visible with the help text and the user
-      // can file a dispute or just check Purchase history below.
-      if (Date.now() - startedAt > POLL_LIMIT_MS) {
-        stopRef.current = true;
+        // Transient 404 while the watcher is in flight — the next realtime
+        // event or fallback poll will pick it up.
       }
     };
 
-    void tick();
-    const id = setInterval(() => { void tick(); }, POLL_INTERVAL_MS);
-    return () => { clearInterval(id); stopRef.current = true; };
-  }, [pending?.txnId, pending?.submittedAt]);
+    void refresh();
+    const unsubscribe = subscribeToPurchase(pending.txnId, () => { void refresh(); });
+    const fallback = setInterval(() => { void refresh(); }, FALLBACK_POLL_MS);
+
+    return () => {
+      active = false;
+      unsubscribe();
+      clearInterval(fallback);
+    };
+  }, [pending?.txnId]);
 
   if (!pending) return null;
 
@@ -173,6 +187,8 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit }) => {
           <div className="mt-3 text-[13.5px] text-brand-700 leading-snug">
             {statusResp?.message ?? t('verifyPill.pendingDetail')}
           </div>
+
+          <PurchaseTimeline status={status} />
 
           <ActionCard
             status={status}
@@ -280,6 +296,54 @@ const STATUS_VISUALS: Record<PurchaseStatus, Visual> = {
     chipClass: 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100',
     label: (t) => t('verifyPill.failedChip'),
   },
+};
+
+// Compact vertical stepper: Submitted → Verifying → Done/Needs attention.
+// Brand palette only (emerald = done, saffron accent = active, red = error).
+type StepState = 'done' | 'active' | 'error' | 'idle';
+
+const PurchaseTimeline: React.FC<{ status: PurchaseStatus }> = ({ status }) => {
+  const t = useT();
+  const isTerminal = TERMINAL.includes(status);
+  const ok = status === 'completed';
+
+  const steps: { label: string; state: StepState }[] = [
+    { label: t('verifyPill.timelineSubmitted'), state: 'done' },
+    { label: t('verifyPill.timelineVerifying'), state: isTerminal ? 'done' : 'active' },
+    {
+      label: ok ? t('verifyPill.timelineDone') : isTerminal ? t('verifyPill.timelineActionNeeded') : t('verifyPill.timelineDone'),
+      state: ok ? 'done' : isTerminal ? 'error' : 'idle',
+    },
+  ];
+
+  const dotBg = (s: StepState) =>
+    s === 'done' ? 'bg-emerald-500'
+    : s === 'active' ? 'bg-accent-500'
+    : s === 'error' ? 'bg-red-500'
+    : 'bg-charcoal-200';
+
+  return (
+    <ol className="mt-3 space-y-1.5">
+      {steps.map((s, i) => (
+        <li key={i} className="flex items-center gap-2">
+          <span className={['inline-flex items-center justify-center w-4 h-4 rounded-full shrink-0', dotBg(s.state)].join(' ')}>
+            {s.state === 'done' && <Check size={10} strokeWidth={3} className="text-white" />}
+            {s.state === 'active' && <Loader2 size={10} className="animate-spin text-white" />}
+            {s.state === 'error' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+          </span>
+          <span
+            className={[
+              'text-[12px]',
+              s.state === 'idle' ? 'text-charcoal-400' : 'text-brand-700',
+              s.state === 'active' ? 'font-semibold' : '',
+            ].join(' ')}
+          >
+            {s.label}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
 };
 
 interface ActionCardProps {

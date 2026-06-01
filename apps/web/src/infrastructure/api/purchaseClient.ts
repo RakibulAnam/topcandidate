@@ -13,10 +13,21 @@ import { ApiCallError } from '../ai/proxy/ProxyClients';
 
 export type PackageId = 'five-pack';
 
+// initiate_purchase v3 (migration 012) may settle the purchase on submit when
+// the verified bKash SMS already arrived (match-on-submit), so the status can
+// come back already-resolved rather than always 'pending'.
+export type PurchaseSubmitStatus =
+  | 'pending'
+  | 'completed'
+  | 'underpaid'
+  | 'msisdn_mismatch_review';
+
 export interface PurchaseResult {
   success: true;
   purchaseId: string;
-  status: 'pending';
+  status: PurchaseSubmitStatus;
+  creditsGranted: number | null;
+  newBalance: number | null;
   message: string;
 }
 

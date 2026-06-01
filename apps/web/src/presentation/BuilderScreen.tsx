@@ -865,6 +865,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         showExitBuilder={true}
         credits={credits}
         onBuyCredits={() => setPurchaseModalOpen(true)}
+        onCredited={handlePurchaseSuccess}
       />
       <BuilderStepper
         steps={visibleSteps}

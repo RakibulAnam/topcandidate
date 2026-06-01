@@ -14,8 +14,9 @@
 
 - HMAC secret stored in **`flutter_secure_storage`** only. On Android this
   uses EncryptedSharedPreferences which is backed by Android Keystore.
-- Never logged. The dispatcher's logging code redacts the `Authorization`
-  and `X-Bkash-Webhook-Signature` headers.
+- Never logged. The webhook client logs only the target host/path, body
+  length, and signature/timestamp lengths — never the body, the
+  `X-Bkash-Webhook-Signature` value, or the secret.
 - Never written to plain SharedPreferences, asset bundles, or environment
   variables in source.
 - Settings UI displays "•••••••• (saved)" after first save; the secret is
@@ -40,9 +41,11 @@
 
 ### Lock screen
 
-- v1 has an optional biometric/PIN gate on app open (see UI spec §3, item 6).
-  When enabled, the History tab's customer phone numbers are protected from
-  shoulder-surfers.
+- A biometric/PIN gate on app open is a **reserved hook, not a shipped
+  feature** (see UI spec §3, item 6). `SettingsRepository` holds the
+  `bkash_biometric_lock` flag, but no UI toggle, no launch-time prompt, and
+  no biometric plugin exist today. The History tab's customer phone numbers
+  are therefore not protected by an in-app lock; rely on the device lock.
 - The foreground service notification shows only "bKash watcher running",
   never customer phone numbers or amounts.
 

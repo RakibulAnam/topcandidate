@@ -21,6 +21,8 @@
 - Migrating AI providers to OpenRouter (separate task — do after launch)
 - Email deliverability for password resets (Supabase handles it on Pro)
 
+> **Heads-up on the AI stack:** OpenRouter is **not implemented**. It is referenced below (and in `docs/OPENROUTER_MIGRATION.md`) only as a *planned* post-launch migration. The shipped stack is **Groq (primary optimizer) + Gemini (fallback optimizer + all toolkit generators + resume extractor)**, configured via `GROQ_API_KEY` + `GEMINI_API_KEY` — both on free tiers today. Where the cost tables in §12 say "via OpenRouter", read that as a future-state projection, not the current bill.
+
 **Assumption:** You are the only user on Vercel and Cloudflare for now. Solo dev. One account each.
 
 ---
@@ -255,7 +257,7 @@ The app likely has the old `vercel.app` URL hardcoded in a few places. Audit and
 ### Find every reference
 
 ```bash
-cd "/Users/bs00834/Desktop/Side Projects/ats-resume-builder"
+cd /Users/bs00834/Desktop/TopCandidate/apps/web
 grep -rni "vercel.app\|roh-ats-resume-builder" src/ api/ index.html metadata.json supabase/ 2>/dev/null
 ```
 
@@ -298,13 +300,12 @@ Replace the existing `functions` block with:
     "api/toolkit-item.ts":        { "maxDuration": 45 },
     "api/extract-resume.ts":      { "maxDuration": 30 },
     "api/purchase.ts":            { "maxDuration": 10 },
-    "api/confirm-purchase.ts":    { "maxDuration": 10 },
-    "api/dev-mock-confirm.ts":    { "maxDuration": 10 }
+    "api/confirm-purchase.ts":    { "maxDuration": 10 }
   }
 }
 ```
 
-(If `dev-mock-confirm.ts` is already deleted per `AGENTS.md` §13, skip that line.)
+(There is no `api/dev-mock-confirm.ts` — that scaffolding was removed; `/api/purchase` records a real `pending` bKash row and the HMAC `confirm-purchase` webhook grants credits.)
 
 Caps compute waste from misbehaving endpoints.
 
@@ -369,9 +370,11 @@ Saves you "I didn't know it was down for 4 hours" stories.
 These are not gating; do them once you have ~100 real users:
 
 - [ ] Migrate AI providers to **OpenRouter** with a $20/mo hard cap (see prior chat — single key for DeepSeek + Llama + Gemini fallback)
-- [ ] Build the **Flutter SMS-watcher** for bKash confirmation (AGENTS.md §13). Until this exists, you confirm purchases manually via `select confirm_purchase('<txnid>');` in the Supabase SQL editor.
+- [ ] Build the **Flutter SMS-watcher** for bKash confirmation (AGENTS.md §13). Until this exists, you confirm purchases manually via `select confirm_purchase('<txnid>', '<observed_sender_msisdn>');` in the Supabase SQL editor (the function takes the transaction id plus the observed sender msisdn), or use the `/admin` panel's "Confirm now" action.
 - [ ] Upgrade **Supabase to Pro** ($25/mo) the day you cross 40K monthly active users on Auth. Free tier pauses inactive projects after 7 days, so do this *before* launch traffic if anyone in another timezone needs the app online overnight.
-- [ ] Delete `api/dev-mock-confirm.ts` and the matching `mockConfirm()` block in `PurchaseModal.tsx` (AGENTS.md §13)
+- [ ] **Apply all DB migrations through `012_realtime_and_match_on_submit.sql`** (full list + order in [`../DEPLOYING.md`](../DEPLOYING.md)). Migration 012 ships near-real-time credit assignment (`inbound_payments` + match-on-submit) and adds the `purchases` table to the `supabase_realtime` publication.
+- [ ] **Confirm Realtime on `purchases`** — Realtime is on by default (no switch to flip; the "Replication" page is a different Pro feature you don't need). Migration 012 adds `purchases` to the `supabase_realtime` publication; verify under **Database → Publications → `supabase_realtime`** or via `select tablename from pg_publication_tables where pubname='supabase_realtime';`. The purchase-status pill subscribes live to its own row, so credits appear sub-second instead of via polling. Works on the free tier.
+- [ ] (Done) The dev mock-confirm scaffolding (`api/dev-mock-confirm.ts` + `mockConfirm()` in `PurchaseModal.tsx`) has already been removed — nothing to delete here.
 
 ---
 

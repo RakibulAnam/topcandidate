@@ -515,18 +515,31 @@ revoke execute on function refund_toolkit_credit(uuid) from public, anon, authen
 -- Initiate a purchase: user-callable. The user has already (claims to have)
 -- sent a bKash payment to the owner's number; they paste the transaction ID
 -- and (optionally) their bKash phone number, and this function records a
--- pending row. NO credits are granted here — that happens out-of-band via
--- confirm_purchase below.
+-- pending row.
+--
+-- v3 (migration 012) adds MATCH-ON-SUBMIT: if the watcher already delivered a
+-- verified SMS for this TrxID (recorded in inbound_payments because it arrived
+-- before the user submitted), this function settles the purchase synchronously
+-- — completing, underpaying, or flagging a mismatch — in the same locked path
+-- confirm_purchase uses. For the common pay-first ordering this grants credits
+-- inside the submit request instead of waiting for the watcher's next retry.
+-- When no inbound SMS exists yet, the row stays 'pending' and the watcher
+-- confirms it out-of-band via confirm_purchase as before.
 --
 -- The package mapping is hardcoded server-side so users cannot fake the
 -- credit count or amount they're entitled to. Add new packages by editing
--- the `case` block.
+-- the `case` block. inbound_payments + record_inbound_payment live in the
+-- Migration 012 section at the bottom of this file.
 create or replace function initiate_purchase(
   p_package_id     text,
   p_transaction_id text,
   p_sender_msisdn  text default null
+) returns table (
+  purchase_id     uuid,
+  status_out      text,
+  credits_granted integer,
+  new_balance     integer
 )
-returns uuid
 language plpgsql
 security definer
 set search_path = public, pg_temp
@@ -536,6 +549,10 @@ declare
   v_amount_taka   integer;
   v_purchase_id   uuid;
   v_pending_count integer;
+  v_inbound       public.inbound_payments%rowtype;
+  v_status        text := 'pending';
+  v_balance       integer := null;
+  v_surplus       integer;
 begin
   case p_package_id
     when 'five-pack' then v_credits := 5; v_amount_taka := 200;
@@ -575,7 +592,56 @@ begin
   )
   returning id into v_purchase_id;
 
-  return v_purchase_id;
+  -- Match-on-submit: settle now if the verified SMS already arrived.
+  select * into v_inbound
+  from public.inbound_payments
+  where payment_reference = p_transaction_id and consumed_at is null
+  for update;
+
+  if found then
+    if p_sender_msisdn is not null
+       and v_inbound.sender_msisdn is not null
+       and p_sender_msisdn <> v_inbound.sender_msisdn then
+      update public.purchases
+        set status = 'msisdn_mismatch_review', observed_amount_taka = v_inbound.amount_taka
+        where id = v_purchase_id;
+      insert into public.purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+        values (v_purchase_id, 'pending', 'msisdn_mismatch_review', 'system-match',
+                format('claimed=%s observed=%s', p_sender_msisdn, v_inbound.sender_msisdn));
+      v_status := 'msisdn_mismatch_review';
+    elsif v_inbound.amount_taka < v_amount_taka then
+      update public.purchases
+        set status = 'underpaid', observed_amount_taka = v_inbound.amount_taka
+        where id = v_purchase_id;
+      insert into public.purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+        values (v_purchase_id, 'pending', 'underpaid', 'system-match',
+                format('observed=%s expected=%s', v_inbound.amount_taka, v_amount_taka));
+      v_status := 'underpaid';
+    else
+      update public.purchases
+        set status = 'completed', observed_amount_taka = v_inbound.amount_taka
+        where id = v_purchase_id;
+      update public.profiles
+        set toolkit_credits = toolkit_credits + v_credits
+        where id = auth.uid()
+        returning toolkit_credits into v_balance;
+      insert into public.purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+        values (v_purchase_id, 'pending', 'completed', 'system-match',
+                format('matched inbound SMS observed=%s', v_inbound.amount_taka));
+      if v_inbound.amount_taka > v_amount_taka then
+        v_surplus := v_inbound.amount_taka - v_amount_taka;
+        insert into public.purchase_overpayments (purchase_id, surplus_taka)
+          values (v_purchase_id, v_surplus);
+      end if;
+      v_status := 'completed';
+    end if;
+
+    update public.inbound_payments
+      set consumed_at = timezone('utc', now()), consumed_purchase_id = v_purchase_id
+      where payment_reference = p_transaction_id;
+  end if;
+
+  return query select v_purchase_id, v_status, v_credits, v_balance;
 end;
 $$;
 
@@ -1135,3 +1201,92 @@ begin
   return v_deleted;
 end; $$;
 revoke execute on function prune_webhook_nonces() from public, anon, authenticated;
+
+-- ────────────────────────────────────────────────────────────────────────
+-- Migration 012 — near-real-time credit assignment
+-- ────────────────────────────────────────────────────────────────────────
+-- See supabase/migrations/012_realtime_and_match_on_submit.sql for rationale.
+-- inbound_payments backs the match-on-submit logic in initiate_purchase v3
+-- (above). purchases is added to the realtime publication so the web client
+-- subscribes instead of polling.
+
+-- Server-side memory of an HMAC-verified bKash SMS that arrived before the
+-- customer submitted their TrxID. Consumed automatically by initiate_purchase.
+create table if not exists inbound_payments (
+  payment_reference    text primary key,
+  sender_msisdn        text,
+  amount_taka          integer not null,
+  raw_body             text,
+  sms_timestamp        timestamp with time zone,
+  received_at          timestamp with time zone default timezone('utc', now()) not null,
+  consumed_at          timestamp with time zone,
+  consumed_purchase_id uuid references purchases(id)
+);
+alter table inbound_payments enable row level security;
+create index if not exists inbound_payments_unconsumed_idx
+  on inbound_payments(received_at) where consumed_at is null;
+
+-- Called by /api/confirm-purchase (service-role) on a genuine 404.
+create or replace function record_inbound_payment(
+  p_payment_reference text,
+  p_sender_msisdn     text,
+  p_amount_taka       integer,
+  p_raw_body          text default null,
+  p_sms_timestamp     timestamp with time zone default null
+) returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if length(coalesce(p_payment_reference, '')) < 6 then
+    raise exception 'invalid_transaction_id';
+  end if;
+  if p_amount_taka is null or p_amount_taka <= 0 then
+    raise exception 'invalid_amount';
+  end if;
+  insert into inbound_payments
+    (payment_reference, sender_msisdn, amount_taka, raw_body, sms_timestamp)
+  values
+    (p_payment_reference, p_sender_msisdn, p_amount_taka,
+     p_raw_body, coalesce(p_sms_timestamp, timezone('utc', now())))
+  on conflict (payment_reference) do nothing;
+end; $$;
+revoke execute on function record_inbound_payment(text, text, integer, text, timestamp with time zone)
+  from public, anon, authenticated;
+
+-- expire_stale_pending_purchases also prunes inbound_payments (consumed rows +
+-- anything older than 48h) so the table stays small. Overrides the earlier
+-- definition.
+create or replace function expire_stale_pending_purchases() returns integer
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_affected integer;
+begin
+  with expired as (
+    update purchases set status = 'expired'
+      where status = 'pending' and created_at < now() - interval '24 hours'
+      returning id
+  ),
+  audited as (
+    insert into purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+      select id, 'pending', 'expired', 'system', 'TTL exceeded (24h)' from expired
+      returning 1
+  )
+  select count(*) into v_affected from expired;
+  delete from inbound_payments
+    where consumed_at is not null or received_at < now() - interval '48 hours';
+  return v_affected;
+end; $$;
+revoke execute on function expire_stale_pending_purchases() from public, anon, authenticated;
+
+-- Realtime: let the web client subscribe to its own purchase row.
+do $$
+begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'purchases'
+  ) then
+    alter publication supabase_realtime add table public.purchases;
+  end if;
+end $$;
+alter table purchases replica identity full;

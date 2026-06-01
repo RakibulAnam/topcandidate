@@ -94,10 +94,13 @@ for steps 4. Steps 2 and 6 are out-of-band.
 
 ## 4. The webhook contract (what the web app must implement)
 
-This is the **only** point of contact between the web app and the watcher.
-There are no other endpoints, no health checks, no admin APIs. Keep it
-simple and stable; changing this contract requires a coordinated change
-in both repos.
+`/api/confirm-purchase` is the primary point of contact between the web app
+and the watcher. Since web migration 007 the watcher also POSTs to three
+sibling endpoints, all derived from the configured URL by path-rewrite and
+sharing the same HMAC convention: `/api/orphan-inbound-sms`,
+`/api/reverse-purchase`, and `/api/admin/parser-failures` (see §7 and
+`spec/01-server-contract.md`). Keep the contract stable; changing it
+requires a coordinated change in both repos.
 
 ### Endpoint
 
@@ -109,27 +112,37 @@ The operator enters this exact URL into the watcher's Settings tab. The
 URL must match the regex `^https?://.+/api/confirm-purchase$` (the watcher
 validates this client-side).
 
-### Headers
+### Headers (webhook protocol v2)
 
 | Header                         | Value                                                                 |
 | ------------------------------ | --------------------------------------------------------------------- |
 | `Content-Type`                 | `application/json`                                                    |
-| `X-Bkash-Webhook-Signature`    | hex-encoded HMAC-SHA256 of the **raw request body** using the shared  |
-|                                | secret. The secret is operator-supplied on both sides.                |
+| `X-Bkash-Webhook-Timestamp`    | UTC ISO-8601 with millisecond precision and trailing `Z` (e.g.        |
+|                                | `2026-05-31T14:23:09.512Z`).                                          |
+| `X-Bkash-Webhook-Signature`    | hex-encoded HMAC-SHA256 of `"<timestamp>.<rawBody>"` — the timestamp, |
+|                                | a literal ASCII period, then the raw body — using the shared secret.  |
 
-The HMAC is computed over the **exact byte sequence** of the request body.
-Verify with the same byte sequence — do not re-serialize the parsed JSON
-before hashing.
+The watcher always sends v2. The HMAC is computed over the **exact byte
+sequence** `timestamp + "." + rawBody`. Verify with the same byte sequence —
+do not re-serialize the parsed JSON before hashing. The legacy v1 form
+(HMAC over the body only, no timestamp) is supported server-side for
+backward compatibility while `BKASH_WEBHOOK_REQUIRE_TIMESTAMP=false`; the
+watcher itself never sends it.
 
 #### Node.js / Next.js verification example
 
 ```ts
 import crypto from 'node:crypto';
 
-function verifySignature(rawBody: string, headerSig: string, secret: string) {
+function verifySignature(
+  timestamp: string,
+  rawBody: string,
+  headerSig: string,
+  secret: string,
+) {
   const expected = crypto
     .createHmac('sha256', secret)
-    .update(rawBody, 'utf8')
+    .update(`${timestamp}.${rawBody}`, 'utf8')   // timestamp + '.' + body
     .digest('hex');
   // Constant-time compare to avoid timing oracles.
   const a = Buffer.from(expected, 'hex');
@@ -144,11 +157,14 @@ In a Next.js Route Handler:
 ```ts
 export async function POST(req: Request) {
   const rawBody = await req.text();        // do NOT use req.json() first
+  const ts = req.headers.get('x-bkash-webhook-timestamp') ?? '';
   const sig = req.headers.get('x-bkash-webhook-signature') ?? '';
   const secret = process.env.BKASH_WEBHOOK_SECRET!;
-  if (!verifySignature(rawBody, sig, secret)) {
+  if (!verifySignature(ts, rawBody, sig, secret)) {
     return Response.json({ error: 'bad signature' }, { status: 401 });
   }
+  // Replay protection: reject timestamps outside a ±5 min window and store a
+  // nonce = sha256(`${ts}:${rawBody}`) (note the COLON) to reject duplicates.
   const body = JSON.parse(rawBody);
   // ...handle business logic, return one of the codes below.
 }
@@ -343,11 +359,14 @@ This is a manual-resolution path.
 ### What the watcher does NOT do
 
 The watcher will never:
-- Initiate refunds. If a refund SMS arrives, it's audit-only on the phone.
-  The web app handles refunds out-of-band (e.g. a separate admin route).
+- Initiate refunds. When a reversal SMS arrives the watcher POSTs it to
+  `/api/reverse-purchase` so the server can roll back credits; it does not
+  itself move money. The web app owns the refund policy.
 - Charge customers. It only confirms payments the customer already made.
 - Send SMS or call bKash APIs. It is read-only on the SMS side.
-- Talk to any endpoint other than `/api/confirm-purchase`.
+- Talk to any endpoint other than `/api/confirm-purchase` and its three
+  siblings (`/api/orphan-inbound-sms`, `/api/reverse-purchase`,
+  `/api/admin/parser-failures`).
 
 ### Volume
 
@@ -387,10 +406,13 @@ watcher would send. The contract in §4 is the entire interface.
 - Do not log request bodies in full — they contain customer phone
   numbers. Log `transactionId` + response status only.
 - TLS only in production. The watcher refuses `http://` in release builds.
-- The watcher's auth model is "shared secret only". There's no per-request
-  nonce or replay protection. Idempotency on `transactionId` is the only
-  thing preventing replay attacks — that's why §4's idempotency rule is
-  mandatory, not optional.
+- The watcher's auth model is a shared-secret HMAC over
+  `"<timestamp>.<body>"` (protocol v2). The timestamp header gives the
+  server replay protection: it should reject timestamps outside a ±5 min
+  window and store a nonce `sha256("<timestamp>:<body>")` to reject
+  duplicates. Idempotency on `transactionId` remains the backstop — §4's
+  idempotency rule is still mandatory because a crashed retry can re-POST
+  with a fresh timestamp (hence a fresh, accepted nonce).
 
 ---
 

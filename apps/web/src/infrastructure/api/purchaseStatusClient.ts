@@ -74,6 +74,45 @@ export async function fetchPurchaseStatus(txnId: string): Promise<PurchaseStatus
   return res.json() as Promise<PurchaseStatusResponse>;
 }
 
+/**
+ * Subscribe to realtime changes on the caller's purchase row (migration 012
+ * added `purchases` to the supabase_realtime publication). Invokes `onChange`
+ * whenever the row changes so the caller can refetch the derived status. RLS
+ * gates delivery to the user's own rows; we set the socket auth to the user's
+ * JWT first. Returns an unsubscribe function.
+ *
+ * This replaces fixed-interval polling — the grant now reflects in the UI in
+ * <1s with no time cap. Callers should still keep a slow fallback poll for the
+ * rare dropped-socket case.
+ */
+export function subscribeToPurchase(txnId: string, onChange: () => void): () => void {
+  let channel: ReturnType<typeof supabase.channel> | null = null;
+  let cancelled = false;
+
+  void (async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) supabase.realtime.setAuth(session.access_token);
+    } catch {
+      // Fall back to whatever auth the socket has; the fallback poll covers us.
+    }
+    if (cancelled) return;
+    channel = supabase
+      .channel(`purchase:${txnId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'purchases', filter: `payment_reference=eq.${txnId}` },
+        () => onChange(),
+      )
+      .subscribe();
+  })();
+
+  return () => {
+    cancelled = true;
+    if (channel) void supabase.removeChannel(channel);
+  };
+}
+
 export async function filePurchaseDispute(transactionId: string, notes: string): Promise<{ disputeId: string }> {
   const token = await bearer();
   const res = await fetch('/api/dispute-purchase', {

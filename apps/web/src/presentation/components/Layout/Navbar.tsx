@@ -12,9 +12,11 @@ interface NavbarProps {
     /** Optional — when supplied, the navbar shows a clickable credits pill. */
     credits?: number | null;
     onBuyCredits?: () => void;
+    /** Fired when a tracked purchase completes, so the host can refresh credits. */
+    onCredited?: () => void;
 }
 
-export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredits }: NavbarProps) => {
+export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredits, onCredited }: NavbarProps) => {
     const { signOut, user } = useAuth();
     const t = useT();
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -47,7 +49,7 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
 
                     {/* Right Section - Language toggle + User Menu */}
                     <div className="hidden md:flex items-center gap-3 relative">
-                        <VerifyingPurchasePill onResubmit={onBuyCredits} />
+                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}
@@ -74,7 +76,7 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
 
                     {/* Mobile: credits pill + language toggle stay visible, then hamburger */}
                     <div className="flex items-center gap-2 md:hidden relative">
-                        <VerifyingPurchasePill onResubmit={onBuyCredits} />
+                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}

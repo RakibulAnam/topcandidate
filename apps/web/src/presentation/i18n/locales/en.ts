@@ -1060,6 +1060,10 @@ export const en = {
     disputeSubmit: 'Submit',
     disputeSubmitting: 'Submitting…',
     disputeFiled: 'Dispute filed — we’ll review and follow up.',
+    timelineSubmitted: 'Submitted',
+    timelineVerifying: 'Verifying payment',
+    timelineDone: 'Credits added',
+    timelineActionNeeded: 'Needs attention',
   },
   purchaseHistory: {
     title: 'Purchase history',

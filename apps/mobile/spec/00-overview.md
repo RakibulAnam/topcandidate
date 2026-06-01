@@ -40,8 +40,9 @@ grants credits.
 - **TrxID** — 10-character alphanumeric bKash transaction reference.
 - **MSISDN** — Mobile Subscriber ISDN, i.e. the 11-digit phone number
   `01XXXXXXXXX` for Bangladesh.
-- **HMAC** — HMAC-SHA256 of the raw JSON request body, hex-encoded, sent in
-  the `X-Bkash-Webhook-Signature` header.
+- **HMAC** — HMAC-SHA256 of `"<timestamp>.<rawBody>"` (protocol v2),
+  hex-encoded, sent in the `X-Bkash-Webhook-Signature` header alongside the
+  `X-Bkash-Webhook-Timestamp` header. See spec/01-server-contract.md.
 - **Pending purchase** — a row the web app creates when the customer says
   "I paid, here's my TrxID". The watcher's POST flips it to `confirmed`.
 - **Foreground service** — Android construct for a process with a persistent

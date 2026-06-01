@@ -32,6 +32,7 @@ CREATE INDEX idx_processed_sms_next_attempt ON processed_sms(next_attempt_at);
 | `sending`         | `ProcessedSmsState.sending`         |
 | `retrying`        | `ProcessedSmsState.retrying`        |
 | `waiting_user`    | `ProcessedSmsState.waitingUser`     |
+| `reversing`       | `ProcessedSmsState.reversing`       |
 | `done`            | `ProcessedSmsState.done`            |
 | `failed`          | `ProcessedSmsState.failed`          |
 | `mismatch`        | `ProcessedSmsState.mismatch`        |
@@ -53,17 +54,25 @@ When adding a column, bump the version in `BkashDatabase` and add an
 
 ## Queries used by the app
 
-- `insertQueued(parsed, smsTimestamp)` — `INSERT OR IGNORE` on `trx_id`.
-- `dueRows(now, limit)` — rows where `state IN ('queued','retrying','waiting_user')`
+(Method names as in `lib/storage/processed_sms_dao.dart`.)
+
+- `insertParsed(parsed, smsTimestamp, now)` — `INSERT OR IGNORE` on `trx_id`.
+  The initial `state` is chosen by `BkashSmsKind` (received → `queued`,
+  refund → `reversing`, sent → `ignored_sent`, ibankingDeposit →
+  `ignored_ibanking`, unknown → `failed`).
+- `dueRows(now, limit)` — rows where
+  `state IN ('queued','retrying','waiting_user','reversing')`
   AND `(next_attempt_at IS NULL OR next_attempt_at <= ?)` ORDER BY id LIMIT ?.
-- `markSending(id)` — sets state = 'sending', updated_at = now.
-- `applyTransition(id, next)` — sets state, next_attempt_at, attempt_count,
-  last_error, updated_at.
+- `markSending(id, now)` — sets state = 'sending', updated_at = now.
+- `applyTransition(id, transition, now)` — sets state, next_attempt_at,
+  attempt_count, last_error, updated_at.
 - `reclaimStuckSending(now)` — rows where state = 'sending' AND
   updated_at < now - 60s → set state = 'retrying', next_attempt_at = now.
 - `latest(limit)` — most recent rows for the Status tab.
-- `byState(state, limit, offset)` — paginated History tab.
+- `page(...)` — paginated/optionally state-filtered History tab.
 - `byId(id)`.
+- `lastSuccessfulConfirmAt()`, `lastSmsSeenAt()` — Status tab footer.
+- `retryNow(id, now)`, `markIgnored(id, now)` — row detail-sheet actions.
 
 ## Indices
 

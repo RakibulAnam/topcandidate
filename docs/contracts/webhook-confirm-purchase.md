@@ -63,7 +63,7 @@ When the watcher omits the timestamp header, the server falls back to the v1 ver
 | 200 | `{ success: true, alreadyConfirmed: true, userId, creditsGranted }` | Idempotent replay. | Marks row `done`. **Notification suppressed.** |
 | 400 | `{ error: '<reason>' }` | Body malformed. | Marks row `failed`. No retry. |
 | 401 | `{ error: 'bad signature' }` | HMAC missing or wrong. | Marks row `failed`. Operator alerted. |
-| 404 | `{ code: 'no_pending_purchase' }` | No matching pending row **yet**. | Marks row `waiting_user`. Retries every 5 min for 24 h. |
+| 404 | `{ code: 'no_pending_purchase' }` | No matching pending row **yet**. Server records the verified SMS into `inbound_payments` for match-on-submit. | Marks row `waiting_user`. Retries (20s→40s→1m→2m→5m backoff) for 24 h as a backstop. |
 | 409 | `{ code: 'msisdn_mismatch' }` | Claimed sender ≠ SMS sender. | Marks row `mismatch`. Manual review. |
 | 409 | `{ code: 'underpaid', expected, observed }` | SMS amount < required. | Marks row `mismatch` (terminal). Operator recovers via admin panel / top-up SMS. |
 | 503 | `{ error: 'webhook misconfigured' }` | Server-side misconfig. | Marks row `failed`. Operator alerted. |
@@ -78,9 +78,13 @@ Per-**request** replay protection is enforced by the v2 timestamp+nonce machiner
 - The timestamp+nonce protection rejects identical signed requests **before** they reach the DB — useful against an attacker replaying a captured request to spam our pipeline.
 - The TrxID-level idempotency handles the legitimate case of the watcher retrying because it didn't see our 200 — those retries land with a *fresh* timestamp + nonce (different signed string), so the v2 protection lets them through, and the DB-level idempotency makes the outcome correct.
 
-### 404 is load-bearing
+### 404 is load-bearing (+ match-on-submit, migration 012)
 
-The customer's TrxID-paste and the operator's bKash SMS arrive in either order. If the SMS reaches the watcher before the customer submits the TrxID, the watcher POSTs and the web app has no matching row → return **404**, not 400. The watcher will retry every 5 min for 24 h. Web app must keep `pending_purchase` rows around for **at least 24 h** after creation.
+The customer's TrxID-paste and the operator's bKash SMS arrive in either order. If the SMS reaches the watcher before the customer submits the TrxID, the watcher POSTs and the web app has no matching `purchases` row → return **404**, not 400.
+
+Since migration 012 the 404 path is no longer a dead end: the server **records the HMAC-verified SMS into `inbound_payments`**. When the customer then submits, `initiate_purchase` (the `/api/purchase` path) matches that stored SMS and **grants credits synchronously inside the submit request** (match-on-submit) — so the common pay-first ordering completes in ~1–2 s instead of waiting for the watcher's next retry.
+
+The watcher still retries the 404'd row as a **backstop** (now a 20s→5min backoff, not a fixed 5 min); a later retry simply lands on the already-`completed` row and gets the **200 idempotent** response. The web app must keep `purchases` rows for **at least 24 h** after creation; `inbound_payments` rows are pruned 48 h after receipt (or immediately once consumed).
 
 ## Server handler logic (canonical)
 
@@ -89,9 +93,11 @@ on POST /api/confirm-purchase:
   1. Read raw body (do NOT use req.json() first).
   2. Verify HMAC. Invalid → 401.
   3. Parse JSON. Missing transactionId → 400.
-  4. Lookup pending_purchase by trx_id = transactionId.
+  4. Lookup the `purchases` row by payment_reference = transactionId.
      - found AND status = 'completed' → 200 idempotent
-     - not found AND no completed row → 404 no_pending_purchase
+     - not found AND no completed row → record the verified SMS into
+       `inbound_payments` (match-on-submit memory, migration 012), then
+       404 no_pending_purchase
      - found AND claimed_msisdn != senderMsisdn (both non-null) → 409 msisdn_mismatch
      - found AND amountTaka < pending.amount_taka → 409 underpaid; row flipped to 'underpaid'
      - found AND amountTaka > pending.amount_taka → 200 + log surplus to purchase_overpayments

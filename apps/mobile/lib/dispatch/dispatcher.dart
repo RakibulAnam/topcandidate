@@ -292,7 +292,7 @@ class Dispatcher {
       }
       return DispatchTransition(
         nextState: ProcessedSmsState.waitingUser,
-        nextAttemptAt: now.add(kWaitingUserDelay),
+        nextAttemptAt: now.add(waitingUserBackoff(newAttempt)),
         incrementAttempts: true,
         lastError: 'HTTP 404: no pending purchase yet',
       );

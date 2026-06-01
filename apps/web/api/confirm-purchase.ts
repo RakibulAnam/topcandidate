@@ -191,6 +191,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return;
       }
+      // Genuine 404 — the SMS reached us before the customer submitted their
+      // TrxID. Remember this HMAC-verified SMS so the next /api/purchase submit
+      // can match it instantly (match-on-submit, migration 012) instead of the
+      // customer waiting for the watcher's next retry. Best-effort; only when
+      // we know the amount (record_inbound_payment requires a positive amount).
+      if (observedAmount !== null) {
+        const { error: recErr } = await admin.rpc('record_inbound_payment', {
+          p_payment_reference: txn,
+          p_sender_msisdn: senderMsisdn?.trim() || null,
+          p_amount_taka: observedAmount,
+        });
+        if (recErr) {
+          console.warn('[confirm-purchase] record_inbound_payment failed:', recErr.message);
+        }
+      }
       res.status(404).json({
         error: 'No pending purchase matches that transaction ID.',
         code: 'no_pending_purchase',

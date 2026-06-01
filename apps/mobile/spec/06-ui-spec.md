@@ -88,10 +88,12 @@ A simple form (no async validators):
    - Button "Request permission" if denied; "Open app settings" if
      permanently denied.
 
-6. **App lock (optional)**
-   - Toggle "Require biometric on app open". When on, the next launch shows a
-     biometric prompt before revealing tabs. Out of scope for v1 if biometric
-     plugin is not in dependency list.
+6. **App lock (optional — NOT implemented in the UI)**
+   - `SettingsRepository` defines `biometricLockEnabled()` /
+     `setBiometricLock()` and the `bkash_biometric_lock` key, but there is
+     **no biometric toggle in the Settings tab and no biometric prompt on
+     launch**. No biometric plugin is in `pubspec.yaml`. Treat this as a
+     reserved hook, not a shipped feature.
 
 ## State badge colors
 
@@ -101,6 +103,7 @@ A simple form (no async validators):
 | `sending`        | blue-100   | blue-800   |
 | `retrying`       | amber-100  | amber-900  |
 | `waiting_user`   | purple-100 | purple-900 |
+| `reversing`      | amber-100  | amber-900  |
 | `done`           | green-100  | green-900  |
 | `failed`         | red-100    | red-900    |
 | `mismatch`       | red-100    | red-900    |

@@ -118,17 +118,23 @@ We do not currently observe a prior 200 then later 404 (because we stop
 retrying after 200), so in practice 404 always means `waiting_user`. The
 distinction is documented in case future logic needs it.
 
-## Example HMAC computation
+## Example HMAC computation (v2)
 
 ```dart
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
-String sign(String body, String secret) {
+/// Signs the v2 string "<timestamp>.<body>". The timestamp is the value sent
+/// in X-Bkash-Webhook-Timestamp; the period separator is part of the protocol.
+String sign(String timestamp, String body, String secret) {
   final mac = Hmac(sha256, utf8.encode(secret));
-  return mac.convert(utf8.encode(body)).toString();
+  return mac.convert(utf8.encode('$timestamp.$body')).toString();
 }
 ```
+
+The watcher's implementation (`lib/dispatch/webhook_client.dart::_signV2`)
+feeds the timestamp bytes, an ASCII period (`0x2e`), then the body bytes into
+the HMAC accumulator rather than building one String — equivalent result.
 
 ## Test-webhook payload
 

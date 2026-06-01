@@ -8,7 +8,7 @@ sending          ← in-flight HTTP POST.
 done             ← terminal. 200 OK received.
 failed           ← terminal. 400/401/503/other-non-retryable.
 mismatch         ← terminal. 409 received (msisdn_mismatch or underpaid).
-waiting_user     ← 404 received; retry every 5 min for 24 h.
+waiting_user     ← 404 received; retry on escalating backoff (20s→5min) for 24 h.
 retrying         ← 5xx / network; backoff per §3 below.
 reversing        ← refund/reversal SMS pending dispatch to
                    /api/reverse-purchase. Exits to ignored_refund.
@@ -47,7 +47,7 @@ inserted directly into `ignored_refund` and never dispatched.
 | 200 OK + body `{"alreadyConfirmed":true}` | `done` | null                              | **suppressed** (replay of a row already confirmed earlier; the fresh-grant notification would be misleading) |
 | 400              | `failed`        | null                                               | yes: "Webhook rejected body"        |
 | 401              | `failed`        | null                                               | yes: "Webhook auth failed"          |
-| 404              | `waiting_user`  | now + 5 min, **up to 288 attempts** (=24 h)        | no (first time); after 288 → notify |
+| 404              | `waiting_user`  | now + `waitingUserBackoff(attempt)`, **up to 288 attempts** (=24 h) | no (first time); after 288 → notify |
 | 409 `msisdn_mismatch` | `mismatch` | null                                               | yes: "Sender mismatch"              |
 | 409 `underpaid`  | `mismatch`      | null                                               | yes: "Underpayment — open admin panel" (added migration 007) |
 | 503              | `failed`        | null                                               | yes: "Server misconfigured"         |
@@ -113,8 +113,20 @@ Continue retrying once per hour for up to 24 h total wall-clock from
 `created_at`. After 24 h with no success, move to `failed` and notify
 "Gave up after 24 h of transient errors".
 
-The 5-min retry for `waiting_user` is on its own schedule (288 attempts
-spaced 5 min apart, also a 24 h budget).
+`waiting_user` (404) retries are on their own schedule: an **escalating
+backoff** `waitingUserBackoff(attempt)` — 20s, 40s, 1m, 2m (attempts 4-6),
+5m (7+) — replacing the old fixed 5-min interval (`kWaitingUserDelay`).
+`kWaitingUserMaxAttempts` (288) and the 24 h give-up are unchanged.
+
+This path is now a **backstop**. The web side does match-on-submit (web
+migration 012): when the bKash SMS arrives before the customer submits,
+`/api/confirm-purchase` returns 404 but records the verified payment to
+`inbound_payments`, and the customer's submit settles the purchase
+synchronously. A later `waiting_user` retry then hits the already-completed
+row → 200 with `alreadyConfirmed:true` (notification suppressed), rather than
+being the path the customer waits on. The fast early retries (20s/40s) still
+matter for the submit-first ordering, where the customer's pending row exists
+before the SMS lands.
 
 ## Mapping 404 → done special case
 
