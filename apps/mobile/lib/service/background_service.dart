@@ -152,6 +152,20 @@ Future<void> _onStart(ServiceInstance service) async {
   service.on('kick').listen((_) {
     unawaited(dispatcher.tick());
   });
+
+  // Periodic in-isolate tick. The dispatcher schedules retries by setting
+  // `next_attempt_at` (transient 5xx back off 5s→1h; waiting_user 404s back off
+  // 20s→5min), but a tick must FIRE for a due row to be processed. While the
+  // foreground service is alive this timer drives those retries so a row
+  // resolves within ~15s of becoming due — instead of waiting for the next SMS,
+  // an app reopen, or the 15-min WorkManager backstop. tick() is idempotent and
+  // serialized, and is a cheap no-op when nothing is due.
+  final ticker = Timer.periodic(const Duration(seconds: 15), (_) {
+    unawaited(dispatcher.tick());
+  });
+  service.on('stop').listen((_) {
+    ticker.cancel();
+  });
 }
 
 /// Workmanager callback. Top-level so AOT can find it.

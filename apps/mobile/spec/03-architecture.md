@@ -20,7 +20,11 @@ The four isolates:
    `flutter_background_service`. Holds its own `SmsListener` (so the
    background callback handle is registered in SharedPrefs) and its own
    `Dispatcher`. Survives UI being closed. Runs an initial `dispatcher.tick()`
-   on start and listens for `'kick'` events.
+   on start, listens for `'kick'` events, and runs a **15s `Timer.periodic`
+   `dispatcher.tick()`** so rows with a future `next_attempt_at` (transient
+   retries, `waiting_user` 404 backoff) fire within ~15s of becoming due while
+   the service is alive — not only on the next SMS / app-reopen / 15-min
+   Workmanager backstop. The timer is cancelled on `'stop'`.
 3. **Workmanager isolate** — 15-min periodic `Dispatcher.tick()` safety net.
    Spawned by `workmanager`, may be a fresh isolate or reused depending on
    Android scheduling. Must call `DartPluginRegistrant.ensureInitialized()`
@@ -234,8 +238,10 @@ if the plugin version is bumped.
   `ExistingPeriodicWorkPolicy.keep`. We additionally dispatch immediately
   whenever an SMS arrives — `dispatcher.kick()` in the foreground/service path,
   and a direct `Dispatcher.tick()` inside `backgroundMessageHandler` when the
-  Activity is detached — so the periodic task is only a safety net for retries,
-  never the primary dispatch path for a backgrounded SMS.
+  Activity is detached — and the service isolate also runs a 15s periodic
+  `tick()` that drives scheduled retries (`next_attempt_at`) while it is alive.
+  So the 15-min Workmanager task is only a safety net for when the service has
+  been killed, never the primary path for dispatch or retries.
 - The periodic task simply calls `Dispatcher.tick()`. It does NOT do any
   parsing.
 - We track the `workmanager` package at `^0.9.x`. Versions ≤ 0.5.2 reference
