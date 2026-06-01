@@ -226,7 +226,7 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                     <Wordmark />
                     <div className="relative flex items-center gap-2">
-                        <VerifyingPurchasePill onResubmit={() => setPurchaseModalOpen(true)} />
+                        <VerifyingPurchasePill onResubmit={() => setPurchaseModalOpen(true)} onCredited={() => { void refreshCredits(); }} />
                         <CreditsBadge credits={credits} onBuy={() => setPurchaseModalOpen(true)} />
                         <LanguageToggle />
                         <button

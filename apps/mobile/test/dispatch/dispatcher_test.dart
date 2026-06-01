@@ -294,14 +294,14 @@ void main() {
       expect(t.notify?.title, contains('auth failed'));
     });
 
-    test('404 first time → waiting_user, +5 min', () {
+    test('404 first time → waiting_user, +20s (first backoff step)', () {
       final t = Dispatcher.applyResponse(
         base,
         const WebhookResponse(statusCode: 404),
         now: now,
       );
       expect(t.nextState, ProcessedSmsState.waitingUser);
-      expect(t.nextAttemptAt, now.add(kWaitingUserDelay));
+      expect(t.nextAttemptAt, now.add(waitingUserBackoff(1)));
     });
 
     test('404 after 288 attempts → failed (give up)', () {
@@ -459,7 +459,7 @@ void main() {
       await dispatcher.tick();
       expect(dao.rows[1]!.state, ProcessedSmsState.waitingUser);
       expect(dao.rows[1]!.nextAttemptAt,
-          clock.now().add(kWaitingUserDelay));
+          clock.now().add(waitingUserBackoff(1)));
     });
 
     test('5xx then 200: row eventually becomes done', () async {

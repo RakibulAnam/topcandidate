@@ -9,6 +9,7 @@ import 'package:another_telephony/telephony.dart';
 import '../diagnostics.dart';
 import '../dispatch/dispatcher.dart';
 import '../dispatch/webhook_client.dart';
+import '../notifications/notifier.dart';
 import '../settings/settings_repository.dart';
 import '../sms/bkash_parser.dart';
 import '../sms/sms_kind.dart';
@@ -218,6 +219,41 @@ Future<void> backgroundMessageHandler(SmsMessage message) async {
       'bg: insert result id=$id (null=duplicate)',
       name: 'sms_listener.bg',
     );
+
+    // Dispatch immediately instead of waiting for the WorkManager safety-net
+    // tick (up to ~15 min). This background isolate is a headless task — like
+    // the WorkManager callback — so awaiting one HTTP POST here is safe, and is
+    // what makes a confirmation near-real-time when the app is backgrounded.
+    // If anything throws, the WM tick / next launch still drains the row.
+    if (id != null &&
+        (parsed.kind == BkashSmsKind.received ||
+            parsed.kind == BkashSmsKind.refund)) {
+      try {
+        final settings = SettingsRepository();
+        final webhook = HttpWebhookClient(
+          urlProvider: settings.webhookUrl,
+          secretProvider: settings.hmacSecret,
+        );
+        final notifier = await Notifier.init();
+        final dispatcher = Dispatcher(
+          dao: dao,
+          webhookClient: webhook,
+          notifier: notifier,
+        );
+        final processed = await dispatcher.tick();
+        developer.log(
+          'bg: dispatched immediately, processed=$processed',
+          name: 'sms_listener.bg',
+        );
+      } catch (e, st) {
+        developer.log(
+          'bg: immediate dispatch failed (WM tick will retry): $e',
+          name: 'sms_listener.bg',
+          error: e,
+          stackTrace: st,
+        );
+      }
+    }
   } catch (e, st) {
     developer.log(
       'bg: insert failed: $e',

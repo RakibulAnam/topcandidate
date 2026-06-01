@@ -28,8 +28,12 @@ The four isolates:
 4. **SMS background isolate** — spawned by `another_telephony` when an SMS
    arrives while the Activity is detached. Entry point is the top-level
    `backgroundMessageHandler` in `lib/service/sms_listener.dart`. Inserts the
-   parsed row into the DB and lets the next dispatcher tick drain it. Must
-   call `DartPluginRegistrant.ensureInitialized()` at entry.
+   parsed row into the DB, then **builds a `Dispatcher` and dispatches
+   immediately** (`tick()`) rather than waiting for the next periodic
+   Workmanager tick — this removes the up-to-15-min latency for SMS that arrive
+   while backgrounded. The 15-min Workmanager tick is now only the backstop.
+   Must call `DartPluginRegistrant.ensureInitialized()` at entry (and, per the
+   cross-isolate DB rule, must NOT close the shared handle).
 
 Each isolate's entrypoint calls `installCrashLogging('<isolate>')` from
 `lib/diagnostics.dart` so uncaught Dart errors surface to `developer.log`
@@ -227,9 +231,11 @@ if the plugin version is bumped.
 
 - One periodic task: name `bkash-watcher-tick`, interval 15 min (the floor on
   most OEMs), with a `NetworkType.connected` constraint and
-  `ExistingPeriodicWorkPolicy.keep`. We additionally call `dispatcher.kick()`
-  immediately whenever an SMS arrives, so the periodic task is only a safety
-  net for retries.
+  `ExistingPeriodicWorkPolicy.keep`. We additionally dispatch immediately
+  whenever an SMS arrives — `dispatcher.kick()` in the foreground/service path,
+  and a direct `Dispatcher.tick()` inside `backgroundMessageHandler` when the
+  Activity is detached — so the periodic task is only a safety net for retries,
+  never the primary dispatch path for a backgrounded SMS.
 - The periodic task simply calls `Dispatcher.tick()`. It does NOT do any
   parsing.
 - We track the `workmanager` package at `^0.9.x`. Versions ≤ 0.5.2 reference

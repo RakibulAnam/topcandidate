@@ -43,9 +43,12 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
    009_admin_panel.sql
    010_align_profiles_columns.sql
    011_webhook_nonces.sql         (webhook replay protection — nonce table + timestamp window)
+   012_realtime_and_match_on_submit.sql  (near-real-time credits — inbound_payments + match-on-submit + adds `purchases` to the realtime publication)
    ```
 
    Re-running is safe.
+
+6. **Confirm Realtime on the `purchases` table**: Realtime is on by default for projects — there is no global switch to flip and you do **not** need the "Replication" page (that's the Pro read-replica/warehouse feature). The only requirement is that `purchases` is a member of the `supabase_realtime` publication, which **migration 012 adds for you**. Verify under **Database → Publications → `supabase_realtime`** (the table should be listed), or run `select tablename from pg_publication_tables where pubname='supabase_realtime';` and confirm `purchases` appears. RLS still gates delivery to each user's own row. Realtime works on the free tier; Supabase Pro is recommended for production (free projects pause after ~1 week idle).
 
 ---
 

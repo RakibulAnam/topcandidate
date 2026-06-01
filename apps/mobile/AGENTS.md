@@ -234,9 +234,19 @@ operator request:
   battery-optimization exemption is also disabled. Operator must check the
   Status tab.
 - Workmanager periodic jobs have a 15-minute floor on some OEM Android skins
-  (MIUI, ColorOS, Samsung One UI). We schedule at 15 min and rely on the
-  per-SMS `dispatcher.kick()` for low-latency dispatch. Worst-case retry
-  latency for `waiting_user` rows is 5 min (the documented retry interval).
+  (MIUI, ColorOS, Samsung One UI). We schedule at 15 min as a backstop only —
+  `backgroundMessageHandler` now dispatches immediately after inserting the SMS
+  (builds a `Dispatcher` and runs `tick()`), so a backgrounded SMS no longer
+  waits up to 15 min for the periodic tick. The 15-min Workmanager tick remains
+  as the safety net for retries.
+- `waiting_user` (HTTP 404) retries now follow an escalating backoff
+  (`waitingUserBackoff(attempt)`: 20s, 40s, 1m, 2m for attempts 4-6, 5m for 7+),
+  not the old fixed 5-min interval. `kWaitingUserMaxAttempts` (288) and the 24h
+  give-up are unchanged. Note this path is now a **backstop**: the web side does
+  match-on-submit (migration 012) — when the bKash SMS lands before the customer
+  submits, `/api/confirm-purchase` records it to `inbound_payments` and the
+  customer's submit settles instantly, so a later `waiting_user` retry usually
+  hits the already-completed row → 200 `alreadyConfirmed`.
 - We do not parse the SMS timestamp from the body — we use the OS delivery
   timestamp. The in-body timestamp is stored as part of `raw_body` for audit
   but is not authoritative.
@@ -291,3 +301,11 @@ any wire-contract changes with the web app on the other end via
 `/api/admin/parser-failures`) and 409 `underpaid` handling on
 `/api/confirm-purchase`. Refund SMS now route through the dispatcher as
 `reversing` rather than landing in terminal `ignored_refund`.
+
+App version **1.3.0+4**: `backgroundMessageHandler` dispatches immediately
+after inserting the SMS (was: store + wait for the WorkManager tick), removing
+the up-to-15-min latency when backgrounded; `waiting_user` (404) retry spacing
+moved from a fixed 5 min to the escalating `waitingUserBackoff` (20s → 5min).
+Pairs with web match-on-submit (migration 012) — the `waiting_user` retry is now
+a backstop, not the path the customer waits on. The webhook wire protocol is
+**unchanged** (still v2 timestamp + nonce).

@@ -29,4 +29,27 @@ void main() {
       expect(transientBackoff(0), const Duration(seconds: 5));
     });
   });
+
+  group('waitingUserBackoff', () {
+    test('attempt 1 -> 20s', () {
+      expect(waitingUserBackoff(1), const Duration(seconds: 20));
+    });
+    test('attempt 2 -> 40s', () {
+      expect(waitingUserBackoff(2), const Duration(seconds: 40));
+    });
+    test('attempt 3 -> 1 min', () {
+      expect(waitingUserBackoff(3), const Duration(minutes: 1));
+    });
+    test('attempts 4-6 -> 2 min', () {
+      expect(waitingUserBackoff(4), const Duration(minutes: 2));
+      expect(waitingUserBackoff(6), const Duration(minutes: 2));
+    });
+    test('attempt 7+ -> 5 min (bounded)', () {
+      expect(waitingUserBackoff(7), const Duration(minutes: 5));
+      expect(waitingUserBackoff(50), const Duration(minutes: 5));
+    });
+    test('attempt 0 falls back to 20s (defensive)', () {
+      expect(waitingUserBackoff(0), const Duration(seconds: 20));
+    });
+  });
 }

@@ -21,6 +21,14 @@ interface PurchaseBody {
   senderMsisdn?: string;
 }
 
+// initiate_purchase v3 (migration 012) returns one row.
+interface InitiateRow {
+  purchase_id: string;
+  status_out: string;
+  credits_granted: number;
+  new_balance: number | null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -45,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = userClient(auth.jwt);
-  const { data: purchaseId, error } = await supabase.rpc('initiate_purchase', {
+  const { data, error } = await supabase.rpc('initiate_purchase', {
     p_package_id: packageId,
     p_transaction_id: transactionId.trim(),
     p_sender_msisdn: senderMsisdn?.trim() || null,
@@ -84,10 +92,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // initiate_purchase v3 returns a single-row table. Match-on-submit may have
+  // already settled the purchase (completed / underpaid / mismatch) when the
+  // bKash SMS arrived before the user submitted.
+  const row = (Array.isArray(data) ? data[0] : data) as InitiateRow | undefined;
+  const status = row?.status_out ?? 'pending';
+  const creditsGranted = row?.credits_granted ?? null;
+  const newBalance = row?.new_balance ?? null;
+
+  let message: string;
+  switch (status) {
+    case 'completed':
+      message = `Payment confirmed — ${creditsGranted ?? ''} credits added to your account.`;
+      break;
+    case 'underpaid':
+      message = 'We received less than the pack price. Check the status pill to complete it.';
+      break;
+    case 'msisdn_mismatch_review':
+      message = 'Payment received but under review (sender number didn’t match).';
+      break;
+    default:
+      message = 'Payment recorded. We\'ll verify your bKash transaction and credit your account within seconds.';
+  }
+
   res.status(200).json({
     success: true,
-    purchaseId,
-    status: 'pending',
-    message: 'Payment recorded. We\'ll verify your bKash transaction and credit your account within a few minutes.',
+    purchaseId: row?.purchase_id,
+    status,
+    creditsGranted,
+    newBalance,
+    message,
   });
 }

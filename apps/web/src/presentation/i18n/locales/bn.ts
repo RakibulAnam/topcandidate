@@ -1043,6 +1043,10 @@ export const bn: Dictionary = {
     disputeSubmit: 'জমা দিন',
     disputeSubmitting: 'জমা হচ্ছে…',
     disputeFiled: 'ডিসপুট জমা হয়েছে — আমরা পর্যালোচনা করে যোগাযোগ করব।',
+    timelineSubmitted: 'জমা দেওয়া হয়েছে',
+    timelineVerifying: 'পেমেন্ট যাচাই হচ্ছে',
+    timelineDone: 'ক্রেডিট যোগ হয়েছে',
+    timelineActionNeeded: 'মনোযোগ প্রয়োজন',
   },
   purchaseHistory: {
     title: 'কেনাকাটার ইতিহাস',
