@@ -16,13 +16,13 @@
 
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { CONTACT_EMAIL } from '../support';
 
 interface Props {
   onBack: () => void;
 }
 
-const LAST_UPDATED = 'May 31, 2026';
-const CONTACT_EMAIL = 'support@topcandidate.app';
+const LAST_UPDATED = 'June 3, 2026';
 
 export const TermsOfService: React.FC<Props> = ({ onBack }) => {
   return (

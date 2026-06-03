@@ -15,7 +15,7 @@
 // the standard brand palette.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, X, Check } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, X, Check, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   clearPendingPurchase,
@@ -29,6 +29,7 @@ import {
   type PurchaseStatusResponse,
 } from '../../../infrastructure/api/purchaseStatusClient';
 import { useT } from '../../i18n/LocaleContext';
+import { CONTACT_EMAIL, contactMailto } from '../../support';
 
 // Slow fallback poll for the rare case the realtime socket drops. The primary
 // update path is the Supabase Realtime subscription (sub-second). No time cap —
@@ -224,7 +225,15 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
               </div>
             </div>
           ) : (
-            <div className="mt-3 pt-3 border-t border-charcoal-100 text-right">
+            <div className="mt-3 pt-3 border-t border-charcoal-100 flex items-center justify-between gap-3">
+              <a
+                href={contactMailto(t('verifyPill.emailSubject', { txn: pending.txnId }))}
+                title={CONTACT_EMAIL}
+                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-brand-600 hover:text-accent-600 transition-colors"
+              >
+                <Mail size={13} />
+                {t('verifyPill.contactUs')}
+              </a>
               <button
                 type="button"
                 onClick={onDismissClick}
@@ -501,6 +510,16 @@ const DisputeDialog: React.FC<DisputeDialogProps> = ({ txnId, onClose }) => {
             {submitting ? t('verifyPill.disputeSubmitting') : t('verifyPill.disputeSubmit')}
           </button>
         </div>
+
+        <p className="mt-4 pt-3 border-t border-charcoal-100 text-[12px] text-charcoal-500">
+          {t('verifyPill.disputeOrEmail')}{' '}
+          <a
+            href={contactMailto(t('verifyPill.emailSubject', { txn: txnId }), notes.trim() || undefined)}
+            className="font-mono text-brand-700 hover:text-accent-600 underline underline-offset-2 break-all"
+          >
+            {CONTACT_EMAIL}
+          </a>
+        </p>
       </div>
     </div>
   );
