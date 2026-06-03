@@ -25,6 +25,7 @@ import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { PurchaseModal } from './components/PurchaseModal';
 import { PurchaseHistorySection } from './components/PurchaseHistorySection';
+import { HelpContactSection } from './components/HelpContactSection';
 import { CreditsBadge } from './components/CreditsBadge';
 import { VerifyingPurchasePill } from './components/Layout/VerifyingPurchasePill';
 import type { ResumeData } from '../domain/entities';
@@ -652,13 +653,18 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                     )}
 
                     <PurchaseHistorySection />
+
+                    <HelpContactSection />
                 </div>
             </main>
 
             <footer className="border-t border-charcoal-200 bg-charcoal-50 py-6">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-brand-500">
                     <Wordmark />
-                    <p>{t('dashboard.footerLine', { year: new Date().getFullYear() })}</p>
+                    <div className="flex items-center gap-4">
+                        <a href="#help" className="hover:text-brand-700 transition-colors">{t('help.eyebrow')}</a>
+                        <p>{t('dashboard.footerLine', { year: new Date().getFullYear() })}</p>
+                    </div>
                 </div>
             </footer>
 

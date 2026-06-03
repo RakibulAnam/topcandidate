@@ -67,6 +67,10 @@ body {
   font-family: var(--font-sans);
   background-color: var(--color-charcoal-50);
   color: var(--color-brand-700);
+  /* Decorative offsets (e.g. the hero's fanned resume cards) must never
+     trigger horizontal scroll on narrow screens. `clip` (not `hidden`)
+     preserves the sticky navbar. */
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

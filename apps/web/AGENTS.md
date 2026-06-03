@@ -73,7 +73,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 
 | Area | File entry point | Status |
 | --- | --- | --- |
-| Landing page | `src/presentation/LandingScreen.tsx` | shipped — rebranded, no gradients, Saffron/Ink palette |
+| Landing page | `src/presentation/LandingScreen.tsx` | shipped — BD-localized editorial redesign: centered hero with a rendered ATS resume mock, five-item toolkit list, value/pricing section (free first resume, ৳200/5 via bKash), 3-step how-it-works, BD testimonials, FAQ accordion. No announcement bar, no mock-interview section. No gradients, Saffron/Ink palette |
 | Auth (email + password) | `src/presentation/LoginScreen.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth) |
 | Profile setup (master profile) | `src/presentation/ProfileSetupScreen.tsx` | shipped — one-time profile capture used to seed future resumes |
 | Profile edit | `src/presentation/ProfileScreen.tsx` | shipped — view/edit saved master profile sections |
@@ -359,7 +359,7 @@ package.json                            Name: "top-candidate"
 
 src/index.tsx                           Vite entry → <App />
 src/presentation/App.tsx                Auth + screen routing + initial data load + ResumeService boot
-src/presentation/LandingScreen.tsx      Rebranded landing (Editorial Ink + Saffron, no gradients)
+src/presentation/LandingScreen.tsx      BD-localized landing (centered hero + resume mock, pricing/value, FAQ; no mock interviews)
 src/presentation/LoginScreen.tsx        Email/password auth
 src/presentation/DashboardScreen.tsx    List of generated resumes + job applications
 src/presentation/ProfileSetupScreen.tsx First-run profile capture
@@ -678,7 +678,7 @@ CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pendin
 
 Agents: **do not build these unless the user asks.**
 
-- **Mock-interview marketplace** — consultant profiles, booking, payments. The landing page now teases this section as **Coming Soon** (no consultant cards, no booking CTA) so we don't promise something we haven't built. The announcement bar and the `feat6` toolkit card still mention mock interviews as part of the value prop; soften further if/when product positioning calls for it. Separate product scope.
+- **Mock-interview marketplace** — consultant profiles, booking, payments. The landing page **no longer references mock interviews at all** (the Coming Soon section, the announcement bar, and the mock-interview toolkit item were all removed in the BD-localized redesign) so we don't promise something we haven't built. Separate product scope.
 - **OAuth providers** — Supabase Auth is wired for email/password only.
 - **Unit / integration tests** — no test harness exists. Don't invent one without asking.
 - **Code-splitting** — the bundle is ~1.7MB. Vite warns about it; acceptable for now.
