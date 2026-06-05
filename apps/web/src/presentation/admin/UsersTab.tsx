@@ -17,7 +17,9 @@ import {
 
 interface UserRow {
   id: string;
-  email: string;
+  email: string;            // profiles.email (app-managed, can drift)
+  loginEmail: string | null; // auth.users.email — the real login (source of truth)
+  emailMismatch?: boolean;
   full_name: string | null;
   toolkit_credits: number;
   flagged_at: string | null;
@@ -79,7 +81,16 @@ export const UsersTab: React.FC<{ api: AdminApi; initialUserId?: string | null; 
 
       <DataTable<UserRow>
         columns={[
-          { key: 'email', header: 'Email', render: (u) => <span className="font-mono text-[12px] break-all">{u.email}</span> },
+          { key: 'email', header: 'Email', render: (u) => (
+            <div className="font-mono text-[12px] break-all">
+              <span>{u.loginEmail ?? u.email}</span>
+              {u.emailMismatch && (
+                <span className="block text-[10.5px] text-accent-600" title="The profile email differs from the real login email">
+                  profile: {u.email}
+                </span>
+              )}
+            </div>
+          ) },
           { key: 'name', header: 'Name', render: (u) => <span>{u.full_name ?? <span className="text-charcoal-400">—</span>}</span> },
           { key: 'credits', header: 'Credits', width: 'w-24', align: 'right', render: (u) => <span className={u.toolkit_credits < 0 ? 'text-red-700 font-semibold' : ''}>{u.toolkit_credits}</span> },
           { key: 'flagged', header: 'Status', width: 'w-28', render: (u) => u.flagged_at ? <StatusPill status="flagged" tone="danger" label="flagged" /> : <span className="text-charcoal-400 text-[12px]">—</span> },
@@ -126,6 +137,8 @@ const FooterPagination: React.FC<{ page: number; pageSize: number; total: number
 
 interface UserDetailResp {
   profile: { id: string; email: string; full_name: string | null; phone: string | null; toolkit_credits: number; flagged_at: string | null; created_at: string };
+  loginEmail: string | null;
+  emailMismatch: boolean;
   lifetimePaid: number;
   purchases: Array<{ id: string; payment_reference: string; amount_taka: number; observed_amount_taka: number | null; status: string; credits_granted: number; created_at: string }>;
   resumes: Array<{ id: string; title: string; company: string | null; created_at: string }>;
@@ -199,11 +212,16 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
       <Card className="mb-5">
         <div className="flex items-start justify-between flex-wrap gap-5">
           <div className="min-w-0 flex-1">
-            <h2 className="font-display text-2xl font-semibold text-brand-700 leading-tight">{data.profile.full_name ?? data.profile.email}</h2>
+            <h2 className="font-display text-2xl font-semibold text-brand-700 leading-tight">{data.profile.full_name ?? data.loginEmail ?? data.profile.email}</h2>
             <div className="text-sm text-charcoal-500 mt-1">
-              <span className="font-mono">{data.profile.email}</span>
+              <span className="font-mono">{data.loginEmail ?? data.profile.email}</span>
               {data.profile.phone && <span> · {data.profile.phone}</span>}
             </div>
+            {data.emailMismatch && (
+              <div className="font-mono text-[11px] text-accent-600 mt-0.5" title="Profile email differs from the real login email">
+                profile email: {data.profile.email}
+              </div>
+            )}
             <div className="font-mono text-[11px] text-charcoal-400 mt-1">{data.profile.id}</div>
             <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
               <KeyValue label="Joined">{new Date(data.profile.created_at).toLocaleDateString()}</KeyValue>
@@ -228,7 +246,7 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
           ) : (
             <Button variant="secondary" size="sm" onClick={() => setModal({ kind: 'flag' })}>Flag user</Button>
           )}
-          <a href={`mailto:${data.profile.email}`} className={['inline-flex items-center h-7 px-2.5 rounded-full text-[11px] font-semibold border bg-white hover:bg-charcoal-50 text-brand-700 border-charcoal-300', focusRing].join(' ')}>Email customer</a>
+          <a href={`mailto:${data.loginEmail ?? data.profile.email}`} className={['inline-flex items-center h-7 px-2.5 rounded-full text-[11px] font-semibold border bg-white hover:bg-charcoal-50 text-brand-700 border-charcoal-300', focusRing].join(' ')}>Email customer</a>
         </div>
       </Card>
 

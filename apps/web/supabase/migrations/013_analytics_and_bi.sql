@@ -196,6 +196,21 @@ create or replace view v_credit_liability as
          count(*) filter (where toolkit_credits < 0)                          as negative_balance_users
   from profiles;
 
-comment on table analytics_events is 'First-party product/funnel analytics. Inserted by /api/track (service role). RLS closed.';
+-- ──────────────────────────────────────────────────────────────────
+-- 8. admin_auth_emails — service-role lookup of the TRUE login email
+-- ──────────────────────────────────────────────────────────────────
+-- profiles.email is app-managed and can drift from the real auth login email
+-- (e.g. two profiles ended up showing the same email while having different
+-- logins). The admin Users/User-detail surfaces use this to show the source
+-- of truth. SECURITY DEFINER so it can read auth.users; execute revoked from
+-- anon/authenticated (only the service role — i.e. admin endpoints — calls it).
+create or replace function public.admin_auth_emails(p_ids uuid[])
+returns table(id uuid, email text)
+language sql security definer set search_path = public as $$
+  select u.id, u.email::text from auth.users u where u.id = any(p_ids);
+$$;
+revoke all on function public.admin_auth_emails(uuid[]) from public, anon, authenticated;
+
+comment on table analytics_events is 'First-party product/funnel analytics. Inserted by the browser via supabase-js (insert-only RLS). RLS closed for reads.';
 comment on table credit_ledger    is 'Append-only journal of toolkit_credits changes (trigger-fed). reason is best-effort.';
 comment on table marketing_spend  is 'Operator-entered ad spend for CAC/ROAS.';
