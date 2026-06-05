@@ -8,6 +8,7 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
+import type { UsageSink } from './usage.js';
 import {
   buildSystemInstruction,
   buildUserPrompt,
@@ -42,7 +43,7 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
     this.model = modelOverride ?? 'gemini-2.5-flash';
   }
 
-  async optimize(data: ResumeData): Promise<OptimizedResumeData> {
+  async optimize(data: ResumeData, usage?: UsageSink): Promise<OptimizedResumeData> {
     const schema = this.buildSchema(data);
     // Gemini doesn't need the schema spec embedded — it gets it via the
     // SDK's responseSchema field instead.
@@ -67,6 +68,17 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
         );
 
         const responseText = this.extractText(result);
+
+        // Capture token usage for cost telemetry before discarding the raw
+        // SDK response (additive — does not affect the returned resume).
+        if (usage) {
+          usage.provider = 'gemini';
+          usage.model = this.model;
+          const um = (result as any)?.usageMetadata;
+          usage.promptTokens = um?.promptTokenCount;
+          usage.completionTokens = um?.candidatesTokenCount;
+        }
+
         const parsed = safeJsonParse<OptimizedResumeData>(responseText);
 
         normalizeSkills(parsed);

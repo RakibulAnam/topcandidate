@@ -11,6 +11,7 @@ import { GenerateToolkitUseCase, IToolkitGenerator } from '../../domain/usecases
 import { IResumeRepository } from '../../domain/repositories/IResumeRepository';
 import { IProfileRepository } from '../../domain/repositories/IProfileRepository';
 import { assertNotGibberish, FieldCheck } from '../validation/gibberishDetector';
+import { track } from '../../infrastructure/analytics/track';
 
 export class ResumeService {
   private optimizeUseCase: OptimizeResumeUseCase;
@@ -112,6 +113,8 @@ export class ResumeService {
     // failure would silently burn a second credit. Per-item retries go through
     // /api/toolkit-item, which is free; the warning-card retry buttons in the
     // Preview tabs are the supported recovery path.
+    track('resume_generation_started', { type: 'paid_tailored' });
+
     const [optimizeResult, toolkitResult] = await Promise.allSettled([
       this.optimizeUseCase.execute(data),
       this.toolkitUseCase.execute(data),
@@ -123,6 +126,7 @@ export class ResumeService {
     // and we surface the error to the caller the same way as before.
     if (optimizeResult.status === 'rejected') {
       console.error('[resume-service] optimizer rejected:', this.errorMessage(optimizeResult.reason));
+      track('resume_generation_completed', { type: 'paid_tailored', success: false });
       throw optimizeResult.reason instanceof Error
         ? optimizeResult.reason
         : new Error(this.errorMessage(optimizeResult.reason));
@@ -165,6 +169,8 @@ export class ResumeService {
     }
 
     console.info(`[resume-service] optimizeResume done total=${Math.round(performance.now() - t0)}ms`);
+
+    track('resume_generation_completed', { type: 'paid_tailored', success: true });
 
     return {
       ...optimizedData,
@@ -461,12 +467,21 @@ export class ResumeService {
     // project / activity descriptions) and we shouldn't spend AI tokens on it.
     this.assertContentIsReal(resumeData);
 
+    track('resume_generation_started', { type: 'free_general' });
+
     // Optimize via the free general-resume path (no credit gate, no toolkit).
-    const optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
+    let optimizedData;
+    try {
+      optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
+    } catch (err) {
+      track('resume_generation_completed', { type: 'free_general', success: false });
+      throw err;
+    }
     const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
 
     // Save and return ID
     const id = await this.saveGeneratedResume(userId, mergedData, ResumeService.GENERAL_RESUME_TITLE);
+    track('resume_generation_completed', { type: 'free_general', success: true });
     return id;
   }
 

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Plus, Minus, Menu, X, Sparkles, Quote } from 'lucide-react';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { contactMailto } from './support';
+import { track } from '../infrastructure/analytics/track';
 
 interface Props {
     onGetStarted: () => void;
@@ -36,6 +37,11 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
     const t = useT();
     const [mobileOpen, setMobileOpen] = useState(false);
     const [faqOpen, setFaqOpen] = useState(0);
+
+    // Funnel: record the landing view once per mount (fire-and-forget).
+    useEffect(() => {
+        track('landing_viewed');
+    }, []);
 
     const scrollTo = (id: string) => {
         document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../supabase/client';
+import { track, getFirstTouch } from '../analytics/track';
 
 /**
  * Sign-in / sign-up moved here from `LoginScreen` (2026-05-30 audit, Clean
@@ -123,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signIn = async (email: string, password: string) => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        track('signin_completed');
     };
 
     const signUp = async ({ email, password, fullName }: AuthSignUpInput): Promise<SignUpResult> => {
@@ -132,6 +134,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             options: { data: { full_name: fullName } },
         });
         if (error) throw error;
+
+        track('signup_completed');
+
+        // Persist first-touch attribution to the user's own profile row.
+        // Best-effort: a failure here must never block or fail signup, so it's
+        // wrapped and the result is ignored. The new user id comes from the
+        // signUp response (session.user when confirmation is off, else data.user).
+        const newUserId = data.session?.user?.id ?? data.user?.id ?? null;
+        if (newUserId) {
+            try {
+                const ft = getFirstTouch();
+                void supabase
+                    .from('profiles')
+                    .update({
+                        utm_source: ft.utm_source ?? null,
+                        utm_medium: ft.utm_medium ?? null,
+                        utm_campaign: ft.utm_campaign ?? null,
+                        signup_referrer: ft.referrer ?? null,
+                    })
+                    .eq('id', newUserId);
+            } catch { /* attribution is non-fatal — never block signup */ }
+        }
+
         // When Supabase has email confirmation OFF (the product default — see
         // file header), `data.session` is populated and the user is logged in
         // immediately. We still expose `needsEmailConfirmation` for future

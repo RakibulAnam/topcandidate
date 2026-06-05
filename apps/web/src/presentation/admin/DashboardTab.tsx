@@ -8,6 +8,7 @@ import {
   Button, Card, ContentGrid, DataTable, EmptyState, ErrorState, PageHeader,
   Section, Skeleton, StatusPill, TimeCell, focusRing,
 } from './ui';
+import { TimeSeriesChart } from './charts';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
@@ -82,6 +83,7 @@ export const DashboardTab: React.FC<{
 }> = ({ api, onOpenPurchase, onOpenDisputes, onOpenOrphans }) => {
   const [range, setRange] = useState<Range>('month');
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [revTrend, setRevTrend] = useState<{ day: string; revenue_taka: number }[] | null>(null);
   const [summaryErr, setSummaryErr] = useState<string | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);
@@ -104,6 +106,9 @@ export const DashboardTab: React.FC<{
       .then((r) => setQueue(r.items))
       .catch((e: unknown) => setQueueErr(e instanceof Error ? e.message : String(e)))
       .finally(() => setQueueLoading(false));
+    void api.call<{ dailyRevenue: { day: string; revenue_taka: number }[] }>('revenue-analytics', { query: { range: 'month' } })
+      .then((r) => setRevTrend(r.dailyRevenue))
+      .catch(() => setRevTrend([]));
   }, [api, range]);
 
   useEffect(() => {
@@ -128,6 +133,16 @@ export const DashboardTab: React.FC<{
       >
         <SummaryCards summary={summary} error={summaryErr} range={range} onRetry={refresh} />
       </Section>
+
+      <div className="mt-6">
+        <Section title="Revenue — last 30 days" description="Completed bKash revenue per day (৳).">
+          <Card>
+            {revTrend == null
+              ? <Skeleton className="h-[200px] w-full" />
+              : <TimeSeriesChart data={revTrend.map((d) => ({ day: d.day, value: d.revenue_taka }))} formatValue={(n) => `৳${Math.round(n)}`} />}
+          </Card>
+        </Section>
+      </div>
 
       <div className="mt-6">
         <Section title="Operations" description="Live operational counts.">

@@ -14,6 +14,7 @@
 
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
+import type { UsageSink } from './usage.js';
 
 export interface NamedOptimizer {
   name: string;          // e.g. "groq", "gemini" — for logs
@@ -51,7 +52,7 @@ export class MultiProviderResumeOptimizer implements IResumeOptimizer {
     this.transientCooldownMs = opts.transientCooldownMs ?? 30 * 1000;
   }
 
-  async optimize(data: ResumeData): Promise<OptimizedResumeData> {
+  async optimize(data: ResumeData, usage?: UsageSink): Promise<OptimizedResumeData> {
     const now = Date.now();
     const candidates = this.providers.filter(p => (this.skipUntil.get(p.name) ?? 0) <= now);
     // If everyone is in cooldown, try them all anyway — better to pay the
@@ -61,7 +62,16 @@ export class MultiProviderResumeOptimizer implements IResumeOptimizer {
     let lastError: unknown;
     for (const { name, optimizer } of order) {
       try {
-        const result = await optimizer.optimize(data);
+        // The concrete Groq/Gemini optimizers accept an optional UsageSink as a
+        // trailing arg (additive telemetry — not part of the domain interface),
+        // and fill in the provider/model that actually served the request. The
+        // structural cast lets us pass it through whichever provider wins,
+        // including the Gemini fallback.
+        const optimizeWithUsage = optimizer.optimize as (
+          d: ResumeData,
+          u?: UsageSink,
+        ) => Promise<OptimizedResumeData>;
+        const result = await optimizeWithUsage(data, usage);
         // Successful call — clear any stale cooldown for this provider.
         this.skipUntil.delete(name);
         return result;

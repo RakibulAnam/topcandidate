@@ -18,7 +18,20 @@ import { userClient } from './auth.js';
 
 export const DEFAULT_DAILY_CAP = 20;
 
-export type CallKind = 'optimize' | 'toolkit_item' | 'extract_resume';
+export type CallKind = 'optimize' | 'optimize_general' | 'toolkit_item' | 'extract_resume';
+
+// Optional cost/telemetry metadata recorded alongside each call. Every field
+// is optional so existing callers (and partial-data paths) keep working — a
+// missing field just lands as NULL in the corresponding ai_call_log column.
+export interface CallMeta {
+  provider?: string;
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  costUsd?: number;
+  status?: 'success' | 'error';
+  latencyMs?: number;
+}
 
 export class RateLimitError extends Error {
   status = 429;
@@ -56,15 +69,32 @@ export async function assertWithinLimit(
 export async function logCall(
   userId: string,
   jwt: string,
-  kind: CallKind
+  kind: CallKind,
+  meta?: CallMeta
 ): Promise<void> {
-  const supabase = userClient(jwt);
-  const { error } = await supabase
-    .from('ai_call_log')
-    .insert({ user_id: userId, kind });
-  if (error) {
-    // Logging failures are non-fatal — call already succeeded; we'd rather
-    // give the user their resume than fail at the audit step.
-    console.warn('[rateLimit] Failed to log AI call:', error.message);
+  // Telemetry is additive and must NEVER break the request — wrap everything
+  // (including building the row) in a try/catch and only ever warn.
+  try {
+    const supabase = userClient(jwt);
+    const row: Record<string, unknown> = { user_id: userId, kind };
+    if (meta) {
+      // Only set columns we actually have values for; omitted → NULL.
+      if (meta.provider !== undefined) row.provider = meta.provider;
+      if (meta.model !== undefined) row.model = meta.model;
+      if (meta.promptTokens !== undefined) row.prompt_tokens = meta.promptTokens;
+      if (meta.completionTokens !== undefined) row.completion_tokens = meta.completionTokens;
+      if (meta.costUsd !== undefined) row.cost_usd = meta.costUsd;
+      if (meta.status !== undefined) row.status = meta.status;
+      if (meta.latencyMs !== undefined) row.latency_ms = meta.latencyMs;
+    }
+    const { error } = await supabase.from('ai_call_log').insert(row);
+    if (error) {
+      // Logging failures are non-fatal — call already succeeded; we'd rather
+      // give the user their resume than fail at the audit step.
+      console.warn('[rateLimit] Failed to log AI call:', error.message);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[rateLimit] Failed to log AI call (threw):', msg);
   }
 }

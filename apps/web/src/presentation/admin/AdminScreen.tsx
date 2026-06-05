@@ -35,8 +35,14 @@ import { DisputesTab } from './DisputesTab';
 import { ParserFailuresTab } from './ParserFailuresTab';
 import { AuditLogTab } from './AuditLogTab';
 import { SettingsTab } from './SettingsTab';
+import { RevenueTab } from './RevenueTab';
+import { ProductTab } from './ProductTab';
+import { MarketingTab } from './MarketingTab';
+import { CustomerIntelTab } from './CustomerIntelTab';
+import { SystemTab } from './SystemTab';
 
-type TabKey = 'dashboard' | 'users' | 'purchases' | 'orphans' | 'disputes' | 'parser' | 'audit' | 'settings';
+type TabKey = 'dashboard' | 'revenue' | 'product' | 'marketing' | 'customers'
+  | 'users' | 'purchases' | 'orphans' | 'disputes' | 'parser' | 'audit' | 'system' | 'settings';
 
 interface NavItem {
   key: TabKey;
@@ -60,6 +66,15 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    title: 'Analytics',
+    items: [
+      { key: 'revenue', label: 'Revenue', icon: <Icon path="M4 19V5 M4 19h16 M8 16l3-4 3 2 4-6" /> },
+      { key: 'product', label: 'Product', icon: <Icon path="M12 3 3 7.5 12 12l9-4.5z M3 7.5V16l9 4.5 9-4.5V7.5" /> },
+      { key: 'marketing', label: 'Marketing', icon: <Icon path="M3 11v2l11 5V6L3 11z M14 8l5-3 M14 16l5 3 M19 11h2" /> },
+      { key: 'customers', label: 'Customers', icon: <Icon path="M17 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0z M3 21a9 9 0 0 1 18 0" /> },
+    ],
+  },
+  {
     title: 'Operations',
     items: [
       { key: 'disputes', label: 'Disputes', icon: <Icon path="M3 21v-1a8 8 0 0 1 16 0v1M11 3h8v6h-8z" /> },
@@ -78,6 +93,7 @@ const NAV: NavSection[] = [
   {
     title: 'System',
     items: [
+      { key: 'system', label: 'System health', icon: <Icon path="M3 12h4l2 5 4-12 2 7h6" /> },
       { key: 'settings', label: 'Settings', icon: <Icon path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 z M19 12a7 7 0 0 0-.4-2.3l2-1.5-2-3.4-2.3 1A7 7 0 0 0 14 4.4L13.6 2h-3.2L10 4.4a7 7 0 0 0-2.3 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .8.1 1.6.4 2.3l-2 1.5 2 3.4 2.3-1A7 7 0 0 0 10 19.6L10.4 22h3.2l.4-2.4a7 7 0 0 0 2.3-1.3l2.3 1 2-3.4-2-1.5c.3-.7.4-1.5.4-2.3z" /> },
     ],
   },
@@ -87,6 +103,11 @@ const ALL_TABS = NAV.flatMap((s) => s.items.map((i) => i.key));
 
 const TAB_META: Record<TabKey, { title: string; description?: string }> = {
   dashboard: { title: 'Dashboard', description: 'At-a-glance state of pending payments, disputes, and SMS reconciliation.' },
+  revenue: { title: 'Revenue', description: 'Gross, net, refunds, daily trend, and credit liability.' },
+  product: { title: 'Product', description: 'Generation mix, AI cost, and approximate gross margin.' },
+  marketing: { title: 'Marketing', description: 'Acquisition funnel, channel CAC/ROAS, and ad-spend logging.' },
+  customers: { title: 'Customers', description: 'Current-state segmentation and customer leaderboards.' },
+  system: { title: 'System health', description: 'AI usage/cost, payments pipeline, and environment health.' },
   users: { title: 'Users', description: 'Customer profiles, credits, history, and operator notes.' },
   purchases: { title: 'Purchases', description: 'Every bKash purchase across all states.' },
   orphans: { title: 'Orphan SMS', description: 'Inbound bKash SMS the watcher could not match to a pending purchase.' },
@@ -248,6 +269,11 @@ export const AdminScreen: React.FC = () => {
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-7xl w-full mx-auto">
           {tab === 'dashboard' && <DashboardTab api={api} onOpenPurchase={goPurchase} onOpenDisputes={() => goTab('disputes')} onOpenOrphans={() => goTab('orphans')} />}
+          {tab === 'revenue' && <RevenueTab api={api} />}
+          {tab === 'product' && <ProductTab api={api} />}
+          {tab === 'marketing' && <MarketingTab api={api} />}
+          {tab === 'customers' && <CustomerIntelTab api={api} onOpenUser={goUser} />}
+          {tab === 'system' && <SystemTab api={api} />}
           {tab === 'users' && <UsersTab api={api} initialUserId={openUserId} onClearInitial={() => setOpenUserId(null)} />}
           {tab === 'purchases' && <PurchasesTab api={api} initialPurchase={openPurchase} onClearInitial={() => setOpenPurchase(null)} onOpenUser={goUser} />}
           {tab === 'orphans' && <OrphansTab api={api} />}

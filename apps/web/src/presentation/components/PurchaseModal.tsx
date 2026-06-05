@@ -40,6 +40,7 @@ import { useT } from '../i18n/LocaleContext';
 import { purchasePackage, type PackageId } from '../../infrastructure/api/purchaseClient';
 import { ApiCallError } from '../../infrastructure/ai/proxy/ProxyClients';
 import { writePendingPurchase } from '../../infrastructure/api/purchaseStatusClient';
+import { track } from '../../infrastructure/analytics/track';
 
 interface Props {
   isOpen: boolean;
@@ -69,6 +70,12 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   const [copied, setCopied] = useState(false);
   const [showPhone, setShowPhone] = useState(false);
   const txnInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Funnel: one event per open (effect re-fires only when isOpen flips true).
+  useEffect(() => {
+    if (!isOpen) return;
+    track('purchase_modal_opened');
+  }, [isOpen]);
 
   // Body scroll lock — keeps the page behind the backdrop still.
   useEffect(() => {
@@ -125,6 +132,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   const handleSubmit = async () => {
     if (busy || !txnIsValid) return;
     setPhase('submitting');
+    track('purchase_submitted', { packageId: PACKAGE_ID });
     try {
       const result = await purchasePackage({
         packageId: PACKAGE_ID,
@@ -136,6 +144,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       // arrived, the server settled the purchase synchronously. Show the
       // confirmed overlay immediately instead of handing off to the pill.
       if (result.status === 'completed') {
+        track('purchase_confirmed', { status: result.status, creditsGranted: result.creditsGranted });
         setPhase('confirmed');
         toast.success(t('purchaseModal.successToast'));
         // Hold the green check briefly, then refresh credits + close.
@@ -146,6 +155,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       // Otherwise hand off to the navbar VerifyingPurchasePill, which subscribes
       // to Supabase Realtime and surfaces the right action card per observed
       // status (verifying / underpaid / mismatch / expired / completed).
+      track('purchase_pending');
       writePendingPurchase({ txnId: trimmedTxn, submittedAt: Date.now() });
 
       toast.success(t('purchaseModal.successToast'));
