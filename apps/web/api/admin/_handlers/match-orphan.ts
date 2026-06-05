@@ -6,7 +6,7 @@
 // consistent with multi-SMS flows (case #14).
 //
 // Request:  { smsId, purchaseId, reason }
-// Headers:  X-Admin-Key
+// Auth:     Authorization: Bearer <session token> (owner login)
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase, requireReason, recordAuditAction } from '../_lib/adminAuth.js';

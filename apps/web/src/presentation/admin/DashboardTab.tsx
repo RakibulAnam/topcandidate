@@ -1,13 +1,39 @@
-// Dashboard — 4 stat tiles + unified action queue.
-// Tiles poll every 30s. Action queue refreshes on demand and after navigation.
+// Dashboard — business summary (range-filtered) + operational tiles + queue.
+// Everything polls every 30s. The summary re-fetches when the range changes.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import { ageMin, taka } from './adminApi';
 import {
   Button, Card, ContentGrid, DataTable, EmptyState, ErrorState, PageHeader,
-  Section, Skeleton, StatusPill, TimeCell,
+  Section, Skeleton, StatusPill, TimeCell, focusRing,
 } from './ui';
+
+type Range = 'day' | 'week' | 'month' | 'all';
+
+const RANGE_LABEL: Record<Range, string> = { day: 'Today', week: 'This week', month: 'This month', all: 'All time' };
+const RANGE_SHORT: Record<Range, string> = { day: 'Day', week: 'Week', month: 'Month', all: 'All' };
+
+interface SummaryData {
+  range: Range;
+  totalUsers: number;
+  newUsersInRange: number;
+  lifetimeEarningsTaka: number;
+  earningsInRangeTaka: number;
+  completedInRange: number;
+  lifetimeCompletedCount: number;
+  failuresInRange: number;
+  failureBreakdown: Record<string, number>;
+  openDisputes: number;
+  disputesInRange: number;
+}
+
+const FAILURE_LABEL: Record<string, string> = {
+  failed: 'failed',
+  expired: 'expired',
+  underpaid: 'underpaid',
+  msisdn_mismatch_review: 'mismatch',
+};
 
 interface DashboardStats {
   pending: number;
@@ -54,6 +80,9 @@ export const DashboardTab: React.FC<{
   onOpenDisputes: () => void;
   onOpenOrphans: () => void;
 }> = ({ api, onOpenPurchase, onOpenDisputes, onOpenOrphans }) => {
+  const [range, setRange] = useState<Range>('month');
+  const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [summaryErr, setSummaryErr] = useState<string | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsErr, setStatsErr] = useState<string | null>(null);
   const [queue, setQueue] = useState<QueueItem[] | null>(null);
@@ -61,9 +90,13 @@ export const DashboardTab: React.FC<{
   const [queueErr, setQueueErr] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
+    setSummaryErr(null);
     setStatsErr(null);
     setQueueErr(null);
     setQueueLoading(true);
+    void api.call<SummaryData>('summary', { query: { range } })
+      .then(setSummary)
+      .catch((e: unknown) => setSummaryErr(e instanceof Error ? e.message : String(e)));
     void api.call<DashboardStats>('dashboard')
       .then(setStats)
       .catch((e: unknown) => setStatsErr(e instanceof Error ? e.message : String(e)));
@@ -71,7 +104,7 @@ export const DashboardTab: React.FC<{
       .then((r) => setQueue(r.items))
       .catch((e: unknown) => setQueueErr(e instanceof Error ? e.message : String(e)))
       .finally(() => setQueueLoading(false));
-  }, [api]);
+  }, [api, range]);
 
   useEffect(() => {
     refresh();
@@ -84,13 +117,23 @@ export const DashboardTab: React.FC<{
       <PageHeader
         eyebrow="Overview"
         title="Dashboard"
-        description="Glance state of pending payments, disputes, and SMS reconciliation. Polls every 30 seconds."
+        description="Business summary, operational state, and the action queue. Polls every 30 seconds."
         actions={<Button variant="secondary" size="sm" onClick={refresh}>Refresh</Button>}
       />
 
-      <Section>
-        <Tiles stats={stats} error={statsErr} onRetry={refresh} />
+      <Section
+        title="Business summary"
+        description="Earnings, users, failures and disputes — scoped by the selected period."
+        actions={<RangeToggle value={range} onChange={setRange} />}
+      >
+        <SummaryCards summary={summary} error={summaryErr} range={range} onRetry={refresh} />
       </Section>
+
+      <div className="mt-6">
+        <Section title="Operations" description="Live operational counts.">
+          <Tiles stats={stats} error={statsErr} onRetry={refresh} />
+        </Section>
+      </div>
 
       <div className="mt-6">
         <Section
@@ -140,6 +183,91 @@ function routeAction(item: QueueItem, openPurchase: (sel: { id?: string; trxId?:
   else if (item.kind === 'orphan') openOrphans();
   else openPurchase({ id: item.id });
 }
+
+// Segmented Day/Week/Month/All control that re-scopes the summary.
+const RangeToggle: React.FC<{ value: Range; onChange: (r: Range) => void }> = ({ value, onChange }) => (
+  <div className="inline-flex rounded-xl border border-charcoal-200 bg-white p-0.5" role="tablist" aria-label="Summary period">
+    {(['day', 'week', 'month', 'all'] as Range[]).map((r) => {
+      const active = r === value;
+      return (
+        <button
+          key={r}
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => onChange(r)}
+          className={[
+            'px-3 py-1.5 rounded-[10px] text-[12px] font-semibold transition-colors',
+            active ? 'bg-brand-700 text-white' : 'text-charcoal-600 hover:text-brand-700 hover:bg-charcoal-100',
+            focusRing,
+          ].join(' ')}
+        >
+          {RANGE_SHORT[r]}
+        </button>
+      );
+    })}
+  </div>
+);
+
+const SummaryCards: React.FC<{ summary: SummaryData | null; error: string | null; range: Range; onRetry: () => void }> = ({ summary, error, range, onRetry }) => {
+  if (error) return <ErrorState error={error} onRetry={onRetry} />;
+  if (!summary) {
+    return (
+      <ContentGrid cols={4}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}><div className="space-y-2"><Skeleton className="h-3 w-24" /><Skeleton className="h-9 w-24" /><Skeleton className="h-3 w-28" /></div></Card>
+        ))}
+      </ContentGrid>
+    );
+  }
+
+  const periodWord = RANGE_LABEL[range].toLowerCase();
+  const failParts = Object.entries(summary.failureBreakdown)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${n} ${FAILURE_LABEL[k] ?? k}`);
+
+  return (
+    <ContentGrid cols={4}>
+      <SummaryCard
+        label="Earnings"
+        value={taka(summary.earningsInRangeTaka)}
+        sub={`Lifetime ${taka(summary.lifetimeEarningsTaka)} · ${summary.completedInRange} sale${summary.completedInRange === 1 ? '' : 's'} ${periodWord}`}
+        tone="brand"
+      />
+      <SummaryCard
+        label="Total users"
+        value={String(summary.totalUsers)}
+        sub={range === 'all' ? 'all registered' : `+${summary.newUsersInRange} new ${periodWord}`}
+        tone="neutral"
+      />
+      <SummaryCard
+        label="Transaction failures"
+        value={String(summary.failuresInRange)}
+        sub={failParts.length ? failParts.join(' · ') : `none ${periodWord}`}
+        tone={summary.failuresInRange > 0 ? 'warn' : 'neutral'}
+      />
+      <SummaryCard
+        label="Disputes"
+        value={String(summary.openDisputes)}
+        sub={summary.openDisputes > 0 ? `${summary.openDisputes} open · ${summary.disputesInRange} ${periodWord}` : `${summary.disputesInRange} opened ${periodWord}`}
+        tone={summary.openDisputes > 0 ? 'bad' : 'neutral'}
+      />
+    </ContentGrid>
+  );
+};
+
+type SummaryTone = 'neutral' | 'brand' | 'warn' | 'bad';
+
+const SummaryCard: React.FC<{ label: string; value: string; sub: string; tone: SummaryTone }> = ({ label, value, sub, tone }) => {
+  const valueColor = tone === 'bad' ? 'text-red-700' : tone === 'warn' ? 'text-accent-600' : tone === 'brand' ? 'text-brand-700' : 'text-brand-700';
+  return (
+    <Card>
+      <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">{label}</div>
+      <div className={`mt-1 font-display text-3xl font-semibold ${valueColor} leading-none`}>{value}</div>
+      {sub && <div className="mt-2 text-[12px] text-charcoal-500">{sub}</div>}
+    </Card>
+  );
+};
 
 const Tiles: React.FC<{ stats: DashboardStats | null; error: string | null; onRetry: () => void }> = ({ stats, error, onRetry }) => {
   if (error) return <ErrorState error={error} onRetry={onRetry} />;

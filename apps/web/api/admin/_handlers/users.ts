@@ -1,7 +1,7 @@
 // GET /api/admin/users?q=&page=&pageSize=
 //
 // Search/list customer profiles. Substring search on email or id prefix.
-// Auth: X-Admin-Key. Read-only — no audit row written.
+// Auth: Bearer session token (owner login). Read-only — no audit row written.
 //
 // Uses the pg_trgm GIN index from migration 009 for fast email substring
 // search. UUID prefix match falls back to equality on full UUID input.

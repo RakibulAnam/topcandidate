@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { AdminApi } from './adminApi';
-import { ADMIN_KEY_STORAGE } from './adminApi';
+import { ADMIN_TOKEN_STORAGE } from './adminApi';
 import {
   Button, Card, ContentGrid, EmptyState, ErrorState, KeyValue, PageHeader,
   ReasonModal, Section, Skeleton, StatusPill, TimeCell, withToast,
@@ -133,7 +133,7 @@ export const SettingsTab: React.FC<{ api: AdminApi; onLock: () => void }> = ({ a
                 <p className="text-[12px] text-charcoal-500 mt-1 max-w-md">Lock the panel without removing the stored key, or fully reset.</p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="secondary" onClick={() => { try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch { /* ignore */ } window.location.reload(); }}>Reset session</Button>
+                <Button size="sm" variant="secondary" onClick={() => { try { sessionStorage.removeItem(ADMIN_TOKEN_STORAGE); } catch { /* ignore */ } window.location.reload(); }}>Reset session</Button>
                 <Button size="sm" variant="danger" onClick={onLock}>Lock</Button>
               </div>
             </div>

@@ -49,10 +49,15 @@ import orphanMarkIgnored from './_handlers/orphan-mark-ignored.js';
 import auditLog from './_handlers/audit-log.js';
 import settings from './_handlers/settings.js';
 import actionQueue from './_handlers/action-queue.js';
+import login from './_handlers/login.js';
+import summary from './_handlers/summary.js';
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
 const HANDLERS: Record<string, Handler> = {
+  // Auth (login is the ONLY unauthenticated action — it does its own checks)
+  'login': login,
+  'summary': summary,
   // Original (P0 recovery surface)
   'confirm-purchase': confirmPurchase,
   'refund-purchase': refundPurchase,

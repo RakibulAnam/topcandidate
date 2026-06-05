@@ -8,11 +8,13 @@
 // tab. Cross-tab jumps (e.g. Dashboard "View" → Purchases tab → purchase
 // detail) are handled by passing initial selection through props.
 //
-// AUTH MODEL (unchanged)
-// ======================
-// Single operator. ADMIN_API_KEY pasted into the gate → stored in
-// localStorage → included on every API call as X-Admin-Key. 401 → clear
-// the key and bounce to the gate.
+// AUTH MODEL (owner login)
+// =========================
+// Single owner. Username + password → POST /api/admin/login → short-lived
+// signed session token, held in **sessionStorage** (NOT localStorage) so it
+// is dropped the instant the tab/browser closes — closing the page logs you
+// out. Token is sent as `Authorization: Bearer <token>` on every API call.
+// 401 → clear the token and bounce to the login screen.
 //
 // TOASTS
 // ======
@@ -23,7 +25,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Toaster } from 'sonner';
-import { AdminApi, ADMIN_KEY_STORAGE } from './adminApi';
+import { AdminApi, ADMIN_TOKEN_STORAGE } from './adminApi';
 import { Button, focusRing } from './ui';
 import { DashboardTab } from './DashboardTab';
 import { UsersTab } from './UsersTab';
@@ -95,8 +97,8 @@ const TAB_META: Record<TabKey, { title: string; description?: string }> = {
 };
 
 export const AdminScreen: React.FC = () => {
-  const [key, setKey] = useState<string | null>(() => {
-    try { return localStorage.getItem(ADMIN_KEY_STORAGE); } catch { return null; }
+  const [token, setToken] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(ADMIN_TOKEN_STORAGE); } catch { return null; }
   });
   const [tab, setTab] = useState<TabKey>('dashboard');
   const [openPurchase, setOpenPurchase] = useState<{ id?: string; trxId?: string } | null>(null);
@@ -105,11 +107,11 @@ export const AdminScreen: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const lock = useCallback(() => {
-    try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch { /* ignore */ }
-    setKey(null);
+    try { sessionStorage.removeItem(ADMIN_TOKEN_STORAGE); } catch { /* ignore */ }
+    setToken(null);
   }, []);
 
-  const api = useMemo(() => (key ? new AdminApi(key, lock) : null), [key, lock]);
+  const api = useMemo(() => (token ? new AdminApi(token, lock) : null), [token, lock]);
 
   // ⌘K palette / Esc close
   useEffect(() => {
@@ -126,12 +128,12 @@ export const AdminScreen: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (!key || !api) {
+  if (!token || !api) {
     return (
       <>
-        <Gate onUnlock={(k) => {
-          try { localStorage.setItem(ADMIN_KEY_STORAGE, k); } catch { /* ignore */ }
-          setKey(k);
+        <LoginGate onAuthed={(t) => {
+          try { sessionStorage.setItem(ADMIN_TOKEN_STORAGE, t); } catch { /* ignore */ }
+          setToken(t);
         }} />
         <Toaster richColors position="top-right" />
       </>
@@ -280,25 +282,41 @@ function Icon({ path }: { path: string }) {
 
 // ─── gate ────────────────────────────────────────────────────────────────
 
-const Gate: React.FC<{ onUnlock: (key: string) => void }> = ({ onUnlock }) => {
-  const [val, setVal] = useState('');
+// Owner login. Posts username + password to /api/admin/login and, on success,
+// hands the signed session token up to AdminScreen (which stores it in
+// sessionStorage). No credentials are persisted here.
+const LoginGate: React.FC<{ onAuthed: (token: string) => void }> = ({ onAuthed }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
   const submit = async () => {
     setErr(null);
-    if (val.trim().length < 16) { setErr('Key looks too short.'); return; }
+    if (!username.trim() || !password) { setErr('Enter your username and password.'); return; }
     setBusy(true);
     try {
-      const res = await fetch('/api/admin/dashboard', { headers: { 'X-Admin-Key': val.trim() } });
-      if (res.status === 401) { setErr('Key rejected.'); return; }
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      if (res.status === 401) { setErr('Invalid username or password.'); return; }
+      if (res.status === 503) { setErr('Admin login is not configured on the server.'); return; }
       if (!res.ok) { setErr(`Server returned ${res.status}.`); return; }
-      onUnlock(val.trim());
+      const data = (await res.json()) as { token?: string };
+      if (!data.token) { setErr('No token returned.'); return; }
+      setPassword('');
+      onAuthed(data.token);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Network error.');
     } finally {
       setBusy(false);
     }
   };
+
+  const inputCls = ['mt-1 block w-full px-3 py-2 rounded-xl border border-charcoal-300 text-sm', focusRing, 'focus:border-accent-500'].join(' ');
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-charcoal-50 px-6">
       <div className="w-full max-w-md bg-white border border-charcoal-200 rounded-2xl p-6 shadow-sm">
@@ -306,20 +324,37 @@ const Gate: React.FC<{ onUnlock: (key: string) => void }> = ({ onUnlock }) => {
           <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
           <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
         </div>
-        <h1 className="mt-3 font-display text-xl font-semibold text-brand-700">Admin</h1>
-        <p className="mt-1 text-sm text-charcoal-500">Paste your admin key to continue. The key is stored in this browser only.</p>
-        <input
-          type="password"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-          className={['mt-4 block w-full px-3 py-2 rounded-xl border border-charcoal-300 font-mono text-sm', focusRing, 'focus:border-accent-500'].join(' ')}
-          placeholder="ADMIN_API_KEY"
-          autoFocus
-          aria-label="Admin key"
-        />
+        <h1 className="mt-3 font-display text-xl font-semibold text-brand-700">Admin sign in</h1>
+        <p className="mt-1 text-sm text-charcoal-500">Owner access only. Your session ends when you close this page.</p>
+
+        <label className="mt-4 block">
+          <span className="text-[12px] font-semibold text-charcoal-600">Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+            className={inputCls}
+            autoComplete="username"
+            autoFocus
+            aria-label="Username"
+          />
+        </label>
+        <label className="mt-3 block">
+          <span className="text-[12px] font-semibold text-charcoal-600">Password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+            className={inputCls}
+            autoComplete="current-password"
+            aria-label="Password"
+          />
+        </label>
+
         {err && <div className="mt-2 text-[12px] text-red-700" role="alert">{err}</div>}
-        <Button variant="primary" onClick={() => void submit()} loading={busy} className="mt-4 w-full">Unlock</Button>
+        <Button variant="primary" onClick={() => void submit()} loading={busy} className="mt-4 w-full">Sign in</Button>
       </div>
     </div>
   );

@@ -6,7 +6,7 @@
 // separately if action is needed.
 //
 // Request:  { disputeId, resolution: 'resolved' | 'rejected', operatorNote }
-// Headers:  X-Admin-Key
+// Auth:     Authorization: Bearer <session token> (owner login)
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase, recordAuditAction } from '../_lib/adminAuth.js';
