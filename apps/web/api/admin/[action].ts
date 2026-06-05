@@ -49,10 +49,31 @@ import orphanMarkIgnored from './_handlers/orphan-mark-ignored.js';
 import auditLog from './_handlers/audit-log.js';
 import settings from './_handlers/settings.js';
 import actionQueue from './_handlers/action-queue.js';
+import login from './_handlers/login.js';
+import summary from './_handlers/summary.js';
+// Analytics & growth surface (migration 013)
+import revenueAnalytics from './_handlers/revenue-analytics.js';
+import revenueExport from './_handlers/revenue-export.js';
+import customerIntelligence from './_handlers/customer-intelligence.js';
+import productAnalytics from './_handlers/product-analytics.js';
+import marketing from './_handlers/marketing.js';
+import marketingSpend from './_handlers/marketing-spend.js';
+import systemHealth from './_handlers/system-health.js';
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
 const HANDLERS: Record<string, Handler> = {
+  // Auth (login is the ONLY unauthenticated action — it does its own checks)
+  'login': login,
+  'summary': summary,
+  // Analytics & growth surface
+  'revenue-analytics': revenueAnalytics,
+  'revenue-export': revenueExport,
+  'customer-intelligence': customerIntelligence,
+  'product-analytics': productAnalytics,
+  'marketing': marketing,
+  'marketing-spend': marketingSpend,
+  'system-health': systemHealth,
   // Original (P0 recovery surface)
   'confirm-purchase': confirmPurchase,
   'refund-purchase': refundPurchase,

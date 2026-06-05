@@ -51,8 +51,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .filter((p) => p.status === 'completed')
     .reduce((sum, p) => sum + (p.amount_taka ?? 0), 0);
 
+  // True login email from auth.users (profiles.email can drift).
+  let loginEmail: string | null = null;
+  const { data: emails } = await supabase.rpc('admin_auth_emails', { p_ids: [id] });
+  if (Array.isArray(emails) && emails[0]) loginEmail = (emails[0] as { email: string }).email;
+  const emailMismatch = Boolean(loginEmail && profile.data.email && loginEmail.toLowerCase() !== String(profile.data.email).toLowerCase());
+
   res.status(200).json({
     profile: profile.data,
+    loginEmail,
+    emailMismatch,
     lifetimePaid,
     purchases: purchases.data ?? [],
     resumes: resumes.data ?? [],

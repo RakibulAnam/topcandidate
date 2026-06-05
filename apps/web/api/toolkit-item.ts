@@ -10,6 +10,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { resolveCost } from './_lib/aiCost.js';
 import {
   coverLetterGenerator,
   outreachEmailGenerator,
@@ -55,15 +56,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     throw err;
   }
 
-  // Log up-front — failed calls count toward the daily cap (audit C5).
-  await logCall(auth.userId, auth.jwt, 'toolkit_item');
-
+  // C5 (audit): one ai_call_log row per attempt past the rate-limit gate so
+  // failed calls still count toward the daily cap. Logged at each terminal
+  // point so the row carries telemetry. These per-item generators all run on
+  // Gemini 2.5 Flash and don't surface SDK usage, so token counts are
+  // estimated from the input (JD) + output text (~4 chars/token).
+  const tAI = Date.now();
+  const PROVIDER = 'gemini';
+  const MODEL = 'gemini-2.5-flash';
   try {
     const result = await runItem(kind, data);
+    const latencyMs = Date.now() - tAI;
+    const outText = typeof result === 'string' ? result : JSON.stringify(result ?? '');
+    const cost = resolveCost(
+      { provider: PROVIDER, model: MODEL },
+      data.targetJob.description,
+      outText
+    );
+    await logCall(auth.userId, auth.jwt, 'toolkit_item', {
+      provider: cost.provider,
+      model: cost.model,
+      promptTokens: cost.promptTokens,
+      completionTokens: cost.completionTokens,
+      costUsd: cost.costUsd,
+      status: 'success',
+      latencyMs,
+    });
     console.info(`[toolkit-item ${rid}] 200 kind=${kind} total=${Date.now() - t0}ms`);
     res.status(200).json({ result });
   } catch (err) {
+    const latencyMs = Date.now() - tAI;
     const msg = err instanceof Error ? err.message : 'Generation failed';
+    const cost = resolveCost({ provider: PROVIDER, model: MODEL }, data.targetJob.description);
+    await logCall(auth.userId, auth.jwt, 'toolkit_item', {
+      provider: cost.provider,
+      model: cost.model,
+      promptTokens: cost.promptTokens,
+      completionTokens: cost.completionTokens,
+      costUsd: cost.costUsd,
+      status: 'error',
+      latencyMs,
+    });
     console.error(`[toolkit-item ${rid}] 502 kind=${kind} total=${Date.now() - t0}ms: ${msg}`);
     res.status(502).json({ error: msg });
   }

@@ -8,11 +8,13 @@
 // tab. Cross-tab jumps (e.g. Dashboard "View" → Purchases tab → purchase
 // detail) are handled by passing initial selection through props.
 //
-// AUTH MODEL (unchanged)
-// ======================
-// Single operator. ADMIN_API_KEY pasted into the gate → stored in
-// localStorage → included on every API call as X-Admin-Key. 401 → clear
-// the key and bounce to the gate.
+// AUTH MODEL (owner login)
+// =========================
+// Single owner. Username + password → POST /api/admin/login → short-lived
+// signed session token, held in **sessionStorage** (NOT localStorage) so it
+// is dropped the instant the tab/browser closes — closing the page logs you
+// out. Token is sent as `Authorization: Bearer <token>` on every API call.
+// 401 → clear the token and bounce to the login screen.
 //
 // TOASTS
 // ======
@@ -23,7 +25,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Toaster } from 'sonner';
-import { AdminApi, ADMIN_KEY_STORAGE } from './adminApi';
+import { AdminApi, ADMIN_TOKEN_STORAGE } from './adminApi';
 import { Button, focusRing } from './ui';
 import { DashboardTab } from './DashboardTab';
 import { UsersTab } from './UsersTab';
@@ -33,8 +35,14 @@ import { DisputesTab } from './DisputesTab';
 import { ParserFailuresTab } from './ParserFailuresTab';
 import { AuditLogTab } from './AuditLogTab';
 import { SettingsTab } from './SettingsTab';
+import { RevenueTab } from './RevenueTab';
+import { ProductTab } from './ProductTab';
+import { MarketingTab } from './MarketingTab';
+import { CustomerIntelTab } from './CustomerIntelTab';
+import { SystemTab } from './SystemTab';
 
-type TabKey = 'dashboard' | 'users' | 'purchases' | 'orphans' | 'disputes' | 'parser' | 'audit' | 'settings';
+type TabKey = 'dashboard' | 'revenue' | 'product' | 'marketing' | 'customers'
+  | 'users' | 'purchases' | 'orphans' | 'disputes' | 'parser' | 'audit' | 'system' | 'settings';
 
 interface NavItem {
   key: TabKey;
@@ -58,6 +66,15 @@ const NAV: NavSection[] = [
     ],
   },
   {
+    title: 'Analytics',
+    items: [
+      { key: 'revenue', label: 'Revenue', icon: <Icon path="M4 19V5 M4 19h16 M8 16l3-4 3 2 4-6" /> },
+      { key: 'product', label: 'Product', icon: <Icon path="M12 3 3 7.5 12 12l9-4.5z M3 7.5V16l9 4.5 9-4.5V7.5" /> },
+      { key: 'marketing', label: 'Marketing', icon: <Icon path="M3 11v2l11 5V6L3 11z M14 8l5-3 M14 16l5 3 M19 11h2" /> },
+      { key: 'customers', label: 'Customers', icon: <Icon path="M17 11a4 4 0 1 0-8 0 4 4 0 0 0 8 0z M3 21a9 9 0 0 1 18 0" /> },
+    ],
+  },
+  {
     title: 'Operations',
     items: [
       { key: 'disputes', label: 'Disputes', icon: <Icon path="M3 21v-1a8 8 0 0 1 16 0v1M11 3h8v6h-8z" /> },
@@ -76,6 +93,7 @@ const NAV: NavSection[] = [
   {
     title: 'System',
     items: [
+      { key: 'system', label: 'System health', icon: <Icon path="M3 12h4l2 5 4-12 2 7h6" /> },
       { key: 'settings', label: 'Settings', icon: <Icon path="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 z M19 12a7 7 0 0 0-.4-2.3l2-1.5-2-3.4-2.3 1A7 7 0 0 0 14 4.4L13.6 2h-3.2L10 4.4a7 7 0 0 0-2.3 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .8.1 1.6.4 2.3l-2 1.5 2 3.4 2.3-1A7 7 0 0 0 10 19.6L10.4 22h3.2l.4-2.4a7 7 0 0 0 2.3-1.3l2.3 1 2-3.4-2-1.5c.3-.7.4-1.5.4-2.3z" /> },
     ],
   },
@@ -85,6 +103,11 @@ const ALL_TABS = NAV.flatMap((s) => s.items.map((i) => i.key));
 
 const TAB_META: Record<TabKey, { title: string; description?: string }> = {
   dashboard: { title: 'Dashboard', description: 'At-a-glance state of pending payments, disputes, and SMS reconciliation.' },
+  revenue: { title: 'Revenue', description: 'Gross, net, refunds, daily trend, and credit liability.' },
+  product: { title: 'Product', description: 'Generation mix, AI cost, and approximate gross margin.' },
+  marketing: { title: 'Marketing', description: 'Acquisition funnel, channel CAC/ROAS, and ad-spend logging.' },
+  customers: { title: 'Customers', description: 'Current-state segmentation and customer leaderboards.' },
+  system: { title: 'System health', description: 'AI usage/cost, payments pipeline, and environment health.' },
   users: { title: 'Users', description: 'Customer profiles, credits, history, and operator notes.' },
   purchases: { title: 'Purchases', description: 'Every bKash purchase across all states.' },
   orphans: { title: 'Orphan SMS', description: 'Inbound bKash SMS the watcher could not match to a pending purchase.' },
@@ -95,8 +118,8 @@ const TAB_META: Record<TabKey, { title: string; description?: string }> = {
 };
 
 export const AdminScreen: React.FC = () => {
-  const [key, setKey] = useState<string | null>(() => {
-    try { return localStorage.getItem(ADMIN_KEY_STORAGE); } catch { return null; }
+  const [token, setToken] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(ADMIN_TOKEN_STORAGE); } catch { return null; }
   });
   const [tab, setTab] = useState<TabKey>('dashboard');
   const [openPurchase, setOpenPurchase] = useState<{ id?: string; trxId?: string } | null>(null);
@@ -105,11 +128,11 @@ export const AdminScreen: React.FC = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const lock = useCallback(() => {
-    try { localStorage.removeItem(ADMIN_KEY_STORAGE); } catch { /* ignore */ }
-    setKey(null);
+    try { sessionStorage.removeItem(ADMIN_TOKEN_STORAGE); } catch { /* ignore */ }
+    setToken(null);
   }, []);
 
-  const api = useMemo(() => (key ? new AdminApi(key, lock) : null), [key, lock]);
+  const api = useMemo(() => (token ? new AdminApi(token, lock) : null), [token, lock]);
 
   // ⌘K palette / Esc close
   useEffect(() => {
@@ -126,12 +149,12 @@ export const AdminScreen: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  if (!key || !api) {
+  if (!token || !api) {
     return (
       <>
-        <Gate onUnlock={(k) => {
-          try { localStorage.setItem(ADMIN_KEY_STORAGE, k); } catch { /* ignore */ }
-          setKey(k);
+        <LoginGate onAuthed={(t) => {
+          try { sessionStorage.setItem(ADMIN_TOKEN_STORAGE, t); } catch { /* ignore */ }
+          setToken(t);
         }} />
         <Toaster richColors position="top-right" />
       </>
@@ -246,6 +269,11 @@ export const AdminScreen: React.FC = () => {
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-7xl w-full mx-auto">
           {tab === 'dashboard' && <DashboardTab api={api} onOpenPurchase={goPurchase} onOpenDisputes={() => goTab('disputes')} onOpenOrphans={() => goTab('orphans')} />}
+          {tab === 'revenue' && <RevenueTab api={api} />}
+          {tab === 'product' && <ProductTab api={api} />}
+          {tab === 'marketing' && <MarketingTab api={api} />}
+          {tab === 'customers' && <CustomerIntelTab api={api} onOpenUser={goUser} />}
+          {tab === 'system' && <SystemTab api={api} />}
           {tab === 'users' && <UsersTab api={api} initialUserId={openUserId} onClearInitial={() => setOpenUserId(null)} />}
           {tab === 'purchases' && <PurchasesTab api={api} initialPurchase={openPurchase} onClearInitial={() => setOpenPurchase(null)} onOpenUser={goUser} />}
           {tab === 'orphans' && <OrphansTab api={api} />}
@@ -280,25 +308,41 @@ function Icon({ path }: { path: string }) {
 
 // ─── gate ────────────────────────────────────────────────────────────────
 
-const Gate: React.FC<{ onUnlock: (key: string) => void }> = ({ onUnlock }) => {
-  const [val, setVal] = useState('');
+// Owner login. Posts username + password to /api/admin/login and, on success,
+// hands the signed session token up to AdminScreen (which stores it in
+// sessionStorage). No credentials are persisted here.
+const LoginGate: React.FC<{ onAuthed: (token: string) => void }> = ({ onAuthed }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
   const submit = async () => {
     setErr(null);
-    if (val.trim().length < 16) { setErr('Key looks too short.'); return; }
+    if (!username.trim() || !password) { setErr('Enter your username and password.'); return; }
     setBusy(true);
     try {
-      const res = await fetch('/api/admin/dashboard', { headers: { 'X-Admin-Key': val.trim() } });
-      if (res.status === 401) { setErr('Key rejected.'); return; }
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      if (res.status === 401) { setErr('Invalid username or password.'); return; }
+      if (res.status === 503) { setErr('Admin login is not configured on the server.'); return; }
       if (!res.ok) { setErr(`Server returned ${res.status}.`); return; }
-      onUnlock(val.trim());
+      const data = (await res.json()) as { token?: string };
+      if (!data.token) { setErr('No token returned.'); return; }
+      setPassword('');
+      onAuthed(data.token);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Network error.');
     } finally {
       setBusy(false);
     }
   };
+
+  const inputCls = ['mt-1 block w-full px-3 py-2 rounded-xl border border-charcoal-300 text-sm', focusRing, 'focus:border-accent-500'].join(' ');
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-charcoal-50 px-6">
       <div className="w-full max-w-md bg-white border border-charcoal-200 rounded-2xl p-6 shadow-sm">
@@ -306,20 +350,37 @@ const Gate: React.FC<{ onUnlock: (key: string) => void }> = ({ onUnlock }) => {
           <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
           <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
         </div>
-        <h1 className="mt-3 font-display text-xl font-semibold text-brand-700">Admin</h1>
-        <p className="mt-1 text-sm text-charcoal-500">Paste your admin key to continue. The key is stored in this browser only.</p>
-        <input
-          type="password"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-          className={['mt-4 block w-full px-3 py-2 rounded-xl border border-charcoal-300 font-mono text-sm', focusRing, 'focus:border-accent-500'].join(' ')}
-          placeholder="ADMIN_API_KEY"
-          autoFocus
-          aria-label="Admin key"
-        />
+        <h1 className="mt-3 font-display text-xl font-semibold text-brand-700">Admin sign in</h1>
+        <p className="mt-1 text-sm text-charcoal-500">Owner access only. Your session ends when you close this page.</p>
+
+        <label className="mt-4 block">
+          <span className="text-[12px] font-semibold text-charcoal-600">Username</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+            className={inputCls}
+            autoComplete="username"
+            autoFocus
+            aria-label="Username"
+          />
+        </label>
+        <label className="mt-3 block">
+          <span className="text-[12px] font-semibold text-charcoal-600">Password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+            className={inputCls}
+            autoComplete="current-password"
+            aria-label="Password"
+          />
+        </label>
+
         {err && <div className="mt-2 text-[12px] text-red-700" role="alert">{err}</div>}
-        <Button variant="primary" onClick={() => void submit()} loading={busy} className="mt-4 w-full">Unlock</Button>
+        <Button variant="primary" onClick={() => void submit()} loading={busy} className="mt-4 w-full">Sign in</Button>
       </div>
     </div>
   );

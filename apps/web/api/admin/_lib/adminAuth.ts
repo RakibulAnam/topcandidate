@@ -1,47 +1,47 @@
-// Shared X-Admin-Key verification for /api/admin/* endpoints + a service-role
+// Shared session-token verification for /api/admin/* endpoints + a service-role
 // Supabase client factory. Every admin endpoint MUST call requireAdmin() at
 // the top and bail when it returns false (the helper writes the 401/503 itself).
 //
-// AUTH MODEL
-// ----------
-// Single operator. The operator generates ADMIN_API_KEY (≥32 random bytes,
-// `openssl rand -hex 32`), pastes it into the /admin SPA, which stores it in
-// localStorage and includes it on every call as the X-Admin-Key header.
-// We timing-safe-compare against process.env.ADMIN_API_KEY. There is no
-// role/permission abstraction — if the key matches you can do anything; if
-// it doesn't, you can do nothing. Rotation = change the env var and reload.
+// AUTH MODEL (owner login — replaces the old "paste ADMIN_API_KEY" gate)
+// ----------------------------------------------------------------------
+// Single owner. The owner logs in at POST /api/admin/login with
+// ADMIN_USERNAME + password; the server mints a short-lived HMAC-signed
+// session token (see _lib/session.ts). The /admin SPA keeps it in
+// sessionStorage (dropped when the tab closes) and sends it as
+// `Authorization: Bearer <token>` on every call. requireAdmin verifies the
+// signature + expiry. There is no role/permission abstraction — a valid token
+// can do anything; no token (or expired) can do nothing.
+//
+// ADMIN_API_KEY is REPURPOSED as the token-signing secret — it is no longer a
+// credential the operator types. Rotating it invalidates all live sessions.
 //
 // Separate from BKASH_WEBHOOK_SECRET on purpose (different blast radius —
-// the bKash secret is shared with the Flutter app on the operator's phone;
-// the admin key is operator-only).
+// the bKash secret is shared with the Flutter app on the operator's phone).
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { timingSafeEqual } from 'crypto';
+import { verifySessionToken } from './session.js';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY ?? '';
-
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a, 'utf8'), Buffer.from(b, 'utf8'));
-}
 
 /**
- * Verify the X-Admin-Key header. Returns true if authorised; otherwise writes
- * 401 (bad/missing key) or 503 (server misconfigured) to res and returns false.
+ * Verify the `Authorization: Bearer <token>` session token. Returns true if
+ * authorised; otherwise writes 401 (missing/invalid/expired) or 503 (server
+ * missing the signing secret) to res and returns false.
  */
 export function requireAdmin(req: VercelRequest, res: VercelResponse): boolean {
-  if (!ADMIN_API_KEY) {
-    console.error('[admin] ADMIN_API_KEY not configured on server');
+  if (!process.env.ADMIN_API_KEY) {
+    console.error('[admin] ADMIN_API_KEY (token-signing secret) not configured on server');
     res.status(503).json({ error: 'Admin endpoints are not configured on the server.' });
     return false;
   }
-  const header = req.headers['x-admin-key'];
-  const key = Array.isArray(header) ? header[0] : header;
-  if (!key || !safeEqual(String(key), ADMIN_API_KEY)) {
-    res.status(401).json({ error: 'bad admin key' });
+  const header = req.headers['authorization'];
+  const raw = Array.isArray(header) ? header[0] : header;
+  const token = raw && raw.startsWith('Bearer ') ? raw.slice(7).trim() : null;
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!token || !verifySessionToken(token, nowSec)) {
+    res.status(401).json({ error: 'unauthorized' });
     return false;
   }
   return true;

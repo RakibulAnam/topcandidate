@@ -1,11 +1,15 @@
-// AdminApi — fetch wrapper that attaches X-Admin-Key and surfaces a 401
-// callback so the shell can drop the operator back to the gate.
+// AdminApi — fetch wrapper that attaches the Bearer session token and surfaces
+// a 401 callback so the shell can drop the operator back to the login screen.
 //
 // Single instance per session. Operators never call /api/admin/* without
-// going through this class — every call needs the header, and centralising
+// going through this class — every call needs the token, and centralising
 // the 401 path keeps the lock UX consistent.
+//
+// The token is obtained from POST /api/admin/login and held in sessionStorage
+// (see AdminScreen) so it is dropped the moment the tab/browser closes.
 
-export const ADMIN_KEY_STORAGE = 'topcandidate.adminKey';
+// sessionStorage key — NOT localStorage, so closing the page logs out.
+export const ADMIN_TOKEN_STORAGE = 'topcandidate.adminToken';
 
 export interface FetchOpts {
   method?: 'GET' | 'POST' | 'DELETE' | 'PATCH';
@@ -15,7 +19,7 @@ export interface FetchOpts {
 }
 
 export class AdminApi {
-  constructor(private readonly key: string, private readonly on401: () => void) {}
+  constructor(private readonly token: string, private readonly on401: () => void) {}
 
   async call<T = unknown>(action: string, opts: FetchOpts = {}): Promise<T> {
     const url = new URL(`/api/admin/${action}`, window.location.origin);
@@ -29,7 +33,7 @@ export class AdminApi {
       method: opts.method ?? 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'X-Admin-Key': this.key,
+        Authorization: `Bearer ${this.token}`,
       },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });

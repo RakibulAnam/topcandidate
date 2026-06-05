@@ -5,7 +5,7 @@
 // on balance > 0, which is the correct UX (case #8).
 //
 // Request:  { transactionId, reason }
-// Headers:  X-Admin-Key
+// Auth:     Authorization: Bearer <session token> (owner login)
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase, requireReason, recordAuditAction } from '../_lib/adminAuth.js';

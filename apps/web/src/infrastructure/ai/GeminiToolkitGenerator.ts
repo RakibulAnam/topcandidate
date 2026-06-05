@@ -14,6 +14,7 @@ import {
   ToolkitErrors,
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
+import type { UsageSink } from './usage.js';
 import {
   buildCandidateContext,
   buildToolkitEvidenceCorpus,
@@ -61,7 +62,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     this.genAI = new GoogleGenAI({ apiKey });
   }
 
-  async generate(data: ResumeData): Promise<GeneratedToolkit> {
+  async generate(data: ResumeData, usage?: UsageSink): Promise<GeneratedToolkit> {
     const t0 = Date.now();
     // Classify the application before we hit the AI so the prompt + guard
     // behaviour can adapt. Match = strict (default). Stretch = career-switcher
@@ -115,6 +116,17 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     });
 
     const tGemini = Date.now() - t0;
+
+    // Capture token usage for cost telemetry before discarding the raw SDK
+    // response (additive — does not affect the generated toolkit).
+    if (usage) {
+      usage.provider = 'gemini';
+      usage.model = this.model;
+      const um = (result as any)?.usageMetadata;
+      usage.promptTokens = um?.promptTokenCount;
+      usage.completionTokens = um?.candidatesTokenCount;
+    }
+
     const text = result.text;
     if (!text) {
       console.error(`[toolkit-gen] empty AI response after ${tGemini}ms`);

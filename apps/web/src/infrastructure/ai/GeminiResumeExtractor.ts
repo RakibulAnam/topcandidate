@@ -1,5 +1,8 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { ExtractedProfileData, IResumeExtractor } from '../../domain/usecases/ExtractResumeUseCase.js';
+import type { UsageSink } from './usage.js';
+
+const EXTRACTOR_MODEL = 'gemini-2.5-flash';
 
 export class GeminiResumeExtractor implements IResumeExtractor {
     private genAI: GoogleGenAI;
@@ -11,7 +14,7 @@ export class GeminiResumeExtractor implements IResumeExtractor {
         this.genAI = new GoogleGenAI({ apiKey });
     }
 
-    async extract(fileData: string, mimeType: string): Promise<ExtractedProfileData> {
+    async extract(fileData: string, mimeType: string, usage?: UsageSink): Promise<ExtractedProfileData> {
         const extractionSchema: Schema = {
             type: Type.OBJECT,
             properties: {
@@ -127,7 +130,7 @@ export class GeminiResumeExtractor implements IResumeExtractor {
 
         try {
             const result = await this.genAI.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: EXTRACTOR_MODEL,
                 contents: [
                     { inlineData: { data: fileData, mimeType } },
                     { text: prompt }
@@ -137,6 +140,16 @@ export class GeminiResumeExtractor implements IResumeExtractor {
                     responseSchema: extractionSchema,
                 }
             });
+
+            // Capture token usage for cost telemetry before discarding the raw
+            // SDK response (additive — does not affect the extracted data).
+            if (usage) {
+                usage.provider = 'gemini';
+                usage.model = EXTRACTOR_MODEL;
+                const um = (result as any)?.usageMetadata;
+                usage.promptTokens = um?.promptTokenCount;
+                usage.completionTokens = um?.candidatesTokenCount;
+            }
 
             const responseText = result.text;
             if (!responseText) {

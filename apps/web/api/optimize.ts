@@ -26,8 +26,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { resolveCost } from './_lib/aiCost.js';
 import { resumeOptimizer, toolkitGenerator } from './_lib/aiFactory.js';
 import type { ResumeData, GeneratedToolkit } from '../src/domain/entities/Resume';
+import type { UsageSink } from '../src/infrastructure/ai/usage';
 
 // Service-role client for credit RPCs. Migration 008 locked consume/refund
 // to service_role only — end-user JWTs no longer have EXECUTE. The userId
@@ -90,12 +92,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   console.info(`[optimize ${rid}] payload ok jdLen=${data.targetJob.description.length} exp=${data.experience?.length ?? 0} proj=${data.projects?.length ?? 0} skills=${data.skills?.length ?? 0}`);
 
-  // Log the attempt BEFORE we run AI (C5 from the audit). Counting only on
-  // success let a user with a valid JWT spam-fail the optimizer endlessly,
-  // burning Groq's 1,000-RPD shared quota. Logging up-front means failed
-  // attempts count toward the per-user daily cap (default 20/day). We still
-  // refund the toolkit credit on optimizer failure below.
-  await logCall(auth.userId, auth.jwt, 'optimize');
+  // C5 (audit): every attempt past the rate-limit gate must write exactly ONE
+  // ai_call_log row so failed/aborted calls still count toward the per-user
+  // daily cap (default 20/day) — a valid JWT must not be able to spam-fail the
+  // optimizer to burn Groq's shared RPD quota. We now log once at each terminal
+  // point (instead of up-front) so the single row can also carry real
+  // cost/telemetry (provider/model/tokens/cost/status/latency) when AI ran.
+  // Helper closes over the rate-limit identity so each call site stays terse.
 
   // ── Credit gate ───────────────────────────────────────────────────────────
   // Atomically decrement the user's toolkit_credits balance before running AI.
@@ -104,6 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // via the WHERE clause + RETURNING idiom (no race with a concurrent call).
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error(`[optimize ${rid}] 503 service-role not configured`);
+    await logCall(auth.userId, auth.jwt, 'optimize', { status: 'error' });
     res.status(503).json({ error: 'Server is not configured for credit accounting.' });
     return;
   }
@@ -118,6 +122,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (creditError) {
     if (creditError.message?.includes('insufficient_credits')) {
       console.info(`[optimize ${rid}] 402 insufficient_credits (rpc=${Date.now() - tCredit}ms)`);
+      // Counts toward the daily cap (C5) — no AI ran, so no telemetry.
+      await logCall(auth.userId, auth.jwt, 'optimize', { status: 'error' });
       res.status(402).json({
         error: 'No toolkit credits remaining. Purchase a pack to continue.',
         code: 'insufficient_credits',
@@ -138,15 +144,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // so a toolkit failure doesn't kill the optimizer result.
   const tAI = Date.now();
   console.info(`[optimize ${rid}] AI start (optimizer + toolkit, parallel)`);
+  // Telemetry sink — the optimizer (Groq primary / Gemini fallback via the
+  // multi-provider router) fills in the provider/model that actually served
+  // the request plus token counts. Additive: does not change the hot path.
+  const optUsage: UsageSink = {};
   const [optimizedResult, toolkitResult] = await Promise.allSettled([
-    resumeOptimizer.optimize(data),
+    resumeOptimizer.optimize(data, optUsage),
     toolkitGenerator ? toolkitGenerator.generate(data) : Promise.reject(new Error('Toolkit generator not configured')),
   ]);
-  console.info(`[optimize ${rid}] AI done in ${Date.now() - tAI}ms optimizer=${optimizedResult.status} toolkit=${toolkitResult.status}`);
+  const latencyMs = Date.now() - tAI;
+  console.info(`[optimize ${rid}] AI done in ${latencyMs}ms optimizer=${optimizedResult.status} toolkit=${toolkitResult.status}`);
 
   if (optimizedResult.status === 'rejected') {
     const msg = optimizedResult.reason instanceof Error ? optimizedResult.reason.message : String(optimizedResult.reason);
     console.error(`[optimize ${rid}] optimizer rejected: ${msg}`);
+    // Telemetry row (status=error). Tokens estimated from the input JD when the
+    // provider didn't report usage on the failed attempt.
+    {
+      const cost = resolveCost(optUsage, data.targetJob.description);
+      await logCall(auth.userId, auth.jwt, 'optimize', {
+        provider: cost.provider,
+        model: cost.model,
+        promptTokens: cost.promptTokens,
+        completionTokens: cost.completionTokens,
+        costUsd: cost.costUsd,
+        status: 'error',
+        latencyMs,
+      });
+    }
     // Core artifact failed — refund the credit so the user isn't charged for
     // a generation that produced nothing.
     if (creditConsumed) {
@@ -195,6 +220,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         interviewQuestions: msg,
       },
     };
+  }
+
+  // Success telemetry (status=success). Fallback token estimate uses the JD
+  // (input) + the optimized summary (output) when the provider omitted usage.
+  {
+    const cost = resolveCost(
+      optUsage,
+      data.targetJob.description,
+      optimized.summary
+    );
+    await logCall(auth.userId, auth.jwt, 'optimize', {
+      provider: cost.provider,
+      model: cost.model,
+      promptTokens: cost.promptTokens,
+      completionTokens: cost.completionTokens,
+      costUsd: cost.costUsd,
+      status: 'success',
+      latencyMs,
+    });
   }
 
   console.info(`[optimize ${rid}] 200 total=${Date.now() - t0}ms`);

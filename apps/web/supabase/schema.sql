@@ -1290,3 +1290,119 @@ begin
   end if;
 end $$;
 alter table purchases replica identity full;
+
+-- ════════════════════════════════════════════════════════════════════
+-- Analytics & BI foundation (migration 013)
+-- ════════════════════════════════════════════════════════════════════
+
+-- First-party product/funnel analytics. Insert-only RLS (anon+authenticated);
+-- reads are service-role only (admin). No third-party SDK.
+create table if not exists analytics_events (
+  id bigint generated always as identity primary key,
+  created_at timestamptz not null default now(),
+  anon_id text, user_id uuid, session_id text,
+  event text not null, props jsonb not null default '{}'::jsonb,
+  path text, referrer text, utm_source text, utm_medium text, utm_campaign text
+);
+create index if not exists analytics_events_event_time_idx on analytics_events (event, created_at desc);
+create index if not exists analytics_events_user_time_idx  on analytics_events (user_id, created_at desc);
+create index if not exists analytics_events_time_idx        on analytics_events (created_at desc);
+alter table analytics_events enable row level security;
+do $$ begin
+  if not exists (select 1 from pg_policies where tablename='analytics_events' and policyname='analytics_events_insert') then
+    create policy analytics_events_insert on analytics_events for insert to anon, authenticated
+      with check (user_id is null or user_id = auth.uid());
+  end if;
+end $$;
+
+-- Append-only journal of every toolkit_credits change (trigger-fed).
+create table if not exists credit_ledger (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references profiles(id) on delete cascade,
+  delta integer not null, balance_after integer not null,
+  reason text, created_at timestamptz not null default now()
+);
+create index if not exists credit_ledger_user_time_idx on credit_ledger (user_id, created_at desc);
+create index if not exists credit_ledger_time_idx       on credit_ledger (created_at desc);
+alter table credit_ledger enable row level security;
+create or replace function log_credit_change() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if new.toolkit_credits is distinct from old.toolkit_credits then
+    insert into credit_ledger (user_id, delta, balance_after, reason)
+    values (new.id, new.toolkit_credits - old.toolkit_credits, new.toolkit_credits,
+            nullif(current_setting('app.credit_reason', true), ''));
+  end if;
+  return new;
+end; $$;
+drop trigger if exists trg_log_credit_change on profiles;
+create trigger trg_log_credit_change after update of toolkit_credits on profiles
+  for each row execute function log_credit_change();
+
+-- Operator-entered ad spend for CAC/ROAS.
+create table if not exists marketing_spend (
+  id uuid primary key default gen_random_uuid(),
+  spend_date date not null, channel text not null, campaign text,
+  amount_taka integer not null default 0, clicks integer, impressions integer,
+  notes text, created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create index if not exists marketing_spend_date_idx on marketing_spend (spend_date desc);
+alter table marketing_spend enable row level security;
+
+-- Acquisition + activity columns on profiles.
+alter table profiles add column if not exists utm_source text;
+alter table profiles add column if not exists utm_medium text;
+alter table profiles add column if not exists utm_campaign text;
+alter table profiles add column if not exists signup_referrer text;
+alter table profiles add column if not exists last_active_at timestamptz;
+
+-- AI cost/telemetry columns + widened kind.
+alter table ai_call_log add column if not exists provider text;
+alter table ai_call_log add column if not exists model text;
+alter table ai_call_log add column if not exists prompt_tokens integer;
+alter table ai_call_log add column if not exists completion_tokens integer;
+alter table ai_call_log add column if not exists cost_usd numeric(12,6);
+alter table ai_call_log add column if not exists status text;
+alter table ai_call_log add column if not exists latency_ms integer;
+do $$ begin
+  if exists (select 1 from pg_constraint where conname='ai_call_log_kind_check' and conrelid='public.ai_call_log'::regclass) then
+    alter table ai_call_log drop constraint ai_call_log_kind_check;
+  end if;
+  alter table ai_call_log add constraint ai_call_log_kind_check
+    check (kind in ('optimize','optimize_general','toolkit_item','extract_resume'));
+end $$;
+
+-- Free vs paid generation typing.
+alter table generated_resumes add column if not exists generation_type text;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname='generated_resumes_generation_type_check' and conrelid='public.generated_resumes'::regclass) then
+    alter table generated_resumes add constraint generated_resumes_generation_type_check
+      check (generation_type is null or generation_type in ('free_general','paid_tailored'));
+  end if;
+end $$;
+
+-- Read-side views.
+create or replace view v_daily_revenue as
+  select date(created_at) as day, count(*) as orders,
+         coalesce(sum(amount_taka),0) as revenue_taka, coalesce(sum(credits_granted),0) as credits_sold
+  from purchases where status='completed' group by 1;
+create or replace view v_daily_signups as
+  select date(created_at) as day, count(*) as signups from profiles group by 1;
+create or replace view v_daily_ai_usage as
+  select date(created_at) as day, count(*) as calls,
+         count(*) filter (where status='error') as errors,
+         coalesce(sum(cost_usd),0) as cost_usd,
+         coalesce(sum(prompt_tokens+completion_tokens),0) as total_tokens
+  from ai_call_log group by 1;
+create or replace view v_credit_liability as
+  select coalesce(sum(toolkit_credits) filter (where toolkit_credits>0),0) as outstanding_credits,
+         count(*) filter (where toolkit_credits<0) as negative_balance_users
+  from profiles;
+
+-- Service-role lookup of the TRUE login email (profiles.email can drift).
+create or replace function public.admin_auth_emails(p_ids uuid[])
+returns table(id uuid, email text)
+language sql security definer set search_path = public as $$
+  select u.id, u.email::text from auth.users u where u.id = any(p_ids);
+$$;
+revoke all on function public.admin_auth_emails(uuid[]) from public, anon, authenticated;

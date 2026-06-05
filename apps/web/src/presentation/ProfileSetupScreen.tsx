@@ -56,6 +56,7 @@ import { isValidEmail } from './components/ui/EmailInput';
 import { isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
+import { track } from '../infrastructure/analytics/track';
 
 interface Props {
     onComplete: () => void;
@@ -577,6 +578,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         } else {
             try {
                 if (user) await profileRepository.markProfileComplete(user.id);
+                track('profile_setup_completed', { user_type: userType });
                 toast.success(t('profileSetup.profileDoneToast'));
                 await handleGenerateGeneralResume();
             } catch (error) {

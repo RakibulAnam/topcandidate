@@ -30,7 +30,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.status(200).json({
       env: {
-        ADMIN_API_KEY: Boolean(process.env.ADMIN_API_KEY),
+        ADMIN_API_KEY: Boolean(process.env.ADMIN_API_KEY), // token-signing secret
+        ADMIN_USERNAME: Boolean(process.env.ADMIN_USERNAME),
+        ADMIN_PASSWORD: Boolean(process.env.ADMIN_PASSWORD_HASH || process.env.ADMIN_PASSWORD),
         BKASH_WEBHOOK_SECRET: Boolean(process.env.BKASH_WEBHOOK_SECRET),
         SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
         CRON_SECRET: Boolean(process.env.CRON_SECRET),

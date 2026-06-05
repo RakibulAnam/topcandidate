@@ -1,7 +1,7 @@
 // GET /api/admin/users?q=&page=&pageSize=
 //
 // Search/list customer profiles. Substring search on email or id prefix.
-// Auth: X-Admin-Key. Read-only — no audit row written.
+// Auth: Bearer session token (owner login). Read-only — no audit row written.
 //
 // Uses the pg_trgm GIN index from migration 009 for fast email substring
 // search. UUID prefix match falls back to equality on full UUID input.
@@ -57,5 +57,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  res.status(200).json({ rows: data ?? [], total: count ?? 0, page, pageSize });
+  // Enrich with the TRUE login email from auth.users (profiles.email is an
+  // app-managed column that can drift from the real login). loginEmail is the
+  // source of truth; emailMismatch flags rows where the two diverge.
+  const rows = data ?? [];
+  const emailMap = new Map<string, string>();
+  if (rows.length > 0) {
+    const { data: emails, error: emailErr } = await supabase.rpc('admin_auth_emails', { p_ids: rows.map((r) => r.id) });
+    if (emailErr) console.warn('[admin/users] auth-email lookup failed:', emailErr.message);
+    for (const e of (emails as { id: string; email: string }[] | null) ?? []) emailMap.set(e.id, e.email);
+  }
+  const enriched = rows.map((r) => {
+    const loginEmail = emailMap.get(r.id) ?? null;
+    return {
+      ...r,
+      loginEmail,
+      emailMismatch: Boolean(loginEmail && r.email && loginEmail.toLowerCase() !== String(r.email).toLowerCase()),
+    };
+  });
+
+  res.status(200).json({ rows: enriched, total: count ?? 0, page, pageSize });
 }

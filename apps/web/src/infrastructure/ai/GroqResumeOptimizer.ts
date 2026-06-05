@@ -11,6 +11,7 @@
 
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
+import type { UsageSink } from './usage.js';
 import {
   buildSystemInstruction,
   buildUserPrompt,
@@ -31,6 +32,12 @@ interface GroqChatResponse {
     message?: { content?: string };
     finish_reason?: string;
   }>;
+  // OpenAI-compatible usage block — present on successful Groq completions.
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
   error?: { message?: string; code?: string };
 }
 
@@ -54,7 +61,7 @@ export class GroqResumeOptimizer implements IResumeOptimizer {
     this.model = modelOverride ?? 'llama-3.3-70b-versatile';
   }
 
-  async optimize(data: ResumeData): Promise<OptimizedResumeData> {
+  async optimize(data: ResumeData, usage?: UsageSink): Promise<OptimizedResumeData> {
     const systemInstruction = buildSystemInstruction();
     // Groq's JSON mode does NOT enforce a schema — only that the output is
     // valid JSON. Embed the shape spec in the user prompt.
@@ -94,6 +101,15 @@ export class GroqResumeOptimizer implements IResumeOptimizer {
         }
         const text = result.choices?.[0]?.message?.content;
         if (!text) throw new Error('No content in Groq response');
+
+        // Surface real token usage for cost telemetry (additive — does not
+        // affect the returned resume).
+        if (usage) {
+          usage.provider = 'groq';
+          usage.model = this.model;
+          usage.promptTokens = result.usage?.prompt_tokens;
+          usage.completionTokens = result.usage?.completion_tokens;
+        }
 
         const parsed = safeJsonParse<OptimizedResumeData>(text);
         normalizeSkills(parsed);

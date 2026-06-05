@@ -6,7 +6,7 @@
 // future watcher failure, parser drift, sender-ID change, or carrier oddity.
 //
 // Request:  { transactionId, observedMsisdn?, overrideMsisdnCheck?, overrideAmountCheck?, reason }
-// Headers:  X-Admin-Key: <ADMIN_API_KEY>
+// Auth:     Authorization: Bearer <session token> (owner login)
 // Response: { success: true, userId, creditsGranted, newBalance }
 //
 // 401 bad/missing admin key; 400 missing fields; 404 no matching row;

@@ -25,8 +25,9 @@ import { supabase } from '../infrastructure/supabase/client';
 const AdminScreen = lazy(() => import('./admin/AdminScreen').then(m => ({ default: m.AdminScreen })));
 
 // Path-based admin route. The admin SPA does NOT use Supabase auth — it
-// gates on ADMIN_API_KEY pasted by the operator. We intercept before any
-// other routing so unauthenticated visitors land on the gate, not the
+// gates on a separate owner login (username + password → session token). We
+// intercept before any other routing so unauthenticated visitors land on the
+// login screen, not the
 // landing page.
 const isAdminPath = (): boolean =>
   typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
@@ -392,8 +393,8 @@ const AppContent = () => {
 
 export default function App() {
   // The admin SPA mounts at /admin and does NOT use Supabase auth (gated by
-  // ADMIN_API_KEY only). Render it BEFORE the providers so the operator can
-  // get to the key-paste gate without going through Supabase login. The
+  // its own owner login → session token). Render it BEFORE the providers so the
+  // operator can get to the login screen without going through Supabase login. The
   // tradeoff: no i18n + no toasts on the admin surface, which is the design.
   if (isAdminPath()) {
     return (
