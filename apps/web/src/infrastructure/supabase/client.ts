@@ -16,4 +16,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const url = supabaseUrl || 'https://placeholder.supabase.co';
 const key = supabaseAnonKey || 'placeholder';
 
-export const supabase = createClient(url, key);
+// Auth config:
+//  - PKCE flow: the secure OAuth flow for SPAs (Supabase exchanges the
+//    `?code=` on the callback and rotates refresh tokens for us).
+//  - detectSessionInUrl: on load, parse + consume the OAuth callback params
+//    automatically, then Supabase strips them from the URL.
+//  - persistSession / autoRefreshToken: keep the session in localStorage and
+//    refresh it transparently (unchanged from the prior defaults).
+export const supabase = createClient(url, key, {
+    auth: {
+        flowType: 'pkce',
+        detectSessionInUrl: true,
+        persistSession: true,
+        autoRefreshToken: true,
+    },
+});

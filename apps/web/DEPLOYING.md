@@ -24,6 +24,13 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
 2. **Enable email/password auth**: Authentication → Providers → Email → enable.
    Note: the app currently ships with **email confirmation OFF** — `signUp` returns an active session immediately and the client routes straight into the app, with no "check your inbox to activate" step. If you turn **Confirm email** on for production, be aware the current UI does not yet handle the unconfirmed-account state, so test the sign-up flow before relying on it.
 
+2b. **Enable Google OAuth** (Authentication → Providers → Google):
+   - In [Google Cloud Console](https://console.cloud.google.com): configure the OAuth consent screen (External; scopes `openid email profile` — non-sensitive, no Google verification needed), then create an **OAuth 2.0 Client ID** (type: Web application). Set the **Authorized redirect URI** to `https://<project-ref>.supabase.co/auth/v1/callback`.
+   - Paste the Client ID + Secret into Supabase → Auth → Providers → Google → Enable.
+   - **Authentication → URL Configuration:** set **Site URL** to the production origin and add it (plus `http://localhost:5173` for dev) to **Redirect URLs**.
+   - **Account linking:** to make "same email = one account" (an email/password user who later signs in with Google lands in the same account), enable **Allow manual linking** (+ auto-confirm) under Auth → Providers → Email. With email confirmation off, both identities are treated as verified and link automatically. Leave off only if you intentionally want separate accounts per provider.
+   - The Google button is gated client-side by `OAUTH_GOOGLE_ENABLED` in `LoginScreen.tsx` (currently `true`); the provider must be configured here or `signInWithOAuth` returns an error.
+
 3. **Enable `pg_cron`**: Database → Extensions → enable `pg_cron`. Needed on Vercel Hobby (no sub-daily cron support).
 
 4. **Bootstrap the schema**: SQL Editor → paste the full contents of `supabase/schema.sql` → run.
@@ -44,7 +51,10 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
    010_align_profiles_columns.sql
    011_webhook_nonces.sql         (webhook replay protection — nonce table + timestamp window)
    012_realtime_and_match_on_submit.sql  (near-real-time credits — inbound_payments + match-on-submit + adds `purchases` to the realtime publication)
+   013_analytics_and_bi.sql       (first-party analytics events, credit ledger, marketing spend, AI cost columns, BI views, admin_auth_emails)
    ```
+
+   Google OAuth (Step 2b) needs **no** migration — it reuses `auth.users` + the existing `handle_new_user` trigger.
 
    Re-running is safe.
 

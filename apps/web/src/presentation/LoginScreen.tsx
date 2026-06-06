@@ -40,6 +40,7 @@ import { validateEmail } from '../application/validation/emailValidator';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
+import { ContinueWithGoogleButton } from './auth/ContinueWithGoogleButton';
 
 type Mode = 'login' | 'signup' | 'forgot';
 
@@ -47,11 +48,10 @@ interface LoginScreenProps {
     onOpenTerms?: () => void;
 }
 
-// Set to true once the OAuth PR (see `pending-work/oauth-google-signin.md`)
-// lands. When true, the screen renders the Google CTA + OR divider above
-// the email form. Today: false — only email auth is offered, and the
-// divider is hidden so the layout doesn't look incomplete.
-const OAUTH_GOOGLE_ENABLED = false;
+// When true, the screen renders the Google CTA + OR divider above the email
+// form. Requires the Supabase Google provider to be configured (Client ID +
+// Secret) — see `pending-work/oauth-google-signin.md` §11.
+const OAUTH_GOOGLE_ENABLED = true;
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
     const t = useT();
@@ -198,7 +198,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
                      */}
                     {OAUTH_GOOGLE_ENABLED && !isForgot && (
                         <>
-                            {/* <ContinueWithGoogleButton /> goes here */}
+                            <ContinueWithGoogleButton />
                             <div className="flex items-center gap-3 my-5" aria-hidden="true">
                                 <div className="flex-1 h-px bg-charcoal-200" />
                                 <span className="text-[11px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">

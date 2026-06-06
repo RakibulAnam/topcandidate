@@ -104,6 +104,26 @@ const AppContent = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // OAuth callback errors. The happy-path `?code=…` is consumed automatically
+  // by detectSessionInUrl (client.ts) → onAuthStateChange → the userId effect
+  // routes the user. We only need to surface an error (e.g. the user cancelled
+  // on Google's consent screen → `error=access_denied`) and then strip the
+  // params so they don't linger or re-fire on refresh.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    if (!err) return;
+    if (err === 'access_denied') {
+      toast.message(t('login.googleCancelled'));
+    } else {
+      console.warn('[oauth] callback error:', err, params.get('error_description') ?? '');
+      toast.error(t('login.googleUnavailable'));
+    }
+    try { window.history.replaceState(null, '', window.location.pathname); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     try {
       const service = createResumeService();

@@ -74,7 +74,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | Area | File entry point | Status |
 | --- | --- | --- |
 | Landing page | `src/presentation/LandingScreen.tsx` | shipped — BD-localized editorial redesign: centered hero with a rendered ATS resume mock, five-item toolkit list, value/pricing section (free first resume, ৳200/5 via bKash), 3-step how-it-works, BD testimonials, FAQ accordion. No announcement bar, no mock-interview section. No gradients, Saffron/Ink palette |
-| Auth (email + password) | `src/presentation/LoginScreen.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth) |
+| Auth (email + password, **Google OAuth**) | `src/presentation/LoginScreen.tsx`, `src/presentation/auth/ContinueWithGoogleButton.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth; Google via `signInWithGoogle` PKCE redirect — requires the Supabase Google provider configured) |
 | Profile setup (master profile) | `src/presentation/ProfileSetupScreen.tsx` | shipped — one-time profile capture used to seed future resumes |
 | Profile edit | `src/presentation/ProfileScreen.tsx` | shipped — view/edit saved master profile sections |
 | Dashboard (two-card action zone — Master vs. Tailor — + applications grid + slim consultant teaser) | `src/presentation/DashboardScreen.tsx` | shipped |
@@ -553,7 +553,7 @@ Guard failures throw, which the service-layer `withRetry` (1 retry) handles auto
 
 ### Supabase
 
-- Auth: email/password (no OAuth configured)
+- Auth: email/password + Google OAuth (Supabase provider; PKCE redirect). Same `auth.users` row model for both — no "two kinds of users" branching. `useAuth().provider` exposes `'email'`/`'google'`.
 - Row-level security is on for every table
 - Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 - Client: `src/infrastructure/supabase/client.ts` (has a dev fallback so the app does not crash on missing env — it will fail at network time instead)
@@ -690,7 +690,7 @@ CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pendin
 Agents: **do not build these unless the user asks.**
 
 - **Mock-interview marketplace** — consultant profiles, booking, payments. The landing page **no longer references mock interviews at all** (the Coming Soon section, the announcement bar, and the mock-interview toolkit item were all removed in the BD-localized redesign) so we don't promise something we haven't built. Separate product scope.
-- **OAuth providers** — Supabase Auth is wired for email/password only.
+- **OAuth providers** — Google is shipped (email/password + Google). Apple / LinkedIn and the in-Profile "Connect Google" (account-linking from settings) are still out of scope — see `pending-work/oauth-google-signin.md` §12.
 - **Unit / integration tests** — no test harness exists. Don't invent one without asking.
 - **Code-splitting** — the bundle is ~1.7MB. Vite warns about it; acceptable for now.
 - **Legacy `applications` table** — exists in schema, unused by current code. Do not write to it; use `generated_resumes`.
