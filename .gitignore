@@ -8,6 +8,9 @@ Thumbs.db
 # Per-developer Claude Code overrides (project-level .claude/settings.json IS committed)
 **/.claude/settings.local.json
 
+# Per-developer MCP server connections (personal tooling, may carry auth context)
+.mcp.json
+
 # Catch-all env (each app maintains its own .env.example)
 **/.env
 **/.env.local
