@@ -18,7 +18,7 @@ import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
 import { TermsOfService } from './legal/TermsOfService';
-import { supabase } from '../infrastructure/supabase/client';
+import { supabase, initialAuthParams } from '../infrastructure/supabase/client';
 
 // Admin SPA is operator-only — customers never visit /admin. Lazy-load so
 // the admin code (~100KB+ gzipped) doesn't ship with every customer page.
@@ -56,18 +56,12 @@ const DEFAULT_SECTIONS = [
 const UNAUTHED_SCREENS: NavScreen[] = ['LANDING', 'LOGIN', 'LEGAL_TERMS'];
 const AUTHED_SCREENS: NavScreen[] = ['DASHBOARD', 'PROFILE', 'PROFILE_SETUP', 'BUILDER'];
 
-// Recovery hash detection. Supabase appends `#access_token=...&type=recovery`
-// when the user clicks the password-reset link in their email. We watch for
-// (a) the hash on initial load and (b) the PASSWORD_RECOVERY auth event,
-// because the GoTrue client parses the hash slightly before our App.tsx
-// effect runs.
-function hasRecoveryHash(): boolean {
-  if (typeof window === 'undefined') return false;
-  const hash = window.location.hash.replace(/^#/, '');
-  if (!hash) return false;
-  const params = new URLSearchParams(hash);
-  return params.get('type') === 'recovery' || params.has('error_code');
-}
+// Recovery detection. The password-reset link returns to `?auth=recovery`
+// (set by requestPasswordReset). client.ts captures that marker at module load
+// — before useBrowserNav can strip the URL — so we read it from there instead
+// of re-parsing the (already-cleaned) live URL. Works whether Supabase returns
+// the session as a PKCE `?code=` or an implicit `#…&type=recovery` hash.
+const isRecoveryRedirect = (): boolean => !!initialAuthParams?.recovery;
 
 const AppContent = () => {
   const { user, loading } = useAuth();
@@ -89,7 +83,7 @@ const AppContent = () => {
   // includes `type=recovery` (or an error_code), route to the reset screen.
   // We also listen to PASSWORD_RECOVERY in case the hash is consumed by
   // GoTrue before our effect runs.
-  const [recoveryActive, setRecoveryActive] = useState<boolean>(() => hasRecoveryHash());
+  const [recoveryActive, setRecoveryActive] = useState<boolean>(() => isRecoveryRedirect());
   useEffect(() => {
     if (recoveryActive) {
       navigate({ screen: 'RESET_PASSWORD' }, { replace: true });
@@ -104,23 +98,23 @@ const AppContent = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // OAuth callback errors. The happy-path `?code=…` is consumed automatically
-  // by detectSessionInUrl (client.ts) → onAuthStateChange → the userId effect
-  // routes the user. We only need to surface an error (e.g. the user cancelled
-  // on Google's consent screen → `error=access_denied`) and then strip the
-  // params so they don't linger or re-fire on refresh.
+  // OAuth callback errors. The happy-path `?code=…` is consumed by AuthContext
+  // (from initialAuthParams, captured at module load) → session → the userId
+  // effect routes the user. Here we only surface an error (e.g. the user
+  // cancelled on Google's consent screen → `error=access_denied`). We read it
+  // from the module-load snapshot, NOT window.location, because useBrowserNav
+  // has already stripped the live URL by the time this effect runs.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const err = params.get('error');
-    if (!err) return;
-    if (err === 'access_denied') {
+    if (initialAuthParams?.kind !== 'error') return;
+    // Recovery-link errors (e.g. expired token) are surfaced by the reset
+    // screen ("request a new link"), not a Google toast.
+    if (initialAuthParams.recovery) return;
+    if (initialAuthParams.error === 'access_denied') {
       toast.message(t('login.googleCancelled'));
     } else {
-      console.warn('[oauth] callback error:', err, params.get('error_description') ?? '');
+      console.warn('[oauth] callback error:', initialAuthParams.error, initialAuthParams.description ?? '');
       toast.error(t('login.googleUnavailable'));
     }
-    try { window.history.replaceState(null, '', window.location.pathname); } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
