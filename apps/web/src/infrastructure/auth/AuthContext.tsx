@@ -49,8 +49,12 @@ interface AuthContextType {
     user: User | null;
     session: Session | null;
     loading: boolean;
+    /** The auth provider for the current session — 'email', 'google', … (null when signed out). */
+    provider: string | null;
     signIn: (email: string, password: string) => Promise<void>;
     signUp: (input: AuthSignUpInput) => Promise<SignUpResult>;
+    /** Start the Google OAuth redirect flow. Rejects with 'already_signed_in' when a user is already signed in. */
+    signInWithGoogle: () => Promise<void>;
     requestPasswordReset: (email: string) => Promise<void>;
     /** Used by the password-reset landing flow after the user clicks the recovery link. */
     updatePassword: (newPassword: string) => Promise<void>;
@@ -124,7 +128,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signIn = async (email: string, password: string) => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        track('signin_completed');
+        track('signin_completed', { method: 'email' });
+    };
+
+    // Google OAuth (redirect flow). On success the browser navigates away to
+    // Google, so nothing after signInWithOAuth runs in this tab. When the user
+    // returns, detectSessionInUrl (client.ts) consumes the callback and
+    // onAuthStateChange fires SIGNED_IN — the existing AppContent flow then
+    // routes them to PROFILE_SETUP / DASHBOARD.
+    //
+    // We refuse if a user is already signed in (spec §4.2): silently switching
+    // accounts on a different Google email is confusing. The caller surfaces a
+    // "sign out first" message.
+    const signInWithGoogle = async () => {
+        if (user) throw new Error('already_signed_in');
+        track('signin_started', { method: 'google' });
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+                scopes: 'openid email profile',
+            },
+        });
+        if (error) throw error;
     };
 
     const signUp = async ({ email, password, fullName }: AuthSignUpInput): Promise<SignUpResult> => {
@@ -194,8 +220,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch { /* ignore — quota or private mode */ }
     };
 
+    // 'email', 'google', … — sourced from app_metadata.provider (set by GoTrue).
+    const provider = (user?.app_metadata?.provider as string | undefined) ?? null;
+
     return (
-        <AuthContext.Provider value={{ user, session, loading, signIn, signUp, requestPasswordReset, updatePassword, signOut }}>
+        <AuthContext.Provider value={{ user, session, loading, provider, signIn, signUp, signInWithGoogle, requestPasswordReset, updatePassword, signOut }}>
             {children}
         </AuthContext.Provider>
     );

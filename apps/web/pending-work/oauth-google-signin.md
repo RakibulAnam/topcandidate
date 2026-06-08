@@ -1,7 +1,7 @@
 # Spec — Google OAuth sign-in
 
 **Owner:** TBD
-**Status:** spec ready, not yet started
+**Status:** IMPLEMENTED (branch `feat/google-oauth`) — client code shipped (AuthContext.signInWithGoogle, ContinueWithGoogleButton, LoginScreen flag on, App.tsx callback-error handling, PKCE client config). Remaining: configure the Supabase Google provider + redirect URLs + account-linking (§11.1), then manual QA (§11.5). No schema migration was needed.
 **Estimated effort:** 1 day implementation + 1 day testing
 **Prerequisite PRs:** none. This is the first OAuth provider.
 

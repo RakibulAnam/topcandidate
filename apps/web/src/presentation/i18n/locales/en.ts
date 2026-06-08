@@ -1060,6 +1060,10 @@ export const en = {
     emailRequired: 'Email is required.',
     continueWithEmail: 'Continue with email',
     orContinueWithEmail: 'or continue with email',
+    continueWithGoogle: 'Continue with Google',
+    googleCancelled: 'Sign-in cancelled.',
+    googleUnavailable: 'Google sign-in is temporarily unavailable. Please try email instead.',
+    googleAlreadySignedIn: "You're already signed in. Sign out first to use a different account.",
     tosBlurb: 'By signing up you agree to our',
     tosLink: 'Terms of Service',
     // Password-reset landing (recovery link click → set new password)
