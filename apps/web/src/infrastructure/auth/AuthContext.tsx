@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '../supabase/client';
+import { supabase, initialAuthParams } from '../supabase/client';
 import { track, getFirstTouch } from '../analytics/track';
 
 /**
@@ -67,6 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(() => {
+        // If we arrived from an OAuth/recovery redirect, stay in `loading` while
+        // the init effect completes the exchange — otherwise the app would
+        // briefly render the public landing page before the session lands.
+        if (initialAuthParams?.kind === 'code' || initialAuthParams?.kind === 'hash') return true;
         // FAST PATH: Check if we have a token in localStorage
         // Key format: sb-<project-ref>-auth-token
         const projectRef = import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0];
@@ -79,15 +83,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     useEffect(() => {
-        // Check active sessions and sets the user
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-        }).catch((err) => {
-            console.warn('Auth initialization error:', err);
-        }).finally(() => {
-            setLoading(false);
-        });
+        let cancelled = false;
+
+        // Initialize auth. CRITICAL ORDERING: if the page loaded from an OAuth /
+        // recovery redirect, the callback params were captured at module load
+        // (client.ts → initialAuthParams) BEFORE the SPA router could strip the
+        // URL. We must consume them HERE — establishing the session — before we
+        // read getSession(), otherwise the OAuth code is never exchanged and the
+        // user appears logged out (lands on the public landing page).
+        const init = async () => {
+            try {
+                if (initialAuthParams?.kind === 'code') {
+                    // OAuth (PKCE): trade the authorization code for a session.
+                    // The code_verifier is in localStorage from signInWithOAuth.
+                    const { error } = await supabase.auth.exchangeCodeForSession(initialAuthParams.code);
+                    if (error) {
+                        console.warn('[auth] code exchange failed:', error.message);
+                    } else if (!initialAuthParams.recovery) {
+                        // Recovery codes also arrive as ?code= — only the genuine
+                        // Google sign-in should log a signin_completed event.
+                        track('signin_completed', { method: 'google' });
+                    }
+                } else if (initialAuthParams?.kind === 'hash' && initialAuthParams.refreshToken) {
+                    // Implicit/recovery hash (e.g. password-reset link): set the
+                    // session directly from the tokens. App.tsx separately detects
+                    // `type=recovery` (synchronously, from the same pre-strip URL)
+                    // and routes to the reset screen.
+                    const { error } = await supabase.auth.setSession({
+                        access_token: initialAuthParams.accessToken,
+                        refresh_token: initialAuthParams.refreshToken,
+                    });
+                    if (error) console.warn('[auth] recovery setSession failed:', error.message);
+                }
+            } catch (err) {
+                console.warn('[auth] callback initialization error:', err);
+            }
+
+            // Now read whatever session exists (freshly established above, or a
+            // persisted one from a prior visit).
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (cancelled) return;
+                setSession(session);
+                setUser(session?.user ?? null);
+            } catch (err) {
+                console.warn('Auth initialization error:', err);
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        };
+        void init();
 
         // Listen for changes on auth state (sign in, sign out, etc.).
         //
@@ -122,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(false);
         });
 
-        return () => subscription.unsubscribe();
+        return () => { cancelled = true; subscription.unsubscribe(); };
     }, []);
 
     const signIn = async (email: string, password: string) => {

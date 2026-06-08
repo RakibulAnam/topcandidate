@@ -33,6 +33,7 @@ import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Lock, Loader2, AlertCircle, XCircle } from 'lucide-react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
+import { initialAuthParams } from '../infrastructure/supabase/client';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 
@@ -65,10 +66,13 @@ export const SetNewPasswordScreen: React.FC<Props> = ({ onDone, onRequestNewLink
   const [linkError, setLinkError] = useState<string | null>(null);
 
   useEffect(() => {
-    const code = readHashError();
-    if (code) {
-      // The hash error variants we care about: otp_expired, access_denied,
-      // server_error. All collapse to the same "request a new link" UI.
+    // An expired/used recovery link surfaces its error either in the hash
+    // (implicit flow) or the query string (PKCE flow → captured at module load
+    // in initialAuthParams before the URL was cleaned). Either way: same
+    // "request a new link" UI.
+    const hashErr = readHashError();
+    const paramErr = initialAuthParams?.kind === 'error' ? initialAuthParams.error : null;
+    if (hashErr || paramErr) {
       setLinkError(t('login.recoveryLinkExpired'));
     }
   }, [t]);
