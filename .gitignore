@@ -25,3 +25,6 @@ Thumbs.db
 **/.vercel/
 .vercel
 .env*.local
+
+# Local AI test fixtures (personal resumes — PII, do not commit)
+apps/web/testResume/

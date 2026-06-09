@@ -71,6 +71,8 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 
 ## 3. Product surface (currently shipped)
 
+> **AI generator note:** the `Gemini*Generator.ts` files referenced below are the **legacy** implementation. The **active** path (when `OPENROUTER_API_KEY` is set) is the sibling `OpenRouter*Generator.ts` set, wired in `api/_lib/aiFactory.ts`. Same domain interfaces, same prompts/guards. See §9 for the full provider map. The Gemini files stay until migration Phase 6b.
+
 | Area | File entry point | Status |
 | --- | --- | --- |
 | Landing page | `src/presentation/LandingScreen.tsx` | shipped — BD-localized editorial redesign: centered hero with a rendered ATS resume mock, five-item toolkit list, value/pricing section (free first resume, ৳200/5 via bKash), 3-step how-it-works, BD testimonials, FAQ accordion. No announcement bar, no mock-interview section. No gradients, Saffron/Ink palette |
@@ -171,7 +173,7 @@ Four layers, dependencies flow inward.
 - **Infrastructure** implements domain interfaces. Can import SDKs (Supabase, Gemini).
 - **Presentation** depends on application + domain. Can read infrastructure via `dependencies.ts` but should prefer going through `ResumeService`.
 
-**AI call budget:** initial generation runs exactly TWO concurrent Gemini calls — optimizer + combined toolkit (`GeminiToolkitGenerator`). Free-tier RPM is 5; historical 1-optimizer-plus-4-toolkit fan-out hit quota. Per-item regeneration still hits the single-artifact generators (one call per retry).
+**AI call budget:** initial generation runs exactly TWO concurrent AI calls — optimizer + combined toolkit. (On OpenRouter that's DeepSeek + Gemini-Flash; on the legacy path both are Gemini.) Free-tier RPM history (the legacy 1-optimizer-plus-4-toolkit fan-out hit quota) is why it's capped at two. Per-item regeneration still hits the single-artifact generators (one call per retry).
 
 **Toolkit validation is per-artifact.** `GeminiToolkitGenerator.generate()` validates each of the four artifacts (cover letter, outreach email, LinkedIn note, interview questions) in isolation and returns a `GeneratedToolkit` with optional fields plus an `errors` map. A validation failure on one artifact (empty payload, fabricated token, missing specificity anchor, interview answers below the 1/3 anchor-coverage floor) records the reason in `errors[<item>]` while the other slots ship through cleanly. The old all-or-nothing throw is gone; never reintroduce it — it forced the user to manually regenerate every item when a single weak interview answer fell below the anchor threshold. `ResumeService.optimizeResume` does NOT wrap the toolkit call in `withRetry`: in the proxy build both halves are served by the same `/api/optimize` POST and a retry would burn a second toolkit credit (the dedupe cache clears in `.finally()`). Per-item retries go through the free `/api/toolkit-item` endpoint via the Preview card buttons.
 
@@ -181,7 +183,7 @@ Four layers, dependencies flow inward.
 
 **Bilingual interview prep (English + Bangla).** Interview questions ship in both languages from the same AI call — fields `questionBn`, `whyAskedBn`, `answerStrategyBn` on `InterviewQuestion` (optional for back-compat with pre-2026-05-14 saved resumes). The English version is authoritative; Bangla is for the candidate's own rehearsal because BD interviews routinely swing into Bangla on behavioural / cultural questions even at MNCs. The combined toolkit schema and the single-artifact retry generator both require all six fields. Translation rules baked into the prompt: professional spoken Bangla (not literal word-by-word), English-canonical industry terms / employer names / regulatory frameworks / certifications kept in Roman script inline (Basel III, IFRS 9, KYC, NPL, ECL, CFA, BBA, KPI), category labels left in English. UI toggle in `InterviewPrepViewer` (English / বাংলা) defaults to English and persists via `localStorage['topcandidate.interviewPrepLang']`. Falls back to English per-field when a Bangla translation is missing. Other artifacts (cover letter / outreach / LinkedIn / resume itself) stay English-only — BD recruiters scan English, ATS systems are English-language, LinkedIn is English globally.
 
-**Optimizer prompt + post-pipeline.** `prompts/resumeOptimizerPrompts.ts` is shared by Groq and Gemini. Beyond the system + user prompt, every optimizer response runs through this deterministic post-pipeline (in order):
+**Optimizer prompt + post-pipeline.** `prompts/resumeOptimizerPrompts.ts` is shared by every optimizer implementation (OpenRouter, Groq, Gemini). Beyond the system + user prompt, every optimizer response runs through this deterministic post-pipeline (in order):
 1. `normalizeSkills` — dedupe flat `skills` and dedupe/clean `skillCategories` (drops empty buckets).
 2. `filterFabricatedSkills` — strips skills (and category items) the candidate never evidenced. Belt-and-braces against the SKILL HONESTY rule.
 3. `reorderLeadBulletByJDFit` — within each item, promote the most JD-aligned bullet to position 0 (the recruiter's highest-attention spot).
@@ -191,7 +193,7 @@ Four layers, dependencies flow inward.
 
 The user prompt also injects a `SENIORITY` line (Junior / Mid / Senior / Senior+) inferred from total months of experience + `userType`, plus a `THINK FIRST` CoT block that asks the model to silently identify JD top requirements + candidate evidence before emitting JSON. Don't strip these — they tune verb choice and gap handling.
 
-**Adding a new AI generator:** add an interface + use case in `domain/usecases/`, a Gemini implementation in `infrastructure/ai/`, wire it into `dependencies.ts`, inject into `ResumeService`. For single-item ancillary output, call it from `regenerateToolkitItem()` — NOT from `optimizeResume()`, which is restricted to the 2-call hot path. If you need to expand the initial toolkit, extend `GeminiToolkitGenerator`'s schema/prompt instead of adding a parallel call.
+**Adding a new AI generator:** add an interface + use case in `domain/usecases/`, then a **provider implementation in `infrastructure/ai/`** — the active path is an `OpenRouter*Generator` built on `OpenRouterClient` (mirror an existing one; reuse the shared prompt in `prompts/` + `withRetry` for JSON); add a legacy `Gemini*` sibling only if you need the fallback path too. Wire both into `api/_lib/aiFactory.ts` (gated on `OPENROUTER_API_KEY`) and inject via `ResumeService`. For single-item ancillary output, call it from `regenerateToolkitItem()` — NOT from `optimizeResume()`, which is restricted to the 2-call hot path. To expand the initial toolkit, extend the toolkit generator's schema/prompt instead of adding a parallel call.
 
 **Pre-flight content gates** live in `src/application/validation/` and run client-side before any AI call (in `ResumeService.optimizeResume`) and before signup (in `LoginScreen`). They are pure utilities — no SDK deps, no domain types — and exist to refuse work that would waste tokens or pollute the user pool. Two gates today:
 
