@@ -30,7 +30,7 @@ import {
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
 import type { UsageSink } from './usage.js';
-import { OpenRouterClient } from './OpenRouterClient.js';
+import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
 import {
   buildToolkitSystemInstruction,
   buildToolkitUserPrompt,
@@ -90,46 +90,43 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
     const fit = classifyFitMode(data);
     console.info(`[or-toolkit-gen] start jdLen=${data.targetJob.description.length} fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
 
-    const result = await this.client.chat(
-      {
-        model: TOOLKIT_MODELS[0],
-        models: TOOLKIT_MODELS,
-        messages: [
-          { role: 'system', content: buildToolkitSystemInstruction(fit.mode) },
-          { role: 'user', content: buildToolkitUserPrompt(data, fit.mode) },
-        ],
-        response_format: { type: 'json_object' },
-        temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
-        max_tokens: 6000,
-        reasoning: { enabled: false },
-        provider: { data_collection: 'deny', allow_fallbacks: true },
-      },
-      this.timeoutMs,
-    );
-
-    const elapsed = Date.now() - t0;
-    if (usage) {
-      usage.provider = 'openrouter';
-      usage.model = result.model;
-      usage.promptTokens = result.usage?.prompt_tokens;
-      usage.completionTokens = result.usage?.completion_tokens;
-    }
-
-    const text = result.content;
-    if (!text) {
-      console.error(`[or-toolkit-gen] empty AI response after ${elapsed}ms`);
-      throw new Error('No response from AI');
-    }
-    console.info(`[or-toolkit-gen] AI response in ${elapsed}ms textLen=${text.length}`);
-
-    let parsed: RawToolkitResponse;
-    try {
-      parsed = this.safeJsonParse(text);
-    } catch (parseErr) {
-      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      console.error(`[or-toolkit-gen] JSON parse failed: ${msg} (textPrefix="${text.slice(0, 120).replace(/\s+/g, ' ')}")`);
-      throw new Error(`Toolkit response was not valid JSON: ${msg}`);
-    }
+    // Retry the AI call + parse on transient malformed JSON (json_object has no
+    // schema enforcement). The per-artifact validation below is NOT retried — a
+    // weak single artifact is expected and lands in the errors map, not a regen.
+    const parsed: RawToolkitResponse = await withRetry(async () => {
+      const result = await this.client.chat(
+        {
+          model: TOOLKIT_MODELS[0],
+          models: TOOLKIT_MODELS,
+          messages: [
+            { role: 'system', content: buildToolkitSystemInstruction(fit.mode) },
+            { role: 'user', content: buildToolkitUserPrompt(data, fit.mode) },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
+          max_tokens: 6000,
+          reasoning: { enabled: false },
+          provider: { data_collection: 'deny', allow_fallbacks: true },
+        },
+        this.timeoutMs,
+      );
+      if (usage) {
+        usage.provider = 'openrouter';
+        usage.model = result.model;
+        usage.promptTokens = result.usage?.prompt_tokens;
+        usage.completionTokens = result.usage?.completion_tokens;
+      }
+      const text = result.content;
+      if (!text) throw new Error('No response from AI');
+      try {
+        return this.safeJsonParse(text);
+      } catch (parseErr) {
+        const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        console.warn(`[or-toolkit-gen] JSON parse failed (retrying if attempts remain): ${msg}`);
+        throw new Error(`Toolkit response was not valid JSON: ${msg}`);
+      }
+    });
+    console.info(`[or-toolkit-gen] parsed after ${Date.now() - t0}ms`);
 
     // Per-artifact validation — identical contract to GeminiToolkitGenerator.
     const evidence = buildToolkitEvidenceCorpus(data);

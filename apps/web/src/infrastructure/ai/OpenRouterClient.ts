@@ -88,6 +88,32 @@ export class OpenRouterError extends Error {
   }
 }
 
+/**
+ * Retry a generator operation on transient failure. OpenRouter `json_object`
+ * mode does NOT enforce a schema the way Gemini's native `responseSchema` does,
+ * so occasional malformed JSON (unterminated strings, stray control chars) is
+ * expected; one retry collapses that failure rate. Also covers transient 5xx /
+ * timeout. `attempts` is the TOTAL number of tries (not extra retries).
+ */
+export async function withRetry<T>(
+  fn: (attempt: number) => Promise<T>,
+  attempts = 2,
+  backoffMs = 400,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn(i);
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, backoffMs * (i + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 export class OpenRouterClient {
   constructor(private readonly apiKey: string) {
     if (!apiKey) {
