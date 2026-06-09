@@ -69,6 +69,10 @@ export interface OpenRouterRequest {
   max_tokens?: number;
   reasoning?: { enabled: boolean };
   provider?: OpenRouterProviderRouting;
+  // File handling for multimodal inputs (resume extractor). `engine: 'native'`
+  // lets a natively-multimodal model (Gemini) read the PDF directly instead of
+  // OpenRouter's default OCR parser.
+  plugins?: Array<{ id: string; pdf?: { engine?: 'native' | 'pdf-text' | 'mistral-ocr' } }>;
 }
 
 export interface OpenRouterResult {
