@@ -51,7 +51,7 @@ A future mock-interview marketplace is planned but **out of scope** until explic
 - **React 19** + **TypeScript 5.8** + **Vite 6**
 - **Tailwind CSS** (via CDN, not PostCSS — config lives in `index.html`)
 - **Internationalisation** — DIY typed dictionary at `src/presentation/i18n/` (no library). Two locales: `en` (default) and `bn` (বাংলা / Bengali). Switch via `<LanguageToggle />` in the navbar / landing / login. Locale persists in `localStorage` (`topcandidate.locale`) and is applied to `<html data-locale>` for font-stack swapping. See §10 for fonts and §11 for the convention.
-- **AI providers** for resume optimization: **Groq** (`llama-3.3-70b-versatile`, primary — 1,000 RPD free, ~5–8s latency) → **Google Gemini 2.5 Flash** (fallback). Routed through `MultiProviderResumeOptimizer`. Toolkit generators (cover letter, outreach, LinkedIn, interview, extractor) are still Gemini-only. SDK: `@google/genai` for Gemini; plain `fetch` to `api.groq.com/openai/v1/chat/completions` for Groq
+- **AI provider:** **OpenRouter** (single key, OpenAI-compatible `fetch` via `OpenRouterClient`) when `OPENROUTER_API_KEY` is set — optimizer → DeepSeek V3.2 (→ Gemini 2.5 Flash → Llama 3.3 70B); toolkit / single-artifact → Gemini 2.5 Flash (→ DeepSeek → Llama); extractor → Gemini 2.5 Flash-Lite (→ Flash). Falls back to the **legacy** Groq (`llama-3.3-70b-versatile`) → Gemini optimizer + Gemini-only toolkit/extractor (`@google/genai`) when the key is absent. Gate + rationale: `api/_lib/aiFactory.ts`, `docs/OPENROUTER_MIGRATION.md`. `@google/genai` is still a dependency (kept one cycle as the rollback path)
 - **Server-side API proxy** — all AI calls go through Vercel Functions in `/api/*` (deployed automatically alongside the Vite app). Client holds NO provider keys. Auth via Supabase JWT bearer; per-user daily-cap rate limiting via the `ai_call_log` table.
 - **Supabase** (`@supabase/supabase-js`) for auth + persistence
 - **docx**, **jspdf**, **html2pdf.js** for export
@@ -152,12 +152,15 @@ Four layers, dependencies flow inward.
  │                          grants NO credits (webhook does)  │
  │  api/_lib/auth         — Supabase JWT verifier            │
  │  api/_lib/rateLimit    — daily cap (ai_call_log)          │
- │  api/_lib/aiFactory    — constructs:                      │
- │    MultiProviderResumeOptimizer (Groq → Gemini fallback)  │
- │    GeminiToolkitGenerator + 4 single-artifact generators  │
- │    GeminiResumeExtractor                                  │
- │  Shared: prompts/resumeOptimizerPrompts.ts                │
- │  Keys read from process.env.{GROQ,GEMINI}_API_KEY         │
+ │  api/_lib/aiFactory    — gates on OPENROUTER_API_KEY:     │
+ │   • set  → OpenRouter{ResumeOptimizer,ToolkitGenerator,   │
+ │            CoverLetter,Outreach,LinkedIn,InterviewQ,       │
+ │            ResumeExtractor} via OpenRouterClient           │
+ │   • unset→ legacy: MultiProviderResumeOptimizer (Groq→    │
+ │            Gemini) + Gemini{Toolkit,…,Extractor}           │
+ │  Shared: prompts/{resumeOptimizerPrompts,toolkitPrompts,  │
+ │          toolkitContext,extractorPrompts}.ts              │
+ │  Keys: process.env.{OPENROUTER,GROQ,GEMINI}_API_KEY       │
  │  (NEVER VITE_-prefixed — server-only, never bundled)      │
  └───────────────────────────────────────────────────────────┘
 ```
@@ -391,12 +394,17 @@ src/domain/usecases/                    Use case classes + domain-layer interfac
 src/domain/repositories/                Repo interfaces (IProfile, IResume, IApplication)
 
 src/infrastructure/ai/                  AI providers (run server-side) + client proxies
-  ├── MultiProviderResumeOptimizer.ts   Router — Groq → Gemini fallback w/ rate-class cooldown
-  ├── GroqResumeOptimizer.ts            Primary optimizer (llama-3.3-70b-versatile)
-  ├── GeminiResumeOptimizer.ts          Fallback optimizer (gemini-2.5-flash, schema-enforced)
-  ├── prompts/resumeOptimizerPrompts.ts Shared system + user prompt + validation + post-filters
-  ├── proxy/ProxyClients.ts             Client-side adapters that POST to /api/*
-  └── Gemini{CoverLetter,Outreach,LinkedIn,InterviewQ,Toolkit,Extractor}Generator.ts (server-only)
+  ├── OpenRouterClient.ts               Single fetch adapter — models[] fallback, usage, ZDR, withRetry (the cutover path)
+  ├── OpenRouter{ResumeOptimizer,Toolkit,CoverLetter,Outreach,LinkedIn,InterviewQ,Extractor}Generator.ts (server-only; active when OPENROUTER_API_KEY set)
+  ├── MultiProviderResumeOptimizer.ts   LEGACY router — Groq → Gemini fallback w/ rate-class cooldown
+  ├── GroqResumeOptimizer.ts            LEGACY primary optimizer (llama-3.3-70b-versatile)
+  ├── GeminiResumeOptimizer.ts          LEGACY fallback optimizer (gemini-2.5-flash, schema-enforced)
+  ├── Gemini{CoverLetter,Outreach,LinkedIn,InterviewQ,Toolkit,Extractor}Generator.ts (LEGACY, server-only)
+  ├── prompts/resumeOptimizerPrompts.ts Shared optimizer system + user prompt + validation + post-filters
+  ├── prompts/toolkitContext.ts         Shared candidate-evidence corpus + fit-mode + fabrication/specificity guards
+  ├── prompts/toolkitPrompts.ts         Shared toolkit + single-artifact system instructions & user-prompt builders (extracted Phase 0)
+  ├── prompts/extractorPrompts.ts       Shared extractor prompt + JSON-shape hint
+  └── proxy/ProxyClients.ts             Client-side adapters that POST to /api/*
 
 api/                                    Vercel Functions — server-side AI proxy + bKash flow
   ├── optimize.ts                       POST — runs optimizer + toolkit (paid: gates on toolkit_credits, refunds on optimizer failure)
@@ -530,16 +538,19 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 
 ### AI providers
 
-The resume optimizer is provider-agnostic — `MultiProviderResumeOptimizer` routes calls in this priority:
+**The AI surface runs through OpenRouter when `OPENROUTER_API_KEY` is set** (single key; the cutover path — `api/_lib/aiFactory.ts` gates on it). All calls go via `OpenRouterClient` (OpenAI-compatible `fetch`) with `provider.data_collection:'deny'` + ZDR routing (resumes are PII — Chinese *models* are acceptable, Chinese *infra* is not), `reasoning:{enabled:false}` (reasoning tokens bill as output), and a `models[]` fallback chain per workload:
 
-1. **Groq** — `llama-3.3-70b-versatile`, free tier 1,000 RPD / 30 RPM, ~5–8s latency. Configured via `GROQ_API_KEY` (server-only, never `VITE_`-prefixed). OpenAI-compatible JSON mode (no schema enforcement → JSON shape spec embedded in user prompt + post-parse validation).
-2. **Gemini** — `gemini-2.5-flash`, free tier 20 RPD on 2.5-flash, ~25–40s latency, **strongest schema enforcement** via `responseSchema`. Configured via `GEMINI_API_KEY` (server-only, never `VITE_`-prefixed).
+- **Optimizer** → `deepseek/deepseek-v3.2` (cheap, fast on short output) → `google/gemini-2.5-flash` → `meta-llama/llama-3.3-70b-instruct`.
+- **Toolkit + single-artifact** → `google/gemini-2.5-flash` (DeepSeek timed out >55s on the long bilingual output vs the 60s cap) → `deepseek/deepseek-v3.2` → Llama.
+- **Extractor** → `google/gemini-2.5-flash-lite` (native PDF via the `file-parser` plugin, `engine:'native'`) → `google/gemini-2.5-flash`.
 
-The router cools down a provider for 10 minutes when it returns 429/503/timeout, so a quota-exhausted Groq doesn't keep eating retries. If only one key is configured, the router uses just that one.
+OpenRouter `json_object` does NOT enforce a schema (unlike Gemini's `responseSchema`), so JSON generators embed the shape in the prompt and wrap the call in `withRetry` (2 attempts, in `OpenRouterClient.ts`) to absorb transient malformed JSON.
 
-**Adding a third provider** (Cerebras, OpenRouter, etc.): implement `IResumeOptimizer`, reuse `prompts/resumeOptimizerPrompts.ts`, push into the `optimizerProviders` array in `dependencies.ts`. The shared prompt module is the contract — never hardcode rules inside an optimizer.
+**Legacy fallback (no `OPENROUTER_API_KEY`):** `MultiProviderResumeOptimizer` routes Groq (`llama-3.3-70b-versatile`, `GROQ_API_KEY`) → Gemini (`gemini-2.5-flash`, `GEMINI_API_KEY`, `responseSchema`) with a 10-min cooldown on 429/503; toolkit/extractor are Gemini-only via `@google/genai`. Kept as the one-cycle **panic switch** (remove `OPENROUTER_API_KEY` to roll back); `@google/genai` stays a dependency until OpenRouter is proven in prod, then a follow-up drops it.
 
-**Toolkit generators** (cover letter, outreach email, LinkedIn note, interview questions, resume extractor) are still Gemini-only. SDK: `@google/genai`. Free-tier RPM is the binding constraint. Initial generation = **2 calls only** (optimizer + combined `GeminiToolkitGenerator`). Do not re-fan the toolkit into N parallel calls.
+**Cost telemetry:** `api/_lib/aiCost.ts` maps served model slugs (incl. OpenRouter provider prefixes + dated snapshots like `deepseek-v3.2-20251201`) to approximate prices for the analytics tables.
+
+**Hot-path budget unchanged:** initial generation = **2 calls only** (optimizer + combined toolkit). Do not re-fan the toolkit into N parallel calls. Per-item retries use the single-artifact generators (free) via `/api/toolkit-item`.
 
 **Toolkit context + guards.** Every toolkit generator (the combined hot-path + the four single-artifact retry generators) shares `infrastructure/ai/prompts/toolkitContext.ts`:
 - `buildCandidateContext(data)` — full profile block (experience + raw-bullet voice excerpt + projects + raw-bullet voice + education + certifications + awards + publications + extracurriculars + affiliations + languages + skills + skill categories). Generators present this as CANDIDATE EVIDENCE *first*, then the JD as a *filter* — the candidate's evidence is the source of truth.
@@ -654,7 +665,9 @@ No test suite currently (no `npm test`). Verification = successful `npm run buil
 
 **Required env vars** — split into client-visible (`VITE_*`) and server-only (no prefix). Set both in Vercel's Environment Variables UI; non-`VITE_` keys are NEVER bundled into the client:
 ```
-# AI providers — server-only (used by Vercel Functions in /api/*)
+# AI provider — server-only (used by Vercel Functions in /api/*)
+OPENROUTER_API_KEY       # https://openrouter.ai/keys — single key, ALL AI when set (cutover path); set a hard $ spend cap
+# Legacy fallback (used only when OPENROUTER_API_KEY is absent; keep one cycle as the rollback path):
 GROQ_API_KEY             # https://console.groq.com/keys   (1,000 RPD free)
 GEMINI_API_KEY           # https://aistudio.google.com/app/apikey  (20 RPD free)
 

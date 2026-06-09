@@ -13,9 +13,8 @@ export interface PricePer1M {
 
 // Approximate list prices (USD / 1M tokens). See note above.
 const PRICE_TABLE: Record<string, PricePer1M> = {
-  // Google Gemini 2.5 Flash — approx list price.
+  // Direct-provider model ids (Groq/Gemini path — recorded without a provider prefix).
   'gemini-2.5-flash': { in: 0.30, out: 2.50 },
-  // Groq llama-3.3-70b-versatile — approx list price.
   'llama-3.3-70b-versatile': { in: 0.59, out: 0.79 },
 };
 
@@ -23,8 +22,18 @@ const PRICE_TABLE: Record<string, PricePer1M> = {
 // non-null estimate rather than dropping the cost). Mid-range of the table.
 const FALLBACK_PRICE: PricePer1M = { in: 0.45, out: 1.65 };
 
+// OpenRouter records the served slug, often provider-prefixed and/or with a
+// dated snapshot (e.g. 'google/gemini-2.5-flash', 'deepseek/deepseek-v3.2-20251201').
+// Match by family so cost telemetry stays accurate without an entry per snapshot.
+// Order matters: flash-lite before flash (the latter is a substring of the former).
 function priceFor(model?: string): PricePer1M {
-  if (model && PRICE_TABLE[model]) return PRICE_TABLE[model];
+  if (!model) return FALLBACK_PRICE;
+  if (PRICE_TABLE[model]) return PRICE_TABLE[model];
+  const m = model.toLowerCase();
+  if (m.includes('gemini-2.5-flash-lite')) return { in: 0.10, out: 0.40 };
+  if (m.includes('gemini-2.5-flash')) return { in: 0.30, out: 2.50 };
+  if (m.includes('deepseek-v3') || m.includes('deepseek-chat')) return { in: 0.229, out: 0.343 };
+  if (m.includes('llama-3.3-70b')) return { in: 0.10, out: 0.32 }; // OpenRouter/DeepInfra instruct
   return FALLBACK_PRICE;
 }
 
