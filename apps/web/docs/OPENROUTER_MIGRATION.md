@@ -2,7 +2,9 @@
 
 > **STATUS: ACTIVE — executing step by step (decided 2026-06-09).** We are migrating the AI layer from Groq + Gemini direct to a single OpenRouter key. This doc is both the *strategy* (model choices, cost, routing) and the *execution plan* (phased, code-accurate steps). It supersedes the earlier "deferred proposal" revision.
 >
-> **Live state at time of writing:** `api/_lib/aiFactory.ts` builds `MultiProviderResumeOptimizer` (Groq primary → Gemini fallback) + `GeminiToolkitGenerator` + four single-artifact Gemini generators + `GeminiResumeExtractor`. `@google/genai` is a dependency. No OpenRouter code exists yet. As each phase below merges, update this header.
+> **Live state (updated 2026-06-09):** Phases 0–3 merged on `feat/open-router-migration` — prompts extracted to shared modules; `OpenRouterClient`, `OpenRouterResumeOptimizer`, and `OpenRouterToolkitGenerator` built and **live-tested with real calls**. Nothing wired into `aiFactory` yet (cutover = Phase 6), so the live path is still Groq→Gemini + the Gemini generators. `@google/genai` still a dependency.
+>
+> **Live-test findings (2026-06-09) — model strategy refined by evidence, not the original projection:** DeepSeek V3.2 is FAST on short output (optimizer ~14s) but TIMED OUT >55s on the toolkit's ~6k-token bilingual output, exceeding Vercel's 60s cap. Gemini 2.5 Flash did the same toolkit in ~20s with all four artifacts valid and strong Bengali (Latin-script ratio 0.05). **Therefore: DeepSeek primary for the optimizer; Gemini 2.5 Flash primary for the toolkit (and single-artifact); DeepSeek/Llama as fallbacks.** The earlier "DeepSeek primary for everything" plan was wrong on latency.
 >
 > ⚠️ **Model slugs and prices drift weekly.** Every slug/price in this doc was verified June 2026 against OpenRouter + price aggregators (confidence noted per row). **Re-verify at <https://openrouter.ai/models> before each phase ships.**
 
@@ -19,7 +21,7 @@ TopCandidate has **no chat, no support bot, no coding assistant, no RAG, no agen
 | **Single-artifact regen** | `/api/toolkit-item` | one artifact (free retry) | ~8K in / 2K out |
 | **Extractor** (multimodal) | `/api/extract-resume` | PDF/DOCX → profile JSON | ~2K in / 3K out |
 
-**Recommended stack:** **DeepSeek V3.2 primary** for optimizer + toolkit + single-artifact, **Gemini 2.5 Flash** as the quality fallback, **Llama 3.3 70B** as a cheap optimizer-only third fallback, **Gemini 2.5 Flash-Lite** for the extractor (native PDF). One OpenRouter key, **ZDR routing + Western-host allow-list** (use Chinese *models*, not Chinese *infra*), **hard $20/mo cap.**
+**Recommended stack (validated by live testing 2026-06-09):** **DeepSeek V3.2 primary for the optimizer** (short output, ~14s, cheap); **Gemini 2.5 Flash primary for the toolkit + single-artifact generators** (long bilingual output — DeepSeek V3.2 timed out >55s vs the 60s cap; Gemini ~20s, strong Bengali); **DeepSeek then Llama 3.3 70B as fallbacks**; **Gemini 2.5 Flash-Lite** for the extractor (native PDF). One OpenRouter key, **ZDR routing + Western-host allow-list** (use Chinese *models*, not Chinese *infra*), **hard $20/mo cap.**
 
 **Why this is safe to do as a Layer-4 change:** the domain interfaces (`IResumeOptimizer`, `IToolkitGenerator`, `ICoverLetterGenerator`, `IResumeExtractor`, …), use cases, `ResumeService`, presentation, and the `/api/*` entry points all stay untouched. Only `src/infrastructure/ai/` + `api/_lib/aiFactory.ts` change.
 
@@ -29,8 +31,8 @@ TopCandidate has **no chat, no support bot, no coding assistant, no RAG, no agen
 
 | Model | Slug | Input | Output | Ctx | JSON | Role here | Conf |
 |---|---|---|---|---|---|---|---|
-| **DeepSeek V3.2** | `deepseek/deepseek-v3.2` | $0.229 | $0.343 | 131K | Yes | **Primary** (optimizer + toolkit) | High |
-| **Gemini 2.5 Flash** | `google/gemini-2.5-flash` | $0.30 | $2.50 | 1M | Yes | **Quality fallback** | High |
+| **DeepSeek V3.2** | `deepseek/deepseek-v3.2` | $0.229 | $0.343 | 131K | Yes | **Optimizer primary**; toolkit fallback (too slow for long toolkit output) | High |
+| **Gemini 2.5 Flash** | `google/gemini-2.5-flash` | $0.30 | $2.50 | 1M | Yes | **Toolkit + single-artifact primary**; optimizer fallback | High |
 | **Gemini 2.5 Flash-Lite** | `google/gemini-2.5-flash-lite` | $0.10 | $0.40 | 1M | Yes | **Extractor primary** (native PDF) | High |
 | **Llama 3.3 70B** | `meta-llama/llama-3.3-70b-instruct` | $0.10 | $0.32 | 128K | via prompt | Optimizer fallback (English) | High |
 | **Qwen3 235B** | `qwen/qwen3-235b-a22b` | ~$0.46 | ~$0.90 | 256K | Yes | Optional BN fallback (119 langs incl. Bengali) | Med |
@@ -88,10 +90,10 @@ Your $15–20/mo target ≈ ~1,000 users. At 10K, ~$200/mo — but a 5-credit pa
         │
    ┌─────────────┼──────────────┐
    ▼             ▼              ▼
- OPTIMIZER    TOOLKIT        EXTRACTOR
- deepseek-v3.2  deepseek-v3.2  gemini-2.5-flash-lite
- gemini-2.5-flash  gemini-2.5-flash  gemini-2.5-flash
- llama-3.3-70b   qwen3-235b
+ OPTIMIZER         TOOLKIT           EXTRACTOR
+ deepseek-v3.2     gemini-2.5-flash  gemini-2.5-flash-lite
+ gemini-2.5-flash  deepseek-v3.2     gemini-2.5-flash
+ llama-3.3-70b     llama-3.3-70b
 ```
 
 | Concern | Design |
@@ -186,7 +188,7 @@ Smoke test: `tsx` a one-line PONG call against a **verified** DeepSeek slug.
 Use `buildSystemInstruction()`, `buildUserPrompt(data, { embedSchemaSpec: true })`, `validateOptimizedResponse(data, parsed)`, `safeJsonParse`, fill `usage`. Models: `[deepseek-v3.2, gemini-2.5-flash, llama-3.3-70b-instruct]`. `provider:{ data_collection:'deny' }`, `reasoning:{ enabled:false }`. A/B the JSON parse-failure rate vs Gemini before trusting it.
 
 ### Phase 3 — Toolkit (`OpenRouterToolkitGenerator implements IToolkitGenerator`)
-After Phase 0. Use the extracted `buildToolkitSystemInstruction(fit.mode)` + `buildCandidateContext`. **Mirror the per-artifact `errors`-map validation exactly** (`detectFabricatedTokens` per artifact, `assertOutreachSpecificity(text, data, mode)`, `assertInterviewAnchorCoverage` when `fit.mode !== 'stretch'`). Models: `[deepseek-v3.2, gemini-2.5-flash, qwen3-235b-a22b]`. Timeout ≤55s. **5-resume Bengali A/B** (tech, banking, pharma, stretch, BD-specific) — if BN is robotic, reorder Gemini first.
+After Phase 0. Use the extracted `buildToolkitSystemInstruction(fit.mode)` + `buildCandidateContext`. **Mirror the per-artifact `errors`-map validation exactly** (`detectFabricatedTokens` per artifact, `assertOutreachSpecificity(text, data, mode)`, `assertInterviewAnchorCoverage` when `fit.mode !== 'stretch'`). Models: `[gemini-2.5-flash, deepseek-v3.2, meta-llama/llama-3.3-70b-instruct]` — **Gemini primary** (DeepSeek timed out >55s on the long bilingual output in live testing; Gemini ~20s). Timeout ≤55s. ✅ Live-tested 2026-06-09: 20.3s, all 4 artifacts valid, Bengali Latin-ratio 0.05.
 
 ### Phase 4 — Single-artifact generators
 Port cover-letter/outreach/LinkedIn/interview the same way (free `/api/toolkit-item`). Guards take **strings** (A5). Keep `usage`. Interview-Q needs `response_format: json_object`.
