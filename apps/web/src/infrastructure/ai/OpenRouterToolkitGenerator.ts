@@ -1,11 +1,26 @@
-// Infrastructure — Gemini AI Combined Toolkit Generator
+// Infrastructure — OpenRouter combined toolkit generator (migration Phase 3).
 //
 // Produces cover letter + outreach email + LinkedIn note + interview questions
-// in a single call with one unified response schema. This is the hot-path used
-// on initial resume generation; the per-artifact generators are still wired
-// individually for the single-item regenerate flow.
+// in ONE call, on OpenRouterClient. Shares the SAME prompts (toolkitPrompts.ts)
+// and the SAME per-artifact guards (toolkitContext.ts) as the Gemini toolkit —
+// only the transport changes. The per-artifact `errors`-map contract is
+// preserved exactly: a weak slot records its reason while the others ship.
+//
+// Gemini 2.5 Flash is the primary here (NOT DeepSeek): the toolkit emits ~6k
+// tokens of bilingual EN/BN content and DeepSeek V3.2 was too slow on that long
+// a generation to fit Vercel's 60s function cap (timed out at 55s in live
+// testing 2026-06-09). Gemini Flash is fast on long output and strong on
+// Bengali. DeepSeek stays as a fallback. The optimizer (short output) keeps
+// DeepSeek primary — see OpenRouterResumeOptimizer. Cost note: Gemini output is
+// $2.50/M, so the toolkit costs more than the DeepSeek projection; acceptable —
+// it's the revenue-generating paid path and latency/reliability win here.
+//
+// JSON mode caveat: OpenRouter `json_object` doesn't enforce a schema, so the
+// shape lives in the prompt and we parse defensively (tolerate missing Bn
+// fields, strip code fences). Reasoning disabled; data_collection denied.
+//
+// Not wired into aiFactory yet (cutover = Phase 6); the live path stays Gemini.
 
-import { GoogleGenAI, Type } from '@google/genai';
 import {
   ResumeData,
   GeneratedToolkit,
@@ -15,6 +30,12 @@ import {
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
 import type { UsageSink } from './usage.js';
+import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
+import {
+  buildToolkitSystemInstruction,
+  buildToolkitUserPrompt,
+  LINKEDIN_MAX,
+} from './prompts/toolkitPrompts.js';
 import {
   buildToolkitEvidenceCorpus,
   detectFabricatedTokens,
@@ -23,11 +44,13 @@ import {
   assertInterviewAnchorCoverage,
   classifyFitMode,
 } from './prompts/toolkitContext.js';
-import {
-  LINKEDIN_MAX,
-  buildToolkitSystemInstruction,
-  buildToolkitUserPrompt,
-} from './prompts/toolkitPrompts.js';
+
+// VERIFY slugs at https://openrouter.ai/models before each release.
+const TOOLKIT_MODELS = [
+  'google/gemini-2.5-flash',
+  'deepseek/deepseek-v3.2',
+  'meta-llama/llama-3.3-70b-instruct',
+];
 
 const VALID_CATEGORIES: InterviewQuestionCategory[] = [
   'Behavioral',
@@ -52,133 +75,69 @@ interface RawToolkitResponse {
   }>;
 }
 
-export class GeminiToolkitGenerator implements IToolkitGenerator {
-  private genAI: GoogleGenAI;
-  private readonly model = 'gemini-2.5-flash';
+export class OpenRouterToolkitGenerator implements IToolkitGenerator {
+  private readonly client: OpenRouterClient;
+  // Toolkit is the slower half (bilingual, ~6k out); give it the full window
+  // under Vercel's 60s cap. Runs in parallel with the optimizer.
+  private readonly timeoutMs = 55_000;
 
   constructor(apiKey: string) {
-    if (!apiKey) {
-      throw new Error('Gemini API key is required');
-    }
-    this.genAI = new GoogleGenAI({ apiKey });
+    this.client = new OpenRouterClient(apiKey);
   }
 
   async generate(data: ResumeData, usage?: UsageSink): Promise<GeneratedToolkit> {
     const t0 = Date.now();
-    // Classify the application before we hit the AI so the prompt + guard
-    // behaviour can adapt. Match = strict (default). Stretch = career-switcher
-    // framing — allow JD-named tools in output, soften specificity, coach
-    // for transferable-skills + learning-posture language.
     const fit = classifyFitMode(data);
-    console.info(`[toolkit-gen] start model=${this.model} jdLen=${data.targetJob.description.length} fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
-    const result = await this.genAI.models.generateContent({
-      model: this.model,
-      contents: buildToolkitUserPrompt(data, fit.mode),
-      config: {
-        temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            coverLetter: { type: Type.STRING },
-            outreachEmail: {
-              type: Type.OBJECT,
-              properties: {
-                subject: { type: Type.STRING },
-                body: { type: Type.STRING },
-              },
-              required: ['subject', 'body'],
-            },
-            linkedInMessage: { type: Type.STRING },
-            interviewQuestions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  question: { type: Type.STRING },
-                  category: { type: Type.STRING },
-                  whyAsked: { type: Type.STRING },
-                  answerStrategy: { type: Type.STRING },
-                  // Bengali (Bangla) translations — see system instruction
-                  // for register & terminology rules. Authoritative copy is
-                  // English; these are for the candidate's own rehearsal.
-                  questionBn: { type: Type.STRING },
-                  whyAskedBn: { type: Type.STRING },
-                  answerStrategyBn: { type: Type.STRING },
-                },
-                required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
-              },
-            },
-          },
-          required: ['coverLetter', 'outreachEmail', 'linkedInMessage', 'interviewQuestions'],
+    console.info(`[or-toolkit-gen] start jdLen=${data.targetJob.description.length} fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
+
+    // Retry the AI call + parse on transient malformed JSON (json_object has no
+    // schema enforcement). The per-artifact validation below is NOT retried — a
+    // weak single artifact is expected and lands in the errors map, not a regen.
+    const parsed: RawToolkitResponse = await withRetry(async () => {
+      const result = await this.client.chat(
+        {
+          model: TOOLKIT_MODELS[0],
+          models: TOOLKIT_MODELS,
+          messages: [
+            { role: 'system', content: buildToolkitSystemInstruction(fit.mode) },
+            { role: 'user', content: buildToolkitUserPrompt(data, fit.mode) },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
+          max_tokens: 6000,
+          reasoning: { enabled: false },
+          provider: { data_collection: 'deny', allow_fallbacks: true },
         },
-        systemInstruction: buildToolkitSystemInstruction(fit.mode),
-      },
+        this.timeoutMs,
+      );
+      if (usage) {
+        usage.provider = 'openrouter';
+        usage.model = result.model;
+        usage.promptTokens = result.usage?.prompt_tokens;
+        usage.completionTokens = result.usage?.completion_tokens;
+      }
+      const text = result.content;
+      if (!text) throw new Error('No response from AI');
+      try {
+        return this.safeJsonParse(text);
+      } catch (parseErr) {
+        const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        console.warn(`[or-toolkit-gen] JSON parse failed (retrying if attempts remain): ${msg}`);
+        throw new Error(`Toolkit response was not valid JSON: ${msg}`);
+      }
     });
+    console.info(`[or-toolkit-gen] parsed after ${Date.now() - t0}ms`);
 
-    const tGemini = Date.now() - t0;
-
-    // Capture token usage for cost telemetry before discarding the raw SDK
-    // response (additive — does not affect the generated toolkit).
-    if (usage) {
-      usage.provider = 'gemini';
-      usage.model = this.model;
-      const um = (result as any)?.usageMetadata;
-      usage.promptTokens = um?.promptTokenCount;
-      usage.completionTokens = um?.candidatesTokenCount;
-    }
-
-    const text = result.text;
-    if (!text) {
-      console.error(`[toolkit-gen] empty AI response after ${tGemini}ms`);
-      // A blank AI response is a hard failure — there's nothing per-artifact
-      // to recover. Throw so the caller records the same error for every
-      // toolkit slot and the user retries the whole bundle.
-      throw new Error('No response from AI');
-    }
-    console.info(`[toolkit-gen] AI response in ${tGemini}ms textLen=${text.length}`);
-
-    let parsed: RawToolkitResponse;
-    try {
-      parsed = this.safeJsonParse(text);
-    } catch (parseErr) {
-      const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-      console.error(`[toolkit-gen] JSON parse failed: ${msg} (textPrefix="${text.slice(0, 120).replace(/\s+/g, ' ')}")`);
-      throw new Error(`Toolkit response was not valid JSON: ${msg}`);
-    }
-
-    // Validate each artifact in isolation so one weak slot doesn't take the
-    // others down with it. Evidence corpus is built once and reused by every
-    // per-artifact fabrication scan; the target company name is folded in so
-    // outreach copy may reference the recipient without tripping the guard.
+    // Per-artifact validation — identical contract to GeminiToolkitGenerator.
     const evidence = buildToolkitEvidenceCorpus(data);
     const baseEvidence = data.targetJob.company
       ? `${evidence} ${data.targetJob.company.toLowerCase()}`
       : evidence;
-
-    // Interview prep ALWAYS gets JD-augmented evidence — even in match mode —
-    // because the JD dictates what the interviewer probes. Basel III / IFRS 9
-    // / KYC / SWIFT etc. legitimately appear in answer-strategy notes as
-    // topics-to-brush-up-on; that's not fabrication.
-    //
-    // Stretch mode extends the same JD allowance to cover letter / outreach /
-    // LinkedIn. Rationale: the candidate is making a career switch, the JD
-    // describes the new field, and the AI may legitimately reference what the
-    // JD asks for as a growth target or transferable-skill bridge. The
-    // prompt (buildSystemInstruction with mode='stretch') tells the AI to
-    // frame these references as aspirational / learning-posture, not as
-    // claimed experience — the prompt does the framing, the guard just stops
-    // blocking the necessary vocabulary.
     const jdText = (data.targetJob.description ?? '').toLowerCase();
     const pitchEvidence = fit.mode === 'stretch'
       ? `${baseEvidence} ${jdText}`
       : baseEvidence;
     const interviewEvidence = `${baseEvidence} ${jdText}`;
-
-    // Outreach specificity stays strict in match mode (both target company
-    // AND a candidate anchor), softens to "either" in stretch mode — a
-    // career switcher's outreach often leans more on JD-anchored aspiration
-    // than on a candidate proper-noun match.
     const outreachSpecificityMode: 'both' | 'either' = fit.mode === 'stretch' ? 'either' : 'both';
 
     const errors: ToolkitErrors = {};
@@ -193,7 +152,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       out.coverLetter = coverLetter;
     } catch (err) {
       errors.coverLetter = this.errorMessage(err);
-      console.warn('[toolkit-gen] coverLetter validation failed:', errors.coverLetter);
+      console.warn('[or-toolkit-gen] coverLetter validation failed:', errors.coverLetter);
     }
 
     // ── Outreach email ──────────────────────────────────────────────────────
@@ -207,7 +166,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       out.outreachEmail = { subject, body };
     } catch (err) {
       errors.outreachEmail = this.errorMessage(err);
-      console.warn('[toolkit-gen] outreachEmail validation failed:', errors.outreachEmail);
+      console.warn('[or-toolkit-gen] outreachEmail validation failed:', errors.outreachEmail);
     }
 
     // ── LinkedIn message ────────────────────────────────────────────────────
@@ -229,12 +188,11 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       }
       const fabricated = detectFabricatedTokens(linkedInMessage, pitchEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
-      // LinkedIn always uses 'either' (280 chars rarely fits both anchors).
       assertOutreachSpecificity(linkedInMessage, data, 'either');
       out.linkedInMessage = linkedInMessage;
     } catch (err) {
       errors.linkedInMessage = this.errorMessage(err);
-      console.warn('[toolkit-gen] linkedInMessage validation failed:', errors.linkedInMessage);
+      console.warn('[or-toolkit-gen] linkedInMessage validation failed:', errors.linkedInMessage);
     }
 
     // ── Interview questions ─────────────────────────────────────────────────
@@ -244,10 +202,6 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
         : [];
       const interviewQuestions: InterviewQuestion[] = questionsRaw
         .map((q) => {
-          // Bengali fields are required by the prompt but tolerated as empty
-          // here so the question still ships if Gemini occasionally skips a
-          // translation (rare). The UI falls back to the English text when
-          // BN is missing.
           const questionBn = (q.questionBn ?? '').trim();
           const whyAskedBn = (q.whyAskedBn ?? '').trim();
           const answerStrategyBn = (q.answerStrategyBn ?? '').trim();
@@ -270,11 +224,6 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       const fabricated = detectFabricatedTokens(allInterviewText, interviewEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
 
-      // Stretch candidates can't always anchor strategies in candidate proper
-      // nouns — half the answers will be about how to bridge from past
-      // experience to the new field. Skip the anchor-coverage assertion in
-      // stretch mode; the prompt already coaches the AI to weave transferable
-      // skills into answers, which is the real signal we want here.
       if (fit.mode !== 'stretch') {
         assertInterviewAnchorCoverage(
           interviewQuestions.map(q => q.answerStrategy),
@@ -284,7 +233,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       out.interviewQuestions = interviewQuestions;
     } catch (err) {
       errors.interviewQuestions = this.errorMessage(err);
-      console.warn('[toolkit-gen] interviewQuestions validation failed:', errors.interviewQuestions);
+      console.warn('[or-toolkit-gen] interviewQuestions validation failed:', errors.interviewQuestions);
     }
 
     const ok = {
@@ -293,7 +242,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       linkedInMessage: !!out.linkedInMessage,
       interviewQuestions: !!out.interviewQuestions && out.interviewQuestions.length > 0,
     };
-    console.info(`[toolkit-gen] done total=${Date.now() - t0}ms slots=${JSON.stringify(ok)} errorKeys=${Object.keys(errors).join(',') || '(none)'}`);
+    console.info(`[or-toolkit-gen] done total=${Date.now() - t0}ms slots=${JSON.stringify(ok)} errorKeys=${Object.keys(errors).join(',') || '(none)'}`);
 
     return out;
   }
@@ -320,5 +269,4 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       return JSON.parse(cleaned);
     }
   }
-
 }

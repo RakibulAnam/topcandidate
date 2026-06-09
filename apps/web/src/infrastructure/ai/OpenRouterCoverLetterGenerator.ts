@@ -1,57 +1,65 @@
-// Infrastructure - Gemini AI Cover Letter Generator
+// Infrastructure — OpenRouter Cover Letter Generator (migration Phase 4).
+//
+// Single-artifact generator for the free per-item regenerate flow
+// (/api/toolkit-item). On OpenRouterClient, reusing the shared prompt
+// (toolkitPrompts.ts) and the same fabrication guard + response cleaning as
+// GeminiCoverLetterGenerator. Gemini 2.5 Flash primary (see model rationale in
+// OpenRouterToolkitGenerator / docs/OPENROUTER_MIGRATION.md). Not wired into
+// aiFactory yet (cutover = Phase 6).
 
-import { GoogleGenAI } from '@google/genai';
 import { ResumeData } from '../../domain/entities/Resume.js';
 import { ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase.js';
-import {
-  assertNoFabricatedTools,
-  classifyFitMode,
-} from './prompts/toolkitContext.js';
-import {
-  COVER_LETTER_SYSTEM_INSTRUCTION,
-  buildCoverLetterUserPrompt,
-} from './prompts/toolkitPrompts.js';
+import type { UsageSink } from './usage.js';
+import { OpenRouterClient } from './OpenRouterClient.js';
+import { COVER_LETTER_SYSTEM_INSTRUCTION, buildCoverLetterUserPrompt } from './prompts/toolkitPrompts.js';
+import { assertNoFabricatedTools, classifyFitMode } from './prompts/toolkitContext.js';
 
-export class GeminiCoverLetterGenerator implements ICoverLetterGenerator {
-  private genAI: GoogleGenAI;
+const MODELS = ['google/gemini-2.5-flash', 'deepseek/deepseek-v3.2', 'meta-llama/llama-3.3-70b-instruct'];
+
+export class OpenRouterCoverLetterGenerator implements ICoverLetterGenerator {
+  private readonly client: OpenRouterClient;
 
   constructor(apiKey: string) {
-    if (!apiKey) {
-      throw new Error('Gemini API key is required');
-    }
-    this.genAI = new GoogleGenAI({ apiKey });
+    this.client = new OpenRouterClient(apiKey);
   }
 
-  async generate(data: ResumeData): Promise<string> {
+  async generate(data: ResumeData, usage?: UsageSink): Promise<string> {
     const fit = classifyFitMode(data);
-    console.info(`[cover-letter-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
-    const prompt = buildCoverLetterUserPrompt(data, fit.mode);
-
+    console.info(`[or-cover-letter-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
     try {
-      const result = await this.genAI.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
+      const result = await this.client.chat(
+        {
+          model: MODELS[0],
+          models: MODELS,
+          messages: [
+            { role: 'system', content: COVER_LETTER_SYSTEM_INSTRUCTION },
+            { role: 'user', content: buildCoverLetterUserPrompt(data, fit.mode) },
+          ],
           temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
-          systemInstruction: COVER_LETTER_SYSTEM_INSTRUCTION,
+          max_tokens: 1500,
+          reasoning: { enabled: false },
+          provider: { data_collection: 'deny', allow_fallbacks: true },
         },
-      });
+        45_000,
+      );
 
-      const responseText = result.text;
-      if (!responseText) {
-        throw new Error('No response from AI');
+      if (usage) {
+        usage.provider = 'openrouter';
+        usage.model = result.model;
+        usage.promptTokens = result.usage?.prompt_tokens;
+        usage.completionTokens = result.usage?.completion_tokens;
       }
 
+      const responseText = result.content;
+      if (!responseText) throw new Error('No response from AI');
+
       const cleaned = this.cleanResponse(responseText.trim(), data);
-      // Stretch mode lets the AI reference JD-named tools as growth targets,
-      // so the fabrication guard must allow JD-text into the evidence corpus.
-      // Match mode keeps the strict corpus.
       assertNoFabricatedTools(cleaned, data, { allowJD: fit.mode === 'stretch' });
       return cleaned;
     } catch (error) {
       console.error('Cover letter generation failed:', error);
       throw new Error(
-        `Failed to generate cover letter: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to generate cover letter: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
   }
@@ -61,14 +69,12 @@ export class GeminiCoverLetterGenerator implements ICoverLetterGenerator {
    * Removes: date lines, address blocks, greetings, closings, signature blocks, markdown.
    */
   private cleanResponse(text: string, data: ResumeData): string {
-    // Remove markdown formatting
     let cleaned = text
       .replace(/\*\*/g, '')
       .replace(/\*/g, '')
       .replace(/^#{1,6}\s.*/gm, '')
       .replace(/```[\s\S]*?```/g, '');
 
-    // Split into lines for filtering
     const lines = cleaned.split('\n');
     const filteredLines: string[] = [];
 
@@ -76,50 +82,30 @@ export class GeminiCoverLetterGenerator implements ICoverLetterGenerator {
       const trimmed = line.trim();
       const lower = trimmed.toLowerCase();
 
-      // Skip empty lines (we'll re-add paragraph breaks later)
       if (!trimmed) {
         if (filteredLines.length > 0) filteredLines.push('');
         continue;
       }
 
-      // Skip date-like lines (e.g. "April 2, 2026", "2026-04-02")
       if (/^\w+\s+\d{1,2},?\s+\d{4}$/.test(trimmed) || /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) continue;
-
-      // Skip address-like lines (short lines before the body, city/state patterns)
       if (/^[\w\s]+,\s*[A-Z]{2}\s+\d{5}/.test(trimmed)) continue;
-
-      // Skip greeting / salutation lines
       if (/^dear\s/i.test(trimmed)) continue;
       if (/^to whom it may concern/i.test(trimmed)) continue;
-
-      // Skip closing lines
       if (/^(sincerely|best regards|regards|respectfully|warm regards|yours truly|yours faithfully),?$/i.test(trimmed)) continue;
-
-      // Skip lines that are just a person's name at the end (after closing)
       if (lower === data.personalInfo.fullName.toLowerCase()) continue;
-
-      // Skip contact info lines (email, phone, LinkedIn URLs)
       if (/^[\w.+-]+@[\w.-]+\.\w+$/.test(trimmed)) continue;
       if (/^\+?[\d\s()-]{7,}$/.test(trimmed)) continue;
       if (/^https?:\/\/(www\.)?(linkedin|github)\.com/i.test(trimmed)) continue;
-
-      // Skip "Hiring Manager" standalone line
       if (lower === 'hiring manager') continue;
-
-      // Skip company name standalone line (if it matches exactly)
       if (data.targetJob.company && trimmed === data.targetJob.company) continue;
-
-      // Skip "Re:" or "Subject:" lines
       if (/^(re:|subject:)/i.test(trimmed)) continue;
 
       filteredLines.push(line);
     }
 
-    // Join and collapse excessive blank lines into double newlines (paragraph breaks)
     return filteredLines
       .join('\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
-
 }

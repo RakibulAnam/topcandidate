@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { ExtractedProfileData, IResumeExtractor } from '../../domain/usecases/ExtractResumeUseCase.js';
 import type { UsageSink } from './usage.js';
+import { EXTRACTOR_PROMPT } from './prompts/extractorPrompts.js';
 
 const EXTRACTOR_MODEL = 'gemini-2.5-flash';
 
@@ -119,14 +120,7 @@ export class GeminiResumeExtractor implements IResumeExtractor {
             required: ['personalInfo', 'userType']
         };
 
-        const prompt = `
-      You are an expert ATS parsing system. I am providing you with a Resume/CV document.
-      Your task is to extract all the structured information from this document with high accuracy.
-      Extract personal information, work experience, projects, education, skills, extracurriculars, and awards.
-      If a section does not exist in the resume, omit it or return an empty array.
-      CRUCIAL FORMATTING: Set 'rawDescription' fields as the exact text from the resume, we will format it later.
-      CRUCIAL DATE FORMATTING: ALL date fields (startDate, endDate, date) MUST be strictly in YYYY-MM format (e.g., 2023-05). If only the year is known, use YYYY-01. If a date is completely unknown, OMIT the field (do not use "Unknown" or similar). For current/ongoing roles, set the endDate exactly to "Present".
-    `;
+        const prompt = EXTRACTOR_PROMPT;
 
         try {
             const result = await this.genAI.models.generateContent({

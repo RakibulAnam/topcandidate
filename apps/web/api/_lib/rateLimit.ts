@@ -3,16 +3,21 @@
 // JWT from racking up paid usage.
 //
 // Two operations:
-//   - assertWithinLimit(userId, kind, jwt): throws if user is over daily cap
-//   - logCall(userId, kind, jwt): inserts a row marking the call
+//   - assertWithinLimit(userId, jwt): throws if user is over daily cap
+//   - logCall(userId, jwt, kind, meta?): inserts a row marking the call
 //
 // Daily window = rolling 24h, not calendar-day, so a user can't drain the
 // quota at 23:59 and again at 00:01.
 //
-// Caller pattern: assert → run AI → log on success. (We log on success, not
-// before, so failed calls don't count against the user. Trade-off: a user
-// can spam-fail forever without hitting the cap. Mitigation: provider-side
-// rate limits on Groq/Gemini will cap them.)
+// Caller pattern (audit C5): assert → run AI → log at EVERY terminal point,
+// success AND failure. All four AI endpoints (optimize, optimize-general,
+// toolkit-item, extract-resume) write exactly one ai_call_log row per attempt
+// that gets past the rate-limit gate, so failed/aborted calls still count
+// toward the cap — a stolen or abusive JWT cannot spam-fail the providers to
+// drain shared quota. The row also carries cost/telemetry (provider/model/
+// tokens/cost/status/latency) when AI actually ran. Cheap input-validation
+// rejections (400/413/415) before any provider call are intentionally NOT
+// logged: they burn no AI quota, which is what the cap exists to protect.
 
 import { userClient } from './auth.js';
 

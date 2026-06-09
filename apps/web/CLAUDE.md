@@ -13,7 +13,7 @@
 
 4. **Respect Clean Architecture layering.** Domain depends on nothing. Infrastructure implements domain interfaces. Presentation goes through `ResumeService`, never direct-imports a Gemini class. If you think you need to break this, stop and ask.
 
-5. **New AI generator? Use the established recipe, and respect the 2-call hot path.** Domain interface → use case → Gemini impl (`infrastructure/ai/`) → wire in `dependencies.ts` → inject into `ResumeService`. Initial generation is capped at **two concurrent Gemini calls** (optimizer + combined `GeminiToolkitGenerator`) because free-tier RPM is the binding constraint. Do not re-fan toolkit-like artifacts into parallel calls from `optimizeResume()` — extend the combined generator's schema/prompt instead. Per-item retry flows (`regenerateToolkitItem`) may call single-artifact generators.
+5. **New AI generator? Use the established recipe, and respect the 2-call hot path.** Domain interface → use case → **provider impl in `infrastructure/ai/`** (active path = an `OpenRouter*Generator` on `OpenRouterClient`, reusing the shared `prompts/` + `withRetry`; legacy `Gemini*` sibling only if you also want the fallback) → wire in `api/_lib/aiFactory.ts` (gated on `OPENROUTER_API_KEY`) → inject into `ResumeService`. Initial generation is capped at **two concurrent AI calls** (optimizer + combined toolkit). Do not re-fan toolkit-like artifacts into parallel calls from `optimizeResume()` — extend the combined generator's schema/prompt instead. Per-item retry flows (`regenerateToolkitItem`) may call single-artifact generators. Full provider map: `AGENTS.md` §9 + `docs/OPENROUTER_MIGRATION.md`.
 
 6. **Database changes ship with a migration file.** Add `supabase/migrations/<nnn>_<name>.sql` (idempotent — use `if not exists`). Also reflect the change in `supabase/schema.sql`. Tell the user to run it in the Supabase SQL editor.
 
@@ -42,7 +42,7 @@ npm run build          # vite build — must pass clean (transpiles TS, does NOT
 
 # Smoke-test that the server-only API code path imports cleanly. `vite build`
 # only bundles client code and tree-shakes server-only files (api/_lib/aiFactory
-# and the Gemini/Groq generators), so a syntax error in those files passes
+# and the OpenRouter / Gemini / Groq generators), so a syntax error in those files passes
 # `npm run build` undetected. This catches it.
 node_modules/.bin/tsx -e "await import('./api/_lib/aiFactory.ts'); console.log('ok')"
 ```

@@ -9,7 +9,7 @@
               │  on Vercel            │
               │   ┌────────────────┐  │
               │   │ /api/* Vercel  │  │   server-only AI + payment endpoints
-              │   │  Functions     │  │   (Groq, Gemini, confirm-purchase)
+              │   │  Functions     │  │   (OpenRouter, confirm-purchase)
               │   └────────────────┘  │
               └────────────┬──────────┘
                            │
@@ -28,10 +28,10 @@
 
 ## Components
 
-- **`apps/web/`** — Vite + React 19 SPA bundled by Vercel, with server-only Vercel Functions in `apps/web/api/`. AI provider keys (Groq, Gemini) and Supabase service-role key live ONLY in Vercel env vars. Client uses Supabase JWT bearer auth to call its own `/api/*` endpoints. Architecture detail: [`apps/web/AGENTS.md`](../../apps/web/AGENTS.md) §4.
+- **`apps/web/`** — Vite + React 19 SPA bundled by Vercel, with server-only Vercel Functions in `apps/web/api/`. The AI provider key (OpenRouter; or legacy Groq/Gemini) and Supabase service-role key live ONLY in Vercel env vars. Client uses Supabase JWT bearer auth to call its own `/api/*` endpoints. Architecture detail: [`apps/web/AGENTS.md`](../../apps/web/AGENTS.md) §4.
 - **`apps/mobile/`** — Single-tenant Flutter app on the operator's Android phone. Reads bKash payment-received SMS, POSTs HMAC-signed JSON to web's `/api/confirm-purchase`. State machine, retries, isolate model: [`apps/mobile/spec/`](../../apps/mobile/spec/).
 - **Supabase** — Postgres + auth. Schema and migrations live with the web app at [`apps/web/supabase/`](../../apps/web/supabase/).
-- **External AI providers** — Groq (primary, free tier, ~1000 RPD), Gemini 2.5 Flash (fallback + toolkit generators). Routed through `MultiProviderResumeOptimizer`. Free-tier rate caps drive the 2-concurrent-call hot-path budget documented in `apps/web/AGENTS.md`.
+- **External AI provider** — **OpenRouter** (single key) when `OPENROUTER_API_KEY` is set: DeepSeek V3.2 optimizer + Gemini 2.5 Flash toolkit/single-artifact + Gemini 2.5 Flash-Lite extractor, each with a `models[]` fallback chain. Falls back to legacy **Groq → Gemini** (`MultiProviderResumeOptimizer` + Gemini-only toolkit) when the key is absent. Gated in `api/_lib/aiFactory.ts`; full detail in [`apps/web/AGENTS.md`](../../apps/web/AGENTS.md) §9 and [`apps/web/docs/OPENROUTER_MIGRATION.md`](../../apps/web/docs/OPENROUTER_MIGRATION.md). The 2-concurrent-call hot-path budget is unchanged.
 
 ## The only cross-app coupling
 
@@ -41,7 +41,7 @@ The HMAC-signed webhook contract described in [`docs/contracts/webhook-confirm-p
 
 - Browser ↔ Vercel: HTTPS, Supabase JWT bearer.
 - Vercel ↔ Supabase: service-role key, server-only.
-- Vercel ↔ Groq/Gemini: API keys, server-only.
+- Vercel ↔ OpenRouter (or legacy Groq/Gemini): API key, server-only. OpenRouter calls set `data_collection:'deny'` + ZDR routing (resumes are PII).
 - Mobile ↔ Vercel: HTTPS + HMAC-SHA256. v2 protocol signs `<timestamp>.<body>` with a ±5 min window and a one-time nonce (replay protection); a legacy body-only path remains until `BKASH_WEBHOOK_REQUIRE_TIMESTAMP=true` is set.
 - Mobile ↔ Android SMS subsystem: Android permissions (`RECEIVE_SMS`, `READ_SMS`).
 

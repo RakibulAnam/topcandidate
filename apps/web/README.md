@@ -26,8 +26,9 @@ See [`.env.example`](./.env.example) for the full annotated list. In short:
 
 | Variable | What it does |
 |---|---|
-| `GROQ_API_KEY` | Primary resume optimizer. Free at https://console.groq.com/keys (1,000 RPD). |
-| `GEMINI_API_KEY` | Fallback optimizer + all toolkit generators (cover letter, outreach, LinkedIn, interview prep, resume extractor). Free at https://aistudio.google.com/app/apikey (20 RPD). |
+| `OPENROUTER_API_KEY` | **Primary AI provider** (single key). When set, all AI runs through OpenRouter: DeepSeek V3.2 optimizer → Gemini 2.5 Flash toolkit/single-artifact → Gemini 2.5 Flash-Lite extractor (each with a fallback chain). `api/_lib/aiFactory.ts` gates on it. Set a hard monthly spend cap + enable ZDR in the OpenRouter dashboard. https://openrouter.ai/keys — see [`docs/OPENROUTER_MIGRATION.md`](./docs/OPENROUTER_MIGRATION.md). |
+| `GROQ_API_KEY` | **Legacy fallback** (used only when `OPENROUTER_API_KEY` is absent). Groq optimizer, free at https://console.groq.com/keys (1,000 RPD). Kept one cycle as the rollback path. |
+| `GEMINI_API_KEY` | **Legacy fallback** optimizer + all legacy toolkit/extractor generators. Free at https://aistudio.google.com/app/apikey (20 RPD). Kept one cycle as the rollback path. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Bypasses RLS. Used server-side by the HMAC webhooks (`/api/confirm-purchase`, `/api/orphan-inbound-sms`, `/api/reverse-purchase`), `/api/cron/expire-pending`, `/api/optimize` (the service-role-only credit RPCs from migration 008), and the admin dispatcher. |
 | `BKASH_WEBHOOK_SECRET` | HMAC-SHA256 secret shared with the Flutter SMS-watcher in `apps/mobile/`. Generate with `openssl rand -hex 32`. |
 | `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` | Optional. Set to `'true'` to enforce webhook protocol v2 (timestamp ±5min window + nonce replay protection, migration 011). Default (unset) accepts the legacy unsigned-timestamp path. |
@@ -80,7 +81,7 @@ There is no automated test suite. Verification = the two commands above + a manu
 ## What's in the box
 
 - Multi-step Builder (Personal info → Sections → Experience → Projects → Education → Skills → Extras → Languages → References → Generate → Preview)
-- Two AI optimizer providers (Groq primary, Gemini fallback) with automatic cooldown
+- AI via OpenRouter (single key) when `OPENROUTER_API_KEY` is set — DeepSeek optimizer + Gemini-Flash toolkit/extractor, each with a `models[]` fallback chain; falls back to legacy Groq→Gemini otherwise. Gated in `api/_lib/aiFactory.ts`
 - One combined toolkit generator (cover letter + outreach email + LinkedIn note + interview prep) — the "2-call hot path"
 - bKash purchase flow with HMAC-signed Flutter watcher confirmation (see `apps/mobile/`)
 - Operator admin SPA at `/admin` (Dashboard / Users / Purchases / Disputes / Orphans / Parser failures / Audit log / Settings)

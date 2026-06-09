@@ -10,7 +10,7 @@
    openssl rand -hex 32   # → CRON_SECRET
    openssl rand -hex 32   # → BKASH_WEBHOOK_SECRET
    ```
-2. Add all three to Vercel's Environment Variables UI (Production + Preview + Development). Also confirm `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `VITE_BKASH_PAYMENT_NUMBER` are set.
+2. Add all three to Vercel's Environment Variables UI (Production + Preview + Development). Also confirm `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `OPENROUTER_API_KEY` (primary AI; or legacy `GROQ_API_KEY`/`GEMINI_API_KEY`), `VITE_BKASH_PAYMENT_NUMBER` are set.
 3. **Run migrations in the Supabase SQL editor in order.** At minimum, migrations 007 → 008 → 009 → 010 must be applied before `/admin` works. Each file in `supabase/migrations/` is idempotent. (Migration 010 backfills `profiles.created_at` / `updated_at` — required for the Users tab, since older DBs may have been provisioned before those columns landed in `schema.sql`.)
 4. **Enable `pg_cron` in Supabase** (required on Vercel Hobby) — Dashboard → Database → Extensions → enable `pg_cron`. Then paste `supabase/migrations/007_optional_pg_cron.sql` into the SQL editor and run it. This schedules the 24h-TTL pending-expiry every 15 minutes.
 5. Open `/admin` on the deployed site. Paste `ADMIN_API_KEY` into the gate. The key is stored in your browser's localStorage; lock the panel any time via the **Lock** button or the **Settings → Reset admin session** button.

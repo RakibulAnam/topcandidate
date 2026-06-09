@@ -47,8 +47,9 @@ So there are **two apps and one database**, and the two apps never talk directly
               service-role key │                 │ API keys (server-only)
                                ▼                 ▼
                     ┌────────────────┐   ┌──────────────────┐
-                    │  SUPABASE      │   │  Groq + Gemini    │
-                    │  Postgres+Auth │   │  (AI providers)   │
+                    │  SUPABASE      │   │  OpenRouter       │
+                    │  Postgres+Auth │   │  (AI; or legacy   │
+                    │                │   │   Groq+Gemini)    │
                     └────────────────┘   └──────────────────┘
                                ▲
                                │  POST /api/confirm-purchase
@@ -70,16 +71,16 @@ So there are **two apps and one database**, and the two apps never talk directly
 | Component | Responsibility | Holds which secrets |
 |---|---|---|
 | **Browser (React SPA)** | UI, login, purchase form, AI requests, status polling, admin UI | The user's login token; for the operator, the admin key — both in `localStorage` |
-| **Vercel `/api/*` functions** | The only code allowed to touch AI keys, the service-role DB key, and credit-granting logic | `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `BKASH_WEBHOOK_SECRET`, `ADMIN_API_KEY`, `CRON_SECRET` |
+| **Vercel `/api/*` functions** | The only code allowed to touch AI keys, the service-role DB key, and credit-granting logic | `SUPABASE_SERVICE_ROLE_KEY`, `OPENROUTER_API_KEY` (or legacy `GROQ_API_KEY`/`GEMINI_API_KEY`), `BKASH_WEBHOOK_SECRET`, `ADMIN_API_KEY`, `CRON_SECRET` |
 | **Supabase Postgres** | Stores everything; enforces Row-Level Security; runs credit logic inside `SECURITY DEFINER` functions | — |
 | **Supabase Auth** | Email/password login, issues JWTs (email confirmation **off**) | — |
 | **Flutter watcher** | Reads bKash SMS, signs and POSTs confirmations | `BKASH_WEBHOOK_SECRET` (operator types it in) |
-| **Groq / Gemini** | The actual AI text generation | — |
+| **OpenRouter** (or legacy Groq / Gemini) | The actual AI text generation — DeepSeek optimizer + Gemini-Flash toolkit/extractor via one key | — |
 
 ### How components communicate
 - **Browser → Vercel:** HTTPS + Supabase JWT bearer.
 - **Vercel → Supabase:** the **service-role key** (bypasses Row-Level Security) — server-only.
-- **Vercel → Groq/Gemini:** API keys, server-only.
+- **Vercel → OpenRouter** (or legacy Groq/Gemini): API key, server-only.
 - **Phone → Vercel:** HTTPS + **HMAC-SHA256** over the exact request bytes + a timestamp + a one-time nonce (replay protection).
 - **Phone → Android OS:** `RECEIVE_SMS` / `READ_SMS` permissions.
 
@@ -364,7 +365,7 @@ Operator → /admin (paste ADMIN_API_KEY) → X-Admin-Key header
 
 **Important services / layers:**
 - Web is **Clean Architecture**: Presentation → Application (`ResumeService`) → Domain ← Infrastructure. Presentation never imports a Gemini class directly (see `apps/web/AGENTS.md`).
-- AI is proxied: the browser calls `/api/*` (`ProxyClients.ts`); the server holds the keys (`aiFactory.ts`, Groq + Gemini).
+- AI is proxied: the browser calls `/api/*` (`ProxyClients.ts`); the server holds the key (`aiFactory.ts` — OpenRouter when `OPENROUTER_API_KEY` is set, else legacy Groq + Gemini).
 - Mobile is an isolate + state-machine design (see `apps/mobile/spec/`).
 
 **Key architecture decisions:**

@@ -7,8 +7,7 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
 - A Git host with the repo pushed (GitHub recommended — Vercel integrates best)
 - A [Vercel account](https://vercel.com/signup)
 - A [Supabase account](https://supabase.com)
-- A [Groq API key](https://console.groq.com/keys) (free)
-- A [Google AI Studio API key](https://aistudio.google.com/app/apikey) (free)
+- An [OpenRouter API key](https://openrouter.ai/keys) — the primary AI provider (set a hard spend cap). *(Or, for the legacy fallback path: a [Groq key](https://console.groq.com/keys) + [Google AI Studio key](https://aistudio.google.com/app/apikey), both free.)*
 - A bKash personal/agent number for receiving payments
 - A copy of the Flutter SMS-watcher app on a phone (see `apps/mobile/`)
 
@@ -88,8 +87,9 @@ Save these. The bKash secret must be set as the matching value in the Flutter wa
 | `VITE_SUPABASE_URL` | client | Supabase API settings |
 | `VITE_SUPABASE_ANON_KEY` | client | Supabase API settings |
 | `VITE_BKASH_PAYMENT_NUMBER` | client | Your bKash number, shown in the purchase modal |
-| `GROQ_API_KEY` | **server** | Groq console (free) |
-| `GEMINI_API_KEY` | **server** | Google AI Studio (free) |
+| `OPENROUTER_API_KEY` | **server** | OpenRouter (primary AI; set spend cap + ZDR). When set, all AI runs through it; see `docs/OPENROUTER_MIGRATION.md` |
+| `GROQ_API_KEY` | **server** (legacy fallback) | Groq console (free) — used only if `OPENROUTER_API_KEY` is absent |
+| `GEMINI_API_KEY` | **server** (legacy fallback) | Google AI Studio (free) — used only if `OPENROUTER_API_KEY` is absent |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server** | Supabase API → service_role |
 | `BKASH_WEBHOOK_SECRET` | **server** | The hex string from Step 2 |
 | `ADMIN_API_KEY` | **server** | The hex string from Step 2 |
@@ -150,7 +150,7 @@ The query-string secret fallback (`?secret=...`) was removed in the 2026-05-30 a
 |---|---|
 | **404 on refresh** | `vercel.json` rewrites missing or `outputDirectory` not set to `dist`. |
 | **"Missing Supabase environment variables" warning** | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` not in the active environment. Re-check the env scope dropdown. |
-| **AI not responding (502 from `/api/optimize`)** | Either `GROQ_API_KEY` and `GEMINI_API_KEY` are both missing, or the provider's free quota is exhausted. Check `dashboard.console.groq.com` / Google AI Studio. |
+| **AI not responding (502/503 from `/api/optimize`)** | If `OPENROUTER_API_KEY` is set: check the OpenRouter dashboard (activity / credits — a depleted balance or a hit spend cap returns errors). If unset (legacy path): `GROQ_API_KEY`/`GEMINI_API_KEY` missing or free quota exhausted. A 503 `no AI provider configured` means no key at all is set. |
 | **"relation generated_resumes.toolkit does not exist"** | Migration 001 not applied. Run it in the SQL editor. |
 | **"Supabase: column profiles.created_at does not exist"** | Migration 010 not applied. Run it. |
 | **Admin gate rejects a valid-looking key** | `ADMIN_API_KEY` differs between local and Vercel — rotate by changing the env var and reloading the page. |

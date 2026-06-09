@@ -48,4 +48,4 @@ All admin actions are consolidated behind a single dynamic function [`api/admin/
 | Disputes | `disputes`, `resolve-dispute` |
 | Orphans / parser | `orphans`, `match-orphan`, `orphan-mark-ignored`, `parser-failures`, `parser-mark-reviewed`, `parser-export` |
 
-Helpers: auth [`api/_lib/auth.ts`](../../apps/web/api/_lib/auth.ts); rate-limit / daily-cap [`api/_lib/rateLimit.ts`](../../apps/web/api/_lib/rateLimit.ts); AI provider factory [`api/_lib/aiFactory.ts`](../../apps/web/api/_lib/aiFactory.ts) (Groq + Gemini); admin auth [`api/admin/_lib/adminAuth.ts`](../../apps/web/api/admin/_lib/adminAuth.ts).
+Helpers: auth [`api/_lib/auth.ts`](../../apps/web/api/_lib/auth.ts); rate-limit / daily-cap [`api/_lib/rateLimit.ts`](../../apps/web/api/_lib/rateLimit.ts); AI provider factory [`api/_lib/aiFactory.ts`](../../apps/web/api/_lib/aiFactory.ts) (OpenRouter when `OPENROUTER_API_KEY` set, else legacy Groq + Gemini); admin auth [`api/admin/_lib/adminAuth.ts`](../../apps/web/api/admin/_lib/adminAuth.ts).

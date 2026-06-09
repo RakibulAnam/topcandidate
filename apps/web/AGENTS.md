@@ -51,7 +51,7 @@ A future mock-interview marketplace is planned but **out of scope** until explic
 - **React 19** + **TypeScript 5.8** + **Vite 6**
 - **Tailwind CSS** (via CDN, not PostCSS — config lives in `index.html`)
 - **Internationalisation** — DIY typed dictionary at `src/presentation/i18n/` (no library). Two locales: `en` (default) and `bn` (বাংলা / Bengali). Switch via `<LanguageToggle />` in the navbar / landing / login. Locale persists in `localStorage` (`topcandidate.locale`) and is applied to `<html data-locale>` for font-stack swapping. See §10 for fonts and §11 for the convention.
-- **AI providers** for resume optimization: **Groq** (`llama-3.3-70b-versatile`, primary — 1,000 RPD free, ~5–8s latency) → **Google Gemini 2.5 Flash** (fallback). Routed through `MultiProviderResumeOptimizer`. Toolkit generators (cover letter, outreach, LinkedIn, interview, extractor) are still Gemini-only. SDK: `@google/genai` for Gemini; plain `fetch` to `api.groq.com/openai/v1/chat/completions` for Groq
+- **AI provider:** **OpenRouter** (single key, OpenAI-compatible `fetch` via `OpenRouterClient`) when `OPENROUTER_API_KEY` is set — optimizer → DeepSeek V3.2 (→ Gemini 2.5 Flash → Llama 3.3 70B); toolkit / single-artifact → Gemini 2.5 Flash (→ DeepSeek → Llama); extractor → Gemini 2.5 Flash-Lite (→ Flash). Falls back to the **legacy** Groq (`llama-3.3-70b-versatile`) → Gemini optimizer + Gemini-only toolkit/extractor (`@google/genai`) when the key is absent. Gate + rationale: `api/_lib/aiFactory.ts`, `docs/OPENROUTER_MIGRATION.md`. `@google/genai` is still a dependency (kept one cycle as the rollback path)
 - **Server-side API proxy** — all AI calls go through Vercel Functions in `/api/*` (deployed automatically alongside the Vite app). Client holds NO provider keys. Auth via Supabase JWT bearer; per-user daily-cap rate limiting via the `ai_call_log` table.
 - **Supabase** (`@supabase/supabase-js`) for auth + persistence
 - **docx**, **jspdf**, **html2pdf.js** for export
@@ -70,6 +70,8 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 ---
 
 ## 3. Product surface (currently shipped)
+
+> **AI generator note:** the `Gemini*Generator.ts` files referenced below are the **legacy** implementation. The **active** path (when `OPENROUTER_API_KEY` is set) is the sibling `OpenRouter*Generator.ts` set, wired in `api/_lib/aiFactory.ts`. Same domain interfaces, same prompts/guards. See §9 for the full provider map. The Gemini files stay until migration Phase 6b.
 
 | Area | File entry point | Status |
 | --- | --- | --- |
@@ -152,12 +154,15 @@ Four layers, dependencies flow inward.
  │                          grants NO credits (webhook does)  │
  │  api/_lib/auth         — Supabase JWT verifier            │
  │  api/_lib/rateLimit    — daily cap (ai_call_log)          │
- │  api/_lib/aiFactory    — constructs:                      │
- │    MultiProviderResumeOptimizer (Groq → Gemini fallback)  │
- │    GeminiToolkitGenerator + 4 single-artifact generators  │
- │    GeminiResumeExtractor                                  │
- │  Shared: prompts/resumeOptimizerPrompts.ts                │
- │  Keys read from process.env.{GROQ,GEMINI}_API_KEY         │
+ │  api/_lib/aiFactory    — gates on OPENROUTER_API_KEY:     │
+ │   • set  → OpenRouter{ResumeOptimizer,ToolkitGenerator,   │
+ │            CoverLetter,Outreach,LinkedIn,InterviewQ,       │
+ │            ResumeExtractor} via OpenRouterClient           │
+ │   • unset→ legacy: MultiProviderResumeOptimizer (Groq→    │
+ │            Gemini) + Gemini{Toolkit,…,Extractor}           │
+ │  Shared: prompts/{resumeOptimizerPrompts,toolkitPrompts,  │
+ │          toolkitContext,extractorPrompts}.ts              │
+ │  Keys: process.env.{OPENROUTER,GROQ,GEMINI}_API_KEY       │
  │  (NEVER VITE_-prefixed — server-only, never bundled)      │
  └───────────────────────────────────────────────────────────┘
 ```
@@ -168,7 +173,7 @@ Four layers, dependencies flow inward.
 - **Infrastructure** implements domain interfaces. Can import SDKs (Supabase, Gemini).
 - **Presentation** depends on application + domain. Can read infrastructure via `dependencies.ts` but should prefer going through `ResumeService`.
 
-**AI call budget:** initial generation runs exactly TWO concurrent Gemini calls — optimizer + combined toolkit (`GeminiToolkitGenerator`). Free-tier RPM is 5; historical 1-optimizer-plus-4-toolkit fan-out hit quota. Per-item regeneration still hits the single-artifact generators (one call per retry).
+**AI call budget:** initial generation runs exactly TWO concurrent AI calls — optimizer + combined toolkit. (On OpenRouter that's DeepSeek + Gemini-Flash; on the legacy path both are Gemini.) Free-tier RPM history (the legacy 1-optimizer-plus-4-toolkit fan-out hit quota) is why it's capped at two. Per-item regeneration still hits the single-artifact generators (one call per retry).
 
 **Toolkit validation is per-artifact.** `GeminiToolkitGenerator.generate()` validates each of the four artifacts (cover letter, outreach email, LinkedIn note, interview questions) in isolation and returns a `GeneratedToolkit` with optional fields plus an `errors` map. A validation failure on one artifact (empty payload, fabricated token, missing specificity anchor, interview answers below the 1/3 anchor-coverage floor) records the reason in `errors[<item>]` while the other slots ship through cleanly. The old all-or-nothing throw is gone; never reintroduce it — it forced the user to manually regenerate every item when a single weak interview answer fell below the anchor threshold. `ResumeService.optimizeResume` does NOT wrap the toolkit call in `withRetry`: in the proxy build both halves are served by the same `/api/optimize` POST and a retry would burn a second toolkit credit (the dedupe cache clears in `.finally()`). Per-item retries go through the free `/api/toolkit-item` endpoint via the Preview card buttons.
 
@@ -178,7 +183,7 @@ Four layers, dependencies flow inward.
 
 **Bilingual interview prep (English + Bangla).** Interview questions ship in both languages from the same AI call — fields `questionBn`, `whyAskedBn`, `answerStrategyBn` on `InterviewQuestion` (optional for back-compat with pre-2026-05-14 saved resumes). The English version is authoritative; Bangla is for the candidate's own rehearsal because BD interviews routinely swing into Bangla on behavioural / cultural questions even at MNCs. The combined toolkit schema and the single-artifact retry generator both require all six fields. Translation rules baked into the prompt: professional spoken Bangla (not literal word-by-word), English-canonical industry terms / employer names / regulatory frameworks / certifications kept in Roman script inline (Basel III, IFRS 9, KYC, NPL, ECL, CFA, BBA, KPI), category labels left in English. UI toggle in `InterviewPrepViewer` (English / বাংলা) defaults to English and persists via `localStorage['topcandidate.interviewPrepLang']`. Falls back to English per-field when a Bangla translation is missing. Other artifacts (cover letter / outreach / LinkedIn / resume itself) stay English-only — BD recruiters scan English, ATS systems are English-language, LinkedIn is English globally.
 
-**Optimizer prompt + post-pipeline.** `prompts/resumeOptimizerPrompts.ts` is shared by Groq and Gemini. Beyond the system + user prompt, every optimizer response runs through this deterministic post-pipeline (in order):
+**Optimizer prompt + post-pipeline.** `prompts/resumeOptimizerPrompts.ts` is shared by every optimizer implementation (OpenRouter, Groq, Gemini). Beyond the system + user prompt, every optimizer response runs through this deterministic post-pipeline (in order):
 1. `normalizeSkills` — dedupe flat `skills` and dedupe/clean `skillCategories` (drops empty buckets).
 2. `filterFabricatedSkills` — strips skills (and category items) the candidate never evidenced. Belt-and-braces against the SKILL HONESTY rule.
 3. `reorderLeadBulletByJDFit` — within each item, promote the most JD-aligned bullet to position 0 (the recruiter's highest-attention spot).
@@ -188,7 +193,7 @@ Four layers, dependencies flow inward.
 
 The user prompt also injects a `SENIORITY` line (Junior / Mid / Senior / Senior+) inferred from total months of experience + `userType`, plus a `THINK FIRST` CoT block that asks the model to silently identify JD top requirements + candidate evidence before emitting JSON. Don't strip these — they tune verb choice and gap handling.
 
-**Adding a new AI generator:** add an interface + use case in `domain/usecases/`, a Gemini implementation in `infrastructure/ai/`, wire it into `dependencies.ts`, inject into `ResumeService`. For single-item ancillary output, call it from `regenerateToolkitItem()` — NOT from `optimizeResume()`, which is restricted to the 2-call hot path. If you need to expand the initial toolkit, extend `GeminiToolkitGenerator`'s schema/prompt instead of adding a parallel call.
+**Adding a new AI generator:** add an interface + use case in `domain/usecases/`, then a **provider implementation in `infrastructure/ai/`** — the active path is an `OpenRouter*Generator` built on `OpenRouterClient` (mirror an existing one; reuse the shared prompt in `prompts/` + `withRetry` for JSON); add a legacy `Gemini*` sibling only if you need the fallback path too. Wire both into `api/_lib/aiFactory.ts` (gated on `OPENROUTER_API_KEY`) and inject via `ResumeService`. For single-item ancillary output, call it from `regenerateToolkitItem()` — NOT from `optimizeResume()`, which is restricted to the 2-call hot path. To expand the initial toolkit, extend the toolkit generator's schema/prompt instead of adding a parallel call.
 
 **Pre-flight content gates** live in `src/application/validation/` and run client-side before any AI call (in `ResumeService.optimizeResume`) and before signup (in `LoginScreen`). They are pure utilities — no SDK deps, no domain types — and exist to refuse work that would waste tokens or pollute the user pool. Two gates today:
 
@@ -391,12 +396,17 @@ src/domain/usecases/                    Use case classes + domain-layer interfac
 src/domain/repositories/                Repo interfaces (IProfile, IResume, IApplication)
 
 src/infrastructure/ai/                  AI providers (run server-side) + client proxies
-  ├── MultiProviderResumeOptimizer.ts   Router — Groq → Gemini fallback w/ rate-class cooldown
-  ├── GroqResumeOptimizer.ts            Primary optimizer (llama-3.3-70b-versatile)
-  ├── GeminiResumeOptimizer.ts          Fallback optimizer (gemini-2.5-flash, schema-enforced)
-  ├── prompts/resumeOptimizerPrompts.ts Shared system + user prompt + validation + post-filters
-  ├── proxy/ProxyClients.ts             Client-side adapters that POST to /api/*
-  └── Gemini{CoverLetter,Outreach,LinkedIn,InterviewQ,Toolkit,Extractor}Generator.ts (server-only)
+  ├── OpenRouterClient.ts               Single fetch adapter — models[] fallback, usage, ZDR, withRetry (the cutover path)
+  ├── OpenRouter{ResumeOptimizer,Toolkit,CoverLetter,Outreach,LinkedIn,InterviewQ,Extractor}Generator.ts (server-only; active when OPENROUTER_API_KEY set)
+  ├── MultiProviderResumeOptimizer.ts   LEGACY router — Groq → Gemini fallback w/ rate-class cooldown
+  ├── GroqResumeOptimizer.ts            LEGACY primary optimizer (llama-3.3-70b-versatile)
+  ├── GeminiResumeOptimizer.ts          LEGACY fallback optimizer (gemini-2.5-flash, schema-enforced)
+  ├── Gemini{CoverLetter,Outreach,LinkedIn,InterviewQ,Toolkit,Extractor}Generator.ts (LEGACY, server-only)
+  ├── prompts/resumeOptimizerPrompts.ts Shared optimizer system + user prompt + validation + post-filters
+  ├── prompts/toolkitContext.ts         Shared candidate-evidence corpus + fit-mode + fabrication/specificity guards
+  ├── prompts/toolkitPrompts.ts         Shared toolkit + single-artifact system instructions & user-prompt builders (extracted Phase 0)
+  ├── prompts/extractorPrompts.ts       Shared extractor prompt + JSON-shape hint
+  └── proxy/ProxyClients.ts             Client-side adapters that POST to /api/*
 
 api/                                    Vercel Functions — server-side AI proxy + bKash flow
   ├── optimize.ts                       POST — runs optimizer + toolkit (paid: gates on toolkit_credits, refunds on optimizer failure)
@@ -530,16 +540,19 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 
 ### AI providers
 
-The resume optimizer is provider-agnostic — `MultiProviderResumeOptimizer` routes calls in this priority:
+**The AI surface runs through OpenRouter when `OPENROUTER_API_KEY` is set** (single key; the cutover path — `api/_lib/aiFactory.ts` gates on it). All calls go via `OpenRouterClient` (OpenAI-compatible `fetch`) with `provider.data_collection:'deny'` + ZDR routing (resumes are PII — Chinese *models* are acceptable, Chinese *infra* is not), `reasoning:{enabled:false}` (reasoning tokens bill as output), and a `models[]` fallback chain per workload:
 
-1. **Groq** — `llama-3.3-70b-versatile`, free tier 1,000 RPD / 30 RPM, ~5–8s latency. Configured via `GROQ_API_KEY` (server-only, never `VITE_`-prefixed). OpenAI-compatible JSON mode (no schema enforcement → JSON shape spec embedded in user prompt + post-parse validation).
-2. **Gemini** — `gemini-2.5-flash`, free tier 20 RPD on 2.5-flash, ~25–40s latency, **strongest schema enforcement** via `responseSchema`. Configured via `GEMINI_API_KEY` (server-only, never `VITE_`-prefixed).
+- **Optimizer** → `deepseek/deepseek-v3.2` (cheap, fast on short output) → `google/gemini-2.5-flash` → `meta-llama/llama-3.3-70b-instruct`.
+- **Toolkit + single-artifact** → `google/gemini-2.5-flash` (DeepSeek timed out >55s on the long bilingual output vs the 60s cap) → `deepseek/deepseek-v3.2` → Llama.
+- **Extractor** → `google/gemini-2.5-flash-lite` (native PDF via the `file-parser` plugin, `engine:'native'`) → `google/gemini-2.5-flash`.
 
-The router cools down a provider for 10 minutes when it returns 429/503/timeout, so a quota-exhausted Groq doesn't keep eating retries. If only one key is configured, the router uses just that one.
+OpenRouter `json_object` does NOT enforce a schema (unlike Gemini's `responseSchema`), so JSON generators embed the shape in the prompt and wrap the call in `withRetry` (2 attempts, in `OpenRouterClient.ts`) to absorb transient malformed JSON.
 
-**Adding a third provider** (Cerebras, OpenRouter, etc.): implement `IResumeOptimizer`, reuse `prompts/resumeOptimizerPrompts.ts`, push into the `optimizerProviders` array in `dependencies.ts`. The shared prompt module is the contract — never hardcode rules inside an optimizer.
+**Legacy fallback (no `OPENROUTER_API_KEY`):** `MultiProviderResumeOptimizer` routes Groq (`llama-3.3-70b-versatile`, `GROQ_API_KEY`) → Gemini (`gemini-2.5-flash`, `GEMINI_API_KEY`, `responseSchema`) with a 10-min cooldown on 429/503; toolkit/extractor are Gemini-only via `@google/genai`. Kept as the one-cycle **panic switch** (remove `OPENROUTER_API_KEY` to roll back); `@google/genai` stays a dependency until OpenRouter is proven in prod, then a follow-up drops it.
 
-**Toolkit generators** (cover letter, outreach email, LinkedIn note, interview questions, resume extractor) are still Gemini-only. SDK: `@google/genai`. Free-tier RPM is the binding constraint. Initial generation = **2 calls only** (optimizer + combined `GeminiToolkitGenerator`). Do not re-fan the toolkit into N parallel calls.
+**Cost telemetry:** `api/_lib/aiCost.ts` maps served model slugs (incl. OpenRouter provider prefixes + dated snapshots like `deepseek-v3.2-20251201`) to approximate prices for the analytics tables.
+
+**Hot-path budget unchanged:** initial generation = **2 calls only** (optimizer + combined toolkit). Do not re-fan the toolkit into N parallel calls. Per-item retries use the single-artifact generators (free) via `/api/toolkit-item`.
 
 **Toolkit context + guards.** Every toolkit generator (the combined hot-path + the four single-artifact retry generators) shares `infrastructure/ai/prompts/toolkitContext.ts`:
 - `buildCandidateContext(data)` — full profile block (experience + raw-bullet voice excerpt + projects + raw-bullet voice + education + certifications + awards + publications + extracurriculars + affiliations + languages + skills + skill categories). Generators present this as CANDIDATE EVIDENCE *first*, then the JD as a *filter* — the candidate's evidence is the source of truth.
@@ -654,7 +667,9 @@ No test suite currently (no `npm test`). Verification = successful `npm run buil
 
 **Required env vars** — split into client-visible (`VITE_*`) and server-only (no prefix). Set both in Vercel's Environment Variables UI; non-`VITE_` keys are NEVER bundled into the client:
 ```
-# AI providers — server-only (used by Vercel Functions in /api/*)
+# AI provider — server-only (used by Vercel Functions in /api/*)
+OPENROUTER_API_KEY       # https://openrouter.ai/keys — single key, ALL AI when set (cutover path); set a hard $ spend cap
+# Legacy fallback (used only when OPENROUTER_API_KEY is absent; keep one cycle as the rollback path):
 GROQ_API_KEY             # https://console.groq.com/keys   (1,000 RPD free)
 GEMINI_API_KEY           # https://aistudio.google.com/app/apikey  (20 RPD free)
 

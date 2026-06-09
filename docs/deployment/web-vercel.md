@@ -24,7 +24,7 @@ Highlights:
 - `BKASH_WEBHOOK_SECRET` — shared with the mobile app via the operator's Settings tab. Signs all four watcher endpoints.
 - `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` — optional; set `true` to reject the legacy body-only signature and enforce the v2 (timestamp + nonce) protocol.
 - Supabase service-role key — server-only.
-- Groq + Gemini API keys — server-only.
+- `OPENROUTER_API_KEY` — server-only; the primary AI provider (set a hard spend cap). Legacy `GROQ_API_KEY` + `GEMINI_API_KEY` are the fallback when it's absent. See [`apps/web/docs/OPENROUTER_MIGRATION.md`](../../apps/web/docs/OPENROUTER_MIGRATION.md).
 - `ADMIN_API_KEY` — gates the `/admin` panel (`X-Admin-Key` header).
 - `CRON_SECRET` — Bearer auth for the pending-purchase expiry job (see below).
 
