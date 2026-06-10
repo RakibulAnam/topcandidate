@@ -41,7 +41,6 @@ import {
   detectFabricatedTokens,
   ToolkitFabricationError,
   assertOutreachSpecificity,
-  assertInterviewAnchorCoverage,
   classifyFitMode,
 } from './prompts/toolkitContext.js';
 
@@ -75,6 +74,42 @@ interface RawToolkitResponse {
   }>;
 }
 
+// Structured-output schema (mirrors the legacy Gemini responseSchema). Using
+// json_schema instead of json_object makes the provider enforce the shape — the
+// largest field (the bilingual interview array) can't truncate or malform.
+const TOOLKIT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    coverLetter: { type: 'string' },
+    outreachEmail: {
+      type: 'object',
+      properties: { subject: { type: 'string' }, body: { type: 'string' } },
+      required: ['subject', 'body'],
+      additionalProperties: false,
+    },
+    linkedInMessage: { type: 'string' },
+    interviewQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          category: { type: 'string' },
+          whyAsked: { type: 'string' },
+          answerStrategy: { type: 'string' },
+          questionBn: { type: 'string' },
+          whyAskedBn: { type: 'string' },
+          answerStrategyBn: { type: 'string' },
+        },
+        required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['coverLetter', 'outreachEmail', 'linkedInMessage', 'interviewQuestions'],
+  additionalProperties: false,
+};
+
 export class OpenRouterToolkitGenerator implements IToolkitGenerator {
   private readonly client: OpenRouterClient;
   // Total wall-time budget across attempts (deadline-bounded — see withRetry).
@@ -105,9 +140,12 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
             { role: 'system', content: buildToolkitSystemInstruction(fit.mode) },
             { role: 'user', content: buildToolkitUserPrompt(data, fit.mode) },
           ],
-          response_format: { type: 'json_object' },
+          response_format: { type: 'json_schema', json_schema: { name: 'toolkit', strict: true, schema: TOOLKIT_SCHEMA } },
           temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
-          max_tokens: 6000,
+          // Four artifacts in one payload, the bilingual interview block being the
+          // largest; 6000 risked truncating the interview JSON. 8000 gives headroom
+          // (ceiling only — normal payloads cost the same). Fits the 48s deadline.
+          max_tokens: 8000,
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
@@ -140,7 +178,6 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
     const pitchEvidence = fit.mode === 'stretch'
       ? `${baseEvidence} ${jdText}`
       : baseEvidence;
-    const interviewEvidence = `${baseEvidence} ${jdText}`;
     const outreachSpecificityMode: 'both' | 'either' = fit.mode === 'stretch' ? 'either' : 'both';
 
     const errors: ToolkitErrors = {};
@@ -221,18 +258,13 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
         .filter((q) => q.question && q.whyAsked && q.answerStrategy);
       if (interviewQuestions.length === 0) throw new Error('No interview questions');
 
-      const allInterviewText = interviewQuestions
-        .map(q => `${q.question}\n${q.whyAsked}\n${q.answerStrategy}`)
-        .join('\n');
-      const fabricated = detectFabricatedTokens(allInterviewText, interviewEvidence);
-      if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
-
-      if (fit.mode !== 'stretch') {
-        assertInterviewAnchorCoverage(
-          interviewQuestions.map(q => q.answerStrategy),
-          data,
-        );
-      }
+      // NO fabrication / anchor-coverage hard-fail on interview prep. Interview
+      // questions are meant to probe what THIS JD demands — including tools the
+      // candidate hasn't used yet — so they can rehearse. Blocking a question
+      // because a tech isn't on the résumé defeats the purpose. The prompt steers
+      // quality (draw from JD + résumé; anchor answers in real experience where it
+      // exists; coach honest preparation for gaps; never fake experience). Empty
+      // output is still a failure (handled by the length check above).
       out.interviewQuestions = interviewQuestions;
     } catch (err) {
       errors.interviewQuestions = this.errorMessage(err);

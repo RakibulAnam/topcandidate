@@ -8,8 +8,6 @@ import {
 } from '../../domain/entities/Resume.js';
 import { IInterviewQuestionsGenerator } from '../../domain/usecases/GenerateInterviewQuestionsUseCase.js';
 import {
-  assertNoFabricatedTools,
-  assertInterviewAnchorCoverage,
   classifyFitMode,
 } from './prompts/toolkitContext.js';
 import {
@@ -100,25 +98,10 @@ export class GeminiInterviewQuestionsGenerator implements IInterviewQuestionsGen
       };
     });
 
-    // Fabrication guard runs across every text field — questions, whys,
-    // strategies — so a tool that wasn't in evidence anywhere triggers a retry.
-    const fullText = questions
-      .map(q => `${q.question}\n${q.whyAsked}\n${q.answerStrategy}`)
-      .join('\n');
-    // Interview prep discusses JD topics (Basel III, IFRS 9, KYC, …) the
-    // candidate is being asked to brush up on — JD-named tokens are NOT
-    // fabrication, they're legitimate prep. The strict corpus is reserved
-    // for cover letter / outreach / LinkedIn which represent the candidate's
-    // own claims.
-    assertNoFabricatedTools(fullText, data, { allowJD: true });
-    // Stretch candidates can't always anchor strategies in candidate proper
-    // nouns — half the questions are about how to bridge from past experience
-    // into the new field. Skip the anchor-coverage assertion in stretch mode;
-    // the prompt already coaches for transferable-skill bridges.
-    if (fit.mode !== 'stretch') {
-      assertInterviewAnchorCoverage(questions.map(q => q.answerStrategy), data);
-    }
-
+    // NO fabrication / anchor-coverage hard-fail on interview prep — questions
+    // are meant to probe the JD (incl. tech the candidate hasn't used) so they
+    // can rehearse. The prompt steers quality + honest answer coaching. (Kept in
+    // sync with OpenRouterInterviewQuestionsGenerator.)
     return questions;
   }
 
