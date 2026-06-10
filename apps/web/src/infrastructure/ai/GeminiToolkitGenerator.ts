@@ -20,7 +20,6 @@ import {
   detectFabricatedTokens,
   ToolkitFabricationError,
   assertOutreachSpecificity,
-  assertInterviewAnchorCoverage,
   classifyFitMode,
 } from './prompts/toolkitContext.js';
 import {
@@ -173,7 +172,6 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     const pitchEvidence = fit.mode === 'stretch'
       ? `${baseEvidence} ${jdText}`
       : baseEvidence;
-    const interviewEvidence = `${baseEvidence} ${jdText}`;
 
     // Outreach specificity stays strict in match mode (both target company
     // AND a candidate anchor), softens to "either" in stretch mode — a
@@ -264,23 +262,10 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
         .filter((q) => q.question && q.whyAsked && q.answerStrategy);
       if (interviewQuestions.length === 0) throw new Error('No interview questions');
 
-      const allInterviewText = interviewQuestions
-        .map(q => `${q.question}\n${q.whyAsked}\n${q.answerStrategy}`)
-        .join('\n');
-      const fabricated = detectFabricatedTokens(allInterviewText, interviewEvidence);
-      if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
-
-      // Stretch candidates can't always anchor strategies in candidate proper
-      // nouns — half the answers will be about how to bridge from past
-      // experience to the new field. Skip the anchor-coverage assertion in
-      // stretch mode; the prompt already coaches the AI to weave transferable
-      // skills into answers, which is the real signal we want here.
-      if (fit.mode !== 'stretch') {
-        assertInterviewAnchorCoverage(
-          interviewQuestions.map(q => q.answerStrategy),
-          data,
-        );
-      }
+      // NO fabrication / anchor-coverage hard-fail on interview prep — questions
+      // are meant to probe the JD (incl. tech the candidate hasn't used) so they
+      // can rehearse. The prompt steers quality + honest answer coaching. (Kept
+      // in sync with OpenRouterToolkitGenerator.)
       out.interviewQuestions = interviewQuestions;
     } catch (err) {
       errors.interviewQuestions = this.errorMessage(err);

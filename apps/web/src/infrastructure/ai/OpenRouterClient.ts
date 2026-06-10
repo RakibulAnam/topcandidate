@@ -64,7 +64,12 @@ export interface OpenRouterRequest {
   model: string;            // primary model slug
   models?: string[];        // ordered fallback chain (incl. the primary)
   messages: OpenRouterMessage[];
-  response_format?: { type: 'json_object' };
+  // `json_object` = valid JSON, no schema (cheap, but large outputs can truncate
+  // or malform). `json_schema` = structured outputs — the provider enforces the
+  // shape, eliminating truncation/malformation; use it for large/critical JSON.
+  response_format?:
+    | { type: 'json_object' }
+    | { type: 'json_schema'; json_schema: { name: string; strict?: boolean; schema: Record<string, unknown> } };
   temperature?: number;
   max_tokens?: number;
   reasoning?: { enabled: boolean };

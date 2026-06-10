@@ -113,9 +113,9 @@ QUESTION — Specific to THIS JD and THIS candidate's background. Banned: "Tell 
 
 WHY ASKED — 2–3 sentences naming the signal the interviewer is scoring.
 
-ANSWER STRATEGY — 3–5 sentences with explicit structure (STAR, trade-off framing, brief-then-deep). ${mode === 'stretch' ? 'For questions about candidate experience the AI cannot anchor in target-field proper nouns, structure the answer around a TRANSFERABLE-SKILL BRIDGE: name a real candidate item (company, project, school) where the underlying skill was exercised, then explicitly map it to how the same skill applies in the target role. For questions about JD-specific tools/frameworks the candidate has not yet used, coach an honest "here is how I would approach learning / applying X" answer; never coach a fake-it answer.' : 'MUST reference at least one named item from the candidate evidence — by name (the company, the role, the project, the certification, the school). Do NOT write "your X project" or "your relevant experience"; name it. Flag common failure modes to avoid.'}
+ANSWER STRATEGY — 3–5 sentences with explicit structure (STAR, trade-off framing, brief-then-deep). ${mode === 'stretch' ? 'For questions about candidate experience the AI cannot anchor in target-field proper nouns, structure the answer around a TRANSFERABLE-SKILL BRIDGE: name a real candidate item (company, project, school) where the underlying skill was exercised, then explicitly map it to how the same skill applies in the target role. For questions about JD-specific tools/frameworks the candidate has not yet used, coach an honest "here is how I would approach learning / applying X" answer; never coach a fake-it answer.' : 'Anchor the answer in a named candidate item where the question maps to the candidate\'s real experience (the company, role, project, certification, school) — not "your relevant experience". For JD-required tools/topics the candidate has NOT used (expected — interviewers probe gaps), coach an honest "here is how I\'d approach / ramp on X" answer; NEVER coach claiming experience they don\'t have. Flag common failure modes to avoid.'}
 
-GROUNDING ${mode === 'stretch' ? '(advisory)' : '(enforced)'} — ${mode === 'stretch' ? 'aim for transferable-skill bridges anchored in real candidate items where possible; for pure JD-knowledge questions an honest learning-posture answer is acceptable.' : 'the majority of answer strategies must contain a literal candidate proper noun — vague hooks like "your relevant project" count as ungrounded.'}
+GROUNDING (quality guidance, not a hard gate) — anchor answers in real candidate items where the question maps to their experience; for JD topics the candidate hasn't used, an honest learning-posture answer is the right call.
 
 HONESTY — Never invent employers, tools, or metrics in answer-strategy hooks.${mode === 'stretch' ? ' Never coach the candidate to claim experience with JD-named tools they have not used; coach honest preparation instead.' : ''}
 
@@ -410,10 +410,11 @@ WHY ASKED (2–3 sentences)
 
 ANSWER STRATEGY (3–5 sentences)
   • Explicit structure (e.g. STAR, trade-off framing, brief-then-deep).
-  • MUST reference at least one named item from the candidate evidence — by name (the company, the role, the project, the certification, the award, the school). Do NOT use placeholders like "your X project" or "the relevant migration"; name it.
+  • Where the question maps to the candidate's real experience, anchor the answer in a named candidate item (the company, role, project, certification, school) — not a placeholder like "your relevant experience".
+  • Where the question is about a JD-required tool/topic the candidate has NOT used (this is expected and good — interviewers probe gaps), coach an honest "here is how I'd approach / ramp on X" answer so they walk in prepared. NEVER coach claiming experience they don't have.
   • Flag common failure modes to avoid.
 
-GROUNDING REQUIREMENT (enforced — failure triggers a retry): the majority of answerStrategies must contain a literal candidate proper noun. Vague "anchor in your relevant experience" is treated as ungrounded.
+GROUNDING — anchor in real candidate items where they're relevant; use honest learning-posture answers for JD topics the candidate hasn't used. Both are good prep. (Quality guidance, not a hard gate.)
 
 HONESTY — Do not invent employers, tools, or metrics in the answer-strategy hooks. Only reference things present in the candidate evidence.
 
@@ -461,7 +462,7 @@ RULES
 - Each question must feel written FOR this specific JD — not a generic prep sheet.
 - ${mode === 'stretch'
   ? '"answerStrategy" should use TRANSFERABLE-SKILL BRIDGES anchored in real candidate items (company, project, school). For JD-knowledge questions the candidate has not practised, coach honest learning posture — never fake-it.'
-  : '"answerStrategy" MUST reference a concrete item from the CANDIDATE EVIDENCE by name (a real company, role, project name, certification, award, or school). Do not write "your relevant project" or "the migration you ran" — name it.'}
-- Never fabricate employers, metrics, or claimed tool experience. JD-named topics may appear as "things to brush up on", not as past experience.
+  : '"answerStrategy": anchor in a named candidate item where the question maps to their real experience; for JD-required topics they have NOT used, coach an honest learning-posture answer ("how I\'d ramp on X") — never coach faking experience. Questions should draw from BOTH the JD\'s requirements (including skills/tools the candidate must prepare for) and the candidate\'s background.'}
+- Never coach the candidate to claim experience or tools they don't have. JD topics they haven't used are framed as "here's how I'd prepare", not as past experience.
 `;
 }
