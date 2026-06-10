@@ -39,7 +39,7 @@ export class OpenRouterInterviewQuestionsGenerator implements IInterviewQuestion
     console.info(`[or-interview-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
     // Retry once on transient malformed JSON / guard failure (json_object has
     // no schema enforcement). Free per-item path; a retry is cheap.
-    return withRetry(async () => {
+    return withRetry(async (remainingMs) => {
       const result = await this.client.chat(
         {
           model: MODELS[0],
@@ -54,7 +54,7 @@ export class OpenRouterInterviewQuestionsGenerator implements IInterviewQuestion
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
-        50_000,
+        remainingMs,
       );
 
       if (usage) {
@@ -98,7 +98,7 @@ export class OpenRouterInterviewQuestionsGenerator implements IInterviewQuestion
       }
 
       return questions;
-    });
+    }, 45_000);
   }
 
   private normalizeCategory(raw: unknown): InterviewQuestionCategory {

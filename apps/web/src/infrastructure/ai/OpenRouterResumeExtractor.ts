@@ -25,7 +25,7 @@ export class OpenRouterResumeExtractor implements IResumeExtractor {
   }
 
   async extract(fileData: string, mimeType: string, usage?: UsageSink): Promise<ExtractedProfileData> {
-    const parsed = await withRetry(async () => {
+    const parsed = await withRetry(async (remainingMs) => {
       const result = await this.client.chat(
         {
           model: EXTRACTOR_MODELS[0],
@@ -55,7 +55,7 @@ export class OpenRouterResumeExtractor implements IResumeExtractor {
           // pass / cost) rather than OpenRouter's default parser.
           plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }],
         },
-        50_000,
+        remainingMs,
       );
 
       if (usage) {
@@ -73,7 +73,7 @@ export class OpenRouterResumeExtractor implements IResumeExtractor {
         const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
         return JSON.parse(cleaned) as ExtractedProfileData;
       }
-    });
+    }, 45_000);
 
     // Identical post-parse sanitization to GeminiResumeExtractor: regenerate
     // ids (the model's are throwaway) and force dates to YYYY-MM or ''.

@@ -92,26 +92,54 @@ export class OpenRouterError extends Error {
   }
 }
 
+// Thrown when our own AbortController fires (request exceeded `timeoutMs`).
+// withRetry treats this specially: it does NOT retry a timeout, because a
+// second full-timeout attempt would blow Vercel's 60s function cap.
+export class OpenRouterTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`OpenRouter request timed out after ${timeoutMs}ms`);
+    this.name = 'OpenRouterTimeoutError';
+  }
+}
+
+const MIN_ATTEMPT_MS = 4_000;
+
 /**
- * Retry a generator operation on transient failure. OpenRouter `json_object`
- * mode does NOT enforce a schema the way Gemini's native `responseSchema` does,
- * so occasional malformed JSON (unterminated strings, stray control chars) is
- * expected; one retry collapses that failure rate. Also covers transient 5xx /
- * timeout. `attempts` is the TOTAL number of tries (not extra retries).
+ * Deadline-bounded retry. OpenRouter `json_object` mode does NOT enforce a
+ * schema the way Gemini's native `responseSchema` does, so occasional malformed
+ * JSON (and the optimizer's strict post-validation) makes a retry worthwhile —
+ * BUT a naive per-attempt timeout × retries can exceed Vercel's 60s function
+ * cap (this caused a prod 504 on /api/optimize). So:
+ *
+ *   • The TOTAL wall time across all attempts is hard-capped at `deadlineMs`.
+ *   • `fn` receives `remainingMs` and MUST pass it as the `chat()` timeout, so a
+ *     single slow attempt may use the whole budget (no false early timeout), yet
+ *     a fast failure leaves time for one bounded retry.
+ *   • A timeout (OpenRouterTimeoutError) is never retried — we're out of budget.
+ *
+ * Set each caller's `deadlineMs` so that callers running in parallel under one
+ * function (optimizer ‖ toolkit on /api/optimize) still fit 60s with headroom.
  */
 export async function withRetry<T>(
-  fn: (attempt: number) => Promise<T>,
+  fn: (remainingMs: number, attempt: number) => Promise<T>,
+  deadlineMs: number,
   attempts = 2,
-  backoffMs = 400,
+  backoffMs = 300,
 ): Promise<T> {
+  const start = Date.now();
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
+    const remaining = deadlineMs - (Date.now() - start);
+    if (remaining < MIN_ATTEMPT_MS) break;
     try {
-      return await fn(i);
+      return await fn(remaining, i);
     } catch (err) {
       lastErr = err;
+      if (err instanceof OpenRouterTimeoutError) throw err; // out of budget
       if (i < attempts - 1) {
-        await new Promise((r) => setTimeout(r, backoffMs * (i + 1)));
+        const left = deadlineMs - (Date.now() - start);
+        if (left < MIN_ATTEMPT_MS) break;
+        await new Promise((r) => setTimeout(r, Math.min(backoffMs, left - MIN_ATTEMPT_MS)));
       }
     }
   }
@@ -175,7 +203,7 @@ export class OpenRouterClient {
       return { content, model: data.model, usage: data.usage };
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`OpenRouter request timed out after ${timeoutMs}ms`);
+        throw new OpenRouterTimeoutError(timeoutMs);
       }
       throw err;
     } finally {

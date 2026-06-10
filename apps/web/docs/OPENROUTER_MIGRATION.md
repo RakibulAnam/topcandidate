@@ -2,7 +2,7 @@
 
 > **STATUS: ACTIVE — executing step by step (decided 2026-06-09).** We are migrating the AI layer from Groq + Gemini direct to a single OpenRouter key. This doc is both the *strategy* (model choices, cost, routing) and the *execution plan* (phased, code-accurate steps). It supersedes the earlier "deferred proposal" revision.
 >
-> **Live state (updated 2026-06-09):** Phases 0–6 merged on `feat/open-router-migration`. All 7 OpenRouter generators built + **live-tested with real calls** (optimizer 14s, toolkit 20s w/ good Bengali, extractor on a real PDF 5.4s, single-artifact w/ retry). `api/_lib/aiFactory.ts` now **gates on `OPENROUTER_API_KEY`**: set → full OpenRouter path; unset → legacy Groq→Gemini (the panic switch). `aiCost.ts` recognizes the new slugs. **Production still runs legacy until `OPENROUTER_API_KEY` is added to Vercel** (operator action). `@google/genai` intentionally kept one cycle; a follow-up (Phase 6b) drops it + the legacy generators after a clean prod window.
+> **Live state (updated 2026-06-10):** Phases 0–6 merged to `master` and live in production with `OPENROUTER_API_KEY` set. **Post-launch hotfix (2026-06-10):** the first real toolkit build 504'd (FUNCTION_INVOCATION_TIMEOUT) — DeepSeek V3.2 on the **optimizer** both failed the strict ID-preserving JSON validation *and* timed out >45s on a real multi-experience resume, then a `withRetry` retry pushed past Vercel's 60s cap. **Fixes shipped:** (1) optimizer → **Gemini 2.5 Flash primary** (DeepSeek dropped from the optimizer chain — it stays a toolkit fallback only); (2) `withRetry` is now **deadline-bounded** (total wall time per generator hard-capped; timeouts never retried) so the parallel optimizer(30s) ‖ toolkit(48s) hot path always fits 60s. Re-tested 4× on a realistic profile: 21–44s, 0 failures. `@google/genai` still kept one cycle as the panic switch.
 >
 > **Live-test findings (2026-06-09) — model strategy refined by evidence, not the original projection:** DeepSeek V3.2 is FAST on short output (optimizer ~14s) but TIMED OUT >55s on the toolkit's ~6k-token bilingual output, exceeding Vercel's 60s cap. Gemini 2.5 Flash did the same toolkit in ~20s with all four artifacts valid and strong Bengali (Latin-script ratio 0.05). **Therefore: DeepSeek primary for the optimizer; Gemini 2.5 Flash primary for the toolkit (and single-artifact); DeepSeek/Llama as fallbacks.** The earlier "DeepSeek primary for everything" plan was wrong on latency.
 >
@@ -21,7 +21,7 @@ TopCandidate has **no chat, no support bot, no coding assistant, no RAG, no agen
 | **Single-artifact regen** | `/api/toolkit-item` | one artifact (free retry) | ~8K in / 2K out |
 | **Extractor** (multimodal) | `/api/extract-resume` | PDF/DOCX → profile JSON | ~2K in / 3K out |
 
-**Recommended stack (validated by live testing 2026-06-09):** **DeepSeek V3.2 primary for the optimizer** (short output, ~14s, cheap); **Gemini 2.5 Flash primary for the toolkit + single-artifact generators** (long bilingual output — DeepSeek V3.2 timed out >55s vs the 60s cap; Gemini ~20s, strong Bengali); **DeepSeek then Llama 3.3 70B as fallbacks**; **Gemini 2.5 Flash-Lite** for the extractor (native PDF). One OpenRouter key, **ZDR routing + Western-host allow-list** (use Chinese *models*, not Chinese *infra*), **hard $20/mo cap.**
+**Recommended stack (validated by live testing; optimizer revised after the 2026-06-10 prod hotfix):** **Gemini 2.5 Flash primary for the optimizer AND the toolkit + single-artifact generators** — DeepSeek V3.2 was the original optimizer pick but broke the strict ID-preserving JSON and timed out on real resumes (504); it's now a toolkit-only fallback. **Llama 3.3 70B** is the optimizer fallback; **Gemini 2.5 Flash-Lite** the extractor (native PDF). Every generator is **deadline-bounded** (see §6/withRetry) so the parallel hot path fits Vercel's 60s cap. One OpenRouter key, **ZDR routing + Western-host allow-list**, **hard monthly spend cap.**
 
 **Why this is safe to do as a Layer-4 change:** the domain interfaces (`IResumeOptimizer`, `IToolkitGenerator`, `ICoverLetterGenerator`, `IResumeExtractor`, …), use cases, `ResumeService`, presentation, and the `/api/*` entry points all stay untouched. Only `src/infrastructure/ai/` + `api/_lib/aiFactory.ts` change.
 
@@ -31,7 +31,7 @@ TopCandidate has **no chat, no support bot, no coding assistant, no RAG, no agen
 
 | Model | Slug | Input | Output | Ctx | JSON | Role here | Conf |
 |---|---|---|---|---|---|---|---|
-| **DeepSeek V3.2** | `deepseek/deepseek-v3.2` | $0.229 | $0.343 | 131K | Yes | **Optimizer primary**; toolkit fallback (too slow for long toolkit output) | High |
+| **DeepSeek V3.2** | `deepseek/deepseek-v3.2` | $0.229 | $0.343 | 131K | Yes | **Toolkit fallback only** — dropped from the optimizer (broke ID-preserving JSON + timed out, 2026-06-10 504) | High |
 | **Gemini 2.5 Flash** | `google/gemini-2.5-flash` | $0.30 | $2.50 | 1M | Yes | **Toolkit + single-artifact primary**; optimizer fallback | High |
 | **Gemini 2.5 Flash-Lite** | `google/gemini-2.5-flash-lite` | $0.10 | $0.40 | 1M | Yes | **Extractor primary** (native PDF) | High |
 | **Llama 3.3 70B** | `meta-llama/llama-3.3-70b-instruct` | $0.10 | $0.32 | 128K | via prompt | Optimizer fallback (English) | High |
@@ -91,9 +91,9 @@ Your $15–20/mo target ≈ ~1,000 users. At 10K, ~$200/mo — but a 5-credit pa
    ┌─────────────┼──────────────┐
    ▼             ▼              ▼
  OPTIMIZER         TOOLKIT           EXTRACTOR
- deepseek-v3.2     gemini-2.5-flash  gemini-2.5-flash-lite
- gemini-2.5-flash  deepseek-v3.2     gemini-2.5-flash
- llama-3.3-70b     llama-3.3-70b
+ gemini-2.5-flash  gemini-2.5-flash  gemini-2.5-flash-lite
+ llama-3.3-70b     deepseek-v3.2     gemini-2.5-flash
+                   llama-3.3-70b
 ```
 
 | Concern | Design |

@@ -19,7 +19,7 @@
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
 import type { UsageSink } from './usage.js';
-import { OpenRouterClient } from './OpenRouterClient.js';
+import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
 import {
   buildSystemInstruction,
   buildUserPrompt,
@@ -31,25 +31,29 @@ import {
   enforceBulletDensity,
   stripBannedCliches,
   safeJsonParse,
-  delay,
 } from './prompts/resumeOptimizerPrompts.js';
 
-// Primary → fallbacks. DeepSeek V3.2 is the cheap, structured, English-strong
-// primary; Gemini 2.5 Flash is the quality net; Llama 3.3 70B is the cheap
-// last resort. VERIFY these slugs at https://openrouter.ai/models before each
-// release — OpenRouter slugs drift.
+// Gemini 2.5 Flash is the PRIMARY here (NOT DeepSeek). Live prod testing
+// (2026-06-10) showed DeepSeek V3.2 both (a) failed the optimizer's strict
+// ID-preserving JSON ("ID mismatch in projects" — it rewrote input item IDs)
+// and (b) timed out >45s on a real multi-experience resume → the optimizer
+// took 61s and the /api/optimize function hit Vercel's 60s cap (504). Gemini
+// Flash is fast and faithful to the schema. Llama 3.3 70B is the cheap English
+// fallback. DeepSeek is intentionally dropped from the optimizer chain (it is
+// still the toolkit's last-resort fallback). VERIFY slugs at
+// https://openrouter.ai/models before each release.
 const OPTIMIZER_MODELS = [
-  'deepseek/deepseek-v3.2',
   'google/gemini-2.5-flash',
   'meta-llama/llama-3.3-70b-instruct',
 ];
 
 export class OpenRouterResumeOptimizer implements IResumeOptimizer {
   private readonly client: OpenRouterClient;
-  private readonly maxRetries = 2;
-  // Per-attempt ceiling. Kept under the 60s Vercel function cap; the toolkit
-  // runs in parallel so this is one half of the hot path.
-  private readonly timeoutMs = 45_000;
+  // Total wall-time budget across attempts (deadline-bounded — see withRetry).
+  // The optimizer runs in PARALLEL with the toolkit on /api/optimize; it's the
+  // shorter pole, so it gets the smaller budget. optimizer(30s) ‖ toolkit(48s)
+  // → ~48s + pre-AI overhead, comfortably under Vercel's 60s cap.
+  private readonly deadlineMs = 30_000;
   private readonly temperature = 0.3;
 
   constructor(apiKey: string) {
@@ -61,9 +65,8 @@ export class OpenRouterResumeOptimizer implements IResumeOptimizer {
     // No schema enforcement on OpenRouter json_object → embed the shape spec.
     const userPrompt = buildUserPrompt(data, { embedSchemaSpec: true });
 
-    let attempt = 0;
-    while (attempt < this.maxRetries) {
-      try {
+    try {
+      return await withRetry(async (remainingMs) => {
         const result = await this.client.chat(
           {
             model: OPTIMIZER_MODELS[0],
@@ -78,7 +81,7 @@ export class OpenRouterResumeOptimizer implements IResumeOptimizer {
             reasoning: { enabled: false },
             provider: { data_collection: 'deny', allow_fallbacks: true },
           },
-          this.timeoutMs,
+          remainingMs,
         );
 
         // Surface real token usage for cost telemetry (additive). The model is
@@ -104,15 +107,10 @@ export class OpenRouterResumeOptimizer implements IResumeOptimizer {
         validateOptimizedResponse(data, parsed);
 
         return parsed;
-      } catch (error) {
-        attempt++;
-        console.warn(`OpenRouter optimization attempt ${attempt} failed:`, error);
-        if (attempt >= this.maxRetries) throw this.buildFinalError(error);
-        await delay(Math.pow(2, attempt) * 1000);
-      }
+      }, this.deadlineMs);
+    } catch (error) {
+      throw this.buildFinalError(error);
     }
-
-    throw new Error('Unexpected OpenRouter optimization failure');
   }
 
   private buildFinalError(error: unknown): Error {

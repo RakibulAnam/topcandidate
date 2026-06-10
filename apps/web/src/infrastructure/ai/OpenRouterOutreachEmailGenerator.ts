@@ -26,7 +26,7 @@ export class OpenRouterOutreachEmailGenerator implements IOutreachEmailGenerator
     console.info(`[or-outreach-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
     // Retry once on transient malformed JSON / guard failure (json_object has
     // no schema enforcement). Free per-item path; a retry is cheap.
-    return withRetry(async () => {
+    return withRetry(async (remainingMs) => {
       const result = await this.client.chat(
         {
           model: MODELS[0],
@@ -41,7 +41,7 @@ export class OpenRouterOutreachEmailGenerator implements IOutreachEmailGenerator
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
-        45_000,
+        remainingMs,
       );
 
       if (usage) {
@@ -65,7 +65,7 @@ export class OpenRouterOutreachEmailGenerator implements IOutreachEmailGenerator
       assertOutreachSpecificity(`${subject}\n${body}`, data, fit.mode === 'stretch' ? 'either' : 'both');
 
       return { subject, body };
-    });
+    }, 45_000);
   }
 
   private safeJsonParse(text: string): { subject?: string; body?: string } {

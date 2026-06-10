@@ -77,9 +77,12 @@ interface RawToolkitResponse {
 
 export class OpenRouterToolkitGenerator implements IToolkitGenerator {
   private readonly client: OpenRouterClient;
-  // Toolkit is the slower half (bilingual, ~6k out); give it the full window
-  // under Vercel's 60s cap. Runs in parallel with the optimizer.
-  private readonly timeoutMs = 55_000;
+  // Total wall-time budget across attempts (deadline-bounded — see withRetry).
+  // Toolkit is the slower, larger-output half; it runs in PARALLEL with the
+  // optimizer (30s) on /api/optimize, so 48s here → ~48s + pre-AI overhead,
+  // under Vercel's 60s cap. One slow attempt may use the whole budget; a fast
+  // parse-fail leaves room for one bounded retry.
+  private readonly deadlineMs = 48_000;
 
   constructor(apiKey: string) {
     this.client = new OpenRouterClient(apiKey);
@@ -93,7 +96,7 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
     // Retry the AI call + parse on transient malformed JSON (json_object has no
     // schema enforcement). The per-artifact validation below is NOT retried — a
     // weak single artifact is expected and lands in the errors map, not a regen.
-    const parsed: RawToolkitResponse = await withRetry(async () => {
+    const parsed: RawToolkitResponse = await withRetry(async (remainingMs) => {
       const result = await this.client.chat(
         {
           model: TOOLKIT_MODELS[0],
@@ -108,7 +111,7 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
-        this.timeoutMs,
+        remainingMs,
       );
       if (usage) {
         usage.provider = 'openrouter';
@@ -125,7 +128,7 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
         console.warn(`[or-toolkit-gen] JSON parse failed (retrying if attempts remain): ${msg}`);
         throw new Error(`Toolkit response was not valid JSON: ${msg}`);
       }
-    });
+    }, this.deadlineMs);
     console.info(`[or-toolkit-gen] parsed after ${Date.now() - t0}ms`);
 
     // Per-artifact validation — identical contract to GeminiToolkitGenerator.
