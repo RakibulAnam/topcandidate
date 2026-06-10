@@ -40,7 +40,7 @@ export class OpenRouterCoverLetterGenerator implements ICoverLetterGenerator {
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
-        45_000,
+        30_000,
       );
 
       if (usage) {

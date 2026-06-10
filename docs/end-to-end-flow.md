@@ -75,7 +75,7 @@ So there are **two apps and one database**, and the two apps never talk directly
 | **Supabase Postgres** | Stores everything; enforces Row-Level Security; runs credit logic inside `SECURITY DEFINER` functions | — |
 | **Supabase Auth** | Email/password login, issues JWTs (email confirmation **off**) | — |
 | **Flutter watcher** | Reads bKash SMS, signs and POSTs confirmations | `BKASH_WEBHOOK_SECRET` (operator types it in) |
-| **OpenRouter** (or legacy Groq / Gemini) | The actual AI text generation — DeepSeek optimizer + Gemini-Flash toolkit/extractor via one key | — |
+| **OpenRouter** (or legacy Groq / Gemini) | The actual AI text generation — Gemini-Flash optimizer + toolkit, Flash-Lite extractor, via one key | — |
 
 ### How components communicate
 - **Browser → Vercel:** HTTPS + Supabase JWT bearer.
