@@ -62,6 +62,8 @@ export interface Project {
   // study, a curriculum design, a legal case). Leave blank when not applicable.
   technologies?: string;
   link?: string;
+  normalized?: NormalizedItemContent; // AI-polished profile evidence
+  normalizedSourceHash?: string; // hash of the rawDescription `normalized` was computed from
 }
 
 
@@ -73,6 +75,8 @@ export interface Extracurricular {
   endDate: string;
   description: string; // raw description
   refinedBullets: string[]; // AI refined
+  normalized?: NormalizedItemContent; // AI-polished profile evidence
+  normalizedSourceHash?: string; // hash of the description `normalized` was computed from
 }
 
 export interface Award {

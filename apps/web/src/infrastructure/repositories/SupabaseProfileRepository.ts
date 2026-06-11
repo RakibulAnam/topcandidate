@@ -243,10 +243,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             technologies: item.technologies,
             link: item.link,
             refinedBullets: [],
+            normalized: item.normalized ?? undefined,
+            normalizedSourceHash: item.normalized_source_hash ?? undefined,
         }));
     }
 
-    async saveProject(userId: string, project: Project): Promise<void> {
+    // Returns the row id (DB-generated for new items) — see saveExperience.
+    async saveProject(userId: string, project: Project): Promise<string> {
         const payload: any = {
             user_id: userId,
             name: project.name,
@@ -259,7 +262,24 @@ export class SupabaseProfileRepository implements IProfileRepository {
             payload.id = project.id;
         }
 
-        const { error } = await supabase.from('projects').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('projects')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
+        if (error) throw error;
+        return data.id as string;
+    }
+
+    async saveProjectNormalized(
+        id: string,
+        normalized: NormalizedItemContent,
+        sourceHash: string,
+    ): Promise<void> {
+        const { error } = await supabase
+            .from('projects')
+            .update({ normalized, normalized_source_hash: sourceHash })
+            .eq('id', id);
         if (error) throw error;
     }
 
@@ -325,10 +345,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             endDate: item.end_date,
             description: item.description,
             refinedBullets: [],
+            normalized: item.normalized ?? undefined,
+            normalizedSourceHash: item.normalized_source_hash ?? undefined,
         }));
     }
 
-    async saveExtracurricular(userId: string, item: Extracurricular): Promise<void> {
+    // Returns the row id (DB-generated for new items) — see saveExperience.
+    async saveExtracurricular(userId: string, item: Extracurricular): Promise<string> {
         const payload: any = {
             user_id: userId,
             title: item.title,
@@ -338,7 +361,24 @@ export class SupabaseProfileRepository implements IProfileRepository {
             description: item.description,
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('extracurriculars').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('extracurriculars')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
+        if (error) throw error;
+        return data.id as string;
+    }
+
+    async saveExtracurricularNormalized(
+        id: string,
+        normalized: NormalizedItemContent,
+        sourceHash: string,
+    ): Promise<void> {
+        const { error } = await supabase
+            .from('extracurriculars')
+            .update({ normalized, normalized_source_hash: sourceHash })
+            .eq('id', id);
         if (error) throw error;
     }
 

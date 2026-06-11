@@ -4,6 +4,7 @@ import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, FolderGit2 } from 'lucide-react';
+import { needsPolish, polishInBackground, PolishedPreview } from './polish';
 
 interface Props {
     projects: Project[];
@@ -16,6 +17,13 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Project>>({});
     const [saving, setSaving] = useState(false);
+    const [polishingIds, setPolishingIds] = useState<Set<string>>(new Set());
+    const markPolishing = (id: string, on: boolean) =>
+        setPolishingIds(prev => {
+            const next = new Set(prev);
+            if (on) next.add(id); else next.delete(id);
+            return next;
+        });
 
     const resetForm = () => {
         setFormData({ name: '', rawDescription: '', technologies: '', link: '' });
@@ -37,15 +45,28 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
         if (!user) return;
         setSaving(true);
         try {
-            await profileRepository.saveProject(user.id, {
+            const proj = {
                 id: editingId || '',
                 name: formData.name || '',
                 rawDescription: formData.rawDescription || '',
                 refinedBullets: [],
                 technologies: formData.technologies || '',
                 link: formData.link,
-            });
+            };
+            const savedId = await profileRepository.saveProject(user.id, proj);
             toast.success('Saved');
+
+            if (needsPolish(proj.rawDescription, projects.find(x => x.id === savedId))) {
+                polishInBackground({
+                    text: proj.rawDescription,
+                    context: { kind: 'project', title: proj.name, technologies: proj.technologies },
+                    persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
+                    onStart: () => markPolishing(savedId, true),
+                    onSettle: () => markPolishing(savedId, false),
+                    onDone: onRefresh,
+                });
+            }
+
             resetForm();
             onRefresh();
         } catch (e) { toast.error('Failed to save'); }
@@ -151,6 +172,7 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                                 })}
                             </div>
                         )}
+                        <PolishedPreview normalized={p.normalized} polishing={polishingIds.has(p.id)} />
                     </div>
                 ))}
             </div>

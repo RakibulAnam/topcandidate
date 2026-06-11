@@ -117,6 +117,9 @@ create table projects (
   description text,
   technologies text[],
   link text,
+  -- "Polished profile" (migration 016) — see experiences.normalized.
+  normalized jsonb,
+  normalized_source_hash text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -162,6 +165,9 @@ create table extracurriculars (
   start_date text,
   end_date text,
   description text,
+  -- "Polished profile" (migration 016) — see experiences.normalized.
+  normalized jsonb,
+  normalized_source_hash text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { WorkExperience } from '../../../domain/entities/Resume';
-import { profileRepository, profileNormalizer } from '../../../infrastructure/config/dependencies';
-import { contentHash } from '../../../application/validation/contentHash';
+import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Save, X, Briefcase, Sparkles, Loader2, Lightbulb } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Briefcase } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
+import { needsPolish, polishInBackground, PolishedPreview } from './polish';
 
 interface Props {
     experiences: WorkExperience[];
@@ -18,35 +18,14 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<WorkExperience>>({});
     const [saving, setSaving] = useState(false);
-    // Row ids with an AI normalization ("polish") currently in flight.
+    // Row ids with an AI polish currently in flight.
     const [polishingIds, setPolishingIds] = useState<Set<string>>(new Set());
-
-    // Background "polished profile" pass: convert the raw brain dump into
-    // canonical English bullets + coaching gaps, once per description change.
-    // Never blocks the save — failures are silent (the raw text is always the
-    // source of truth, and the next save retries).
-    const polishInBackground = (id: string, exp: { role: string; company: string; rawDescription: string }) => {
-        const text = exp.rawDescription.trim();
-        if (!text) return;
-        const hash = contentHash(text);
-        setPolishingIds(prev => new Set(prev).add(id));
-        profileNormalizer
-            .normalize(text, { role: exp.role, company: exp.company })
-            .then(async normalized => {
-                await profileRepository.saveExperienceNormalized(id, normalized, hash);
-                onRefresh();
-            })
-            .catch(err => {
-                console.warn('Profile polish failed (will retry on next save):', err);
-            })
-            .finally(() => {
-                setPolishingIds(prev => {
-                    const next = new Set(prev);
-                    next.delete(id);
-                    return next;
-                });
-            });
-    };
+    const markPolishing = (id: string, on: boolean) =>
+        setPolishingIds(prev => {
+            const next = new Set(prev);
+            if (on) next.add(id); else next.delete(id);
+            return next;
+        });
 
     const resetForm = () => {
         setFormData({
@@ -106,10 +85,16 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
             // Re-polish only when the description actually changed since the
             // last normalization (hash comparison) — saves the AI call on
             // date/title-only edits.
-            const text = exp.rawDescription.trim();
-            const prior = experiences.find(x => x.id === savedId);
-            const needsPolish = !!text && (!prior?.normalized || prior.normalizedSourceHash !== contentHash(text));
-            if (needsPolish) polishInBackground(savedId, exp);
+            if (needsPolish(exp.rawDescription, experiences.find(x => x.id === savedId))) {
+                polishInBackground({
+                    text: exp.rawDescription,
+                    context: { kind: 'experience', title: exp.role, organization: exp.company },
+                    persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
+                    onStart: () => markPolishing(savedId, true),
+                    onSettle: () => markPolishing(savedId, false),
+                    onDone: onRefresh,
+                });
+            }
 
             resetForm();
             onRefresh();
@@ -262,37 +247,7 @@ Examples from different fields:
                             </p>
                         )}
 
-                        {/* Polished profile — AI-normalized rendering of the raw text */}
-                        {polishingIds.has(exp.id) ? (
-                            <div className="mt-3 flex items-center gap-2 text-xs text-charcoal-500 bg-charcoal-50 border border-charcoal-200 rounded-lg px-3 py-2">
-                                <Loader2 size={13} className="animate-spin text-brand-600" />
-                                Polishing this entry with AI…
-                            </div>
-                        ) : exp.normalized && exp.normalized.bullets.length > 0 && (
-                            <div className="mt-3 bg-charcoal-50 border border-charcoal-200 rounded-lg px-3 py-2.5">
-                                <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] font-semibold text-brand-600 mb-1.5">
-                                    <Sparkles size={11} className="text-accent-500" /> Polished by AI — how resumes will present this
-                                </p>
-                                <ul className="space-y-1">
-                                    {exp.normalized.bullets.map((b, i) => (
-                                        <li key={i} className="text-sm text-charcoal-700 flex gap-1.5">
-                                            <span className="text-charcoal-400 shrink-0">•</span>
-                                            <span>{b}</span>
-                                        </li>
-                                    ))}
-                                </ul>
-                                {exp.normalized.gaps.length > 0 && (
-                                    <div className="mt-2 pt-2 border-t border-charcoal-200 space-y-1">
-                                        {exp.normalized.gaps.map((g, i) => (
-                                            <p key={i} className="text-xs text-accent-700 flex gap-1.5 items-start">
-                                                <Lightbulb size={12} className="shrink-0 mt-0.5" />
-                                                <span>{g}</span>
-                                            </p>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                        <PolishedPreview normalized={exp.normalized} polishing={polishingIds.has(exp.id)} />
                     </div>
                 ))}
             </div>

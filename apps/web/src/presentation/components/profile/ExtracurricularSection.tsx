@@ -5,6 +5,7 @@ import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, Users } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
+import { needsPolish, polishInBackground, PolishedPreview } from './polish';
 
 interface Props {
     items: Extracurricular[];
@@ -17,6 +18,13 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Extracurricular>>({});
     const [saving, setSaving] = useState(false);
+    const [polishingIds, setPolishingIds] = useState<Set<string>>(new Set());
+    const markPolishing = (id: string, on: boolean) =>
+        setPolishingIds(prev => {
+            const next = new Set(prev);
+            if (on) next.add(id); else next.delete(id);
+            return next;
+        });
 
     const resetForm = () => {
         setFormData({
@@ -57,7 +65,7 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
         if (!user) return;
         setSaving(true);
         try {
-            await profileRepository.saveExtracurricular(user.id, {
+            const item = {
                 id: editingId || '',
                 organization: formData.organization || '',
                 title: formData.title || '',
@@ -65,8 +73,21 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                 startDate: formData.startDate || '',
                 endDate: formData.endDate || '',
                 refinedBullets: [],
-            });
+            };
+            const savedId = await profileRepository.saveExtracurricular(user.id, item);
             toast.success('Activity saved');
+
+            if (needsPolish(item.description, items.find(x => x.id === savedId))) {
+                polishInBackground({
+                    text: item.description,
+                    context: { kind: 'extracurricular', title: item.title, organization: item.organization },
+                    persist: (n, h) => profileRepository.saveExtracurricularNormalized(savedId, n, h),
+                    onStart: () => markPolishing(savedId, true),
+                    onSettle: () => markPolishing(savedId, false),
+                    onDone: onRefresh,
+                });
+            }
+
             resetForm();
             onRefresh();
         } catch (error) {
@@ -139,6 +160,7 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                             </div>
                         </div>
                         {item.description && <p className="mt-2 text-sm text-charcoal-600 whitespace-pre-line">{item.description}</p>}
+                        <PolishedPreview normalized={item.normalized} polishing={polishingIds.has(item.id)} />
                     </div>
                 ))}
             </div>

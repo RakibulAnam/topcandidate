@@ -68,11 +68,12 @@ export function buildCandidateContext(
     lines.push('');
     lines.push('Work experience:');
     for (const e of data.experience) {
+      // Evidence quality ladder: this generation's JD-tailored bullets →
+      // the stable AI-polished profile bullets → the raw brain dump.
       const bullets = (e.refinedBullets && e.refinedBullets.length > 0)
         ? e.refinedBullets
-        : e.rawDescription
-          ? [e.rawDescription]
-          : [];
+        : (e.normalized?.bullets?.length ? e.normalized.bullets
+          : e.rawDescription ? [e.rawDescription] : []);
       const tenure = e.startDate
         ? ` (${e.startDate} – ${e.isCurrent ? 'Present' : (e.endDate || 'present')})`
         : '';
@@ -87,9 +88,8 @@ export function buildCandidateContext(
     for (const p of data.projects) {
       const bullets = (p.refinedBullets && p.refinedBullets.length > 0)
         ? p.refinedBullets
-        : p.rawDescription
-          ? [p.rawDescription]
-          : [];
+        : (p.normalized?.bullets?.length ? p.normalized.bullets
+          : p.rawDescription ? [p.rawDescription] : []);
       const tech = p.technologies ? ` (${p.technologies})` : '';
       lines.push(`- ${p.name}${tech}`);
       for (const b of bullets) lines.push(`    • ${b}`);
@@ -222,10 +222,16 @@ export function buildToolkitEvidenceCorpus(data: ResumeData): string {
   for (const e of data.experience ?? []) {
     parts.push(e.role ?? '', e.company ?? '', e.rawDescription ?? '');
     if (e.refinedBullets) parts.push(...e.refinedBullets);
+    // Polished-profile evidence: canonical English renderings of the raw
+    // text (e.g. "PostgreSQL" where the Banglish raw says "postgres diye").
+    // Without these the fabrication guard would false-flag legitimate terms
+    // that only appear in their canonical form.
+    if (e.normalized) parts.push(...e.normalized.bullets, ...e.normalized.skills);
   }
   for (const p of data.projects ?? []) {
     parts.push(p.name ?? '', p.rawDescription ?? '', p.technologies ?? '');
     if (p.refinedBullets) parts.push(...p.refinedBullets);
+    if (p.normalized) parts.push(...p.normalized.bullets, ...p.normalized.skills);
   }
   for (const ed of data.education ?? []) {
     parts.push(ed.school ?? '', ed.degree ?? '', ed.field ?? '');
@@ -236,6 +242,7 @@ export function buildToolkitEvidenceCorpus(data: ResumeData): string {
   for (const x of data.extracurriculars ?? []) {
     parts.push(x.title ?? '', x.organization ?? '', x.description ?? '');
     if (x.refinedBullets) parts.push(...x.refinedBullets);
+    if (x.normalized) parts.push(...x.normalized.bullets, ...x.normalized.skills);
   }
   for (const af of data.affiliations ?? []) parts.push(af.role ?? '', af.organization ?? '');
   for (const lang of data.languages ?? []) parts.push(lang.name ?? '');

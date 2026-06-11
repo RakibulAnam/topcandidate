@@ -7,9 +7,14 @@
 
 import { NormalizedItemContent } from '../entities/Resume';
 
+// Generic context for any polishable profile item. `title` is the item's
+// headline (job role / project name / activity title); `organization` is the
+// company or organization when there is one; `technologies` only for projects.
 export interface ProfileItemContext {
-  role?: string;
-  company?: string;
+  kind?: 'experience' | 'project' | 'extracurricular';
+  title?: string;
+  organization?: string;
+  technologies?: string;
 }
 
 export interface IProfileItemNormalizer {

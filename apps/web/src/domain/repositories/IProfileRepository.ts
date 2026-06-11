@@ -26,7 +26,9 @@ export interface IProfileRepository {
     deleteEducation(id: string): Promise<void>;
 
     getProjects(userId: string): Promise<Project[]>;
-    saveProject(userId: string, project: Project): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveProject(userId: string, project: Project): Promise<string>;
+    saveProjectNormalized(id: string, normalized: NormalizedItemContent, sourceHash: string): Promise<void>;
     deleteProject(id: string): Promise<void>;
 
     getSkills(userId: string): Promise<string[]>;
@@ -34,7 +36,9 @@ export interface IProfileRepository {
 
     // New Sections
     getExtracurriculars(userId: string): Promise<Extracurricular[]>;
-    saveExtracurricular(userId: string, item: Extracurricular): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveExtracurricular(userId: string, item: Extracurricular): Promise<string>;
+    saveExtracurricularNormalized(id: string, normalized: NormalizedItemContent, sourceHash: string): Promise<void>;
     deleteExtracurricular(id: string): Promise<void>;
 
     getAwards(userId: string): Promise<Award[]>;

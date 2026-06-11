@@ -71,7 +71,9 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
       // Defensive trims — tiny payload, cheap to sanitize.
       parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, 5);
       parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 10);
-      parsed.gaps = (parsed.gaps ?? []).map(g => g.trim()).filter(Boolean).slice(0, 3);
+      // Subtle coaching only: a single hint at most — the polish itself is
+      // the product; we never pile instructions on the user.
+      parsed.gaps = (parsed.gaps ?? []).map(g => g.trim()).filter(Boolean).slice(0, 1);
       return parsed;
     }, this.deadlineMs);
   }
