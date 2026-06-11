@@ -739,7 +739,18 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         toast.success(t('builder.toolkitReady'));
       } else {
         console.warn(`[builder] generation success — partial toolkit, failed slots=${errorKeys.join(',')}`);
-        toast.warning(t('builder.toolkitPartial'));
+        // Name the failed artifacts so the user knows exactly which tabs to
+        // retry instead of hunting for the empty ones.
+        const itemLabelKeys: Record<string, string> = {
+          coverLetter: 'preview.tabCoverLetter',
+          outreachEmail: 'preview.tabOutreachEmail',
+          linkedInMessage: 'preview.tabLinkedIn',
+          interviewQuestions: 'preview.tabQuestionPrep',
+        };
+        const failedNames = errorKeys
+          .map(k => (itemLabelKeys[k] ? t(itemLabelKeys[k]) : k))
+          .join(', ');
+        toast.warning(t('builder.toolkitPartialNamed', { items: failedNames }), { duration: 8000 });
       }
 
       if (user) {
@@ -778,8 +789,31 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         // GibberishContentError carries a user-actionable message naming the
         // offending field — surface it verbatim so the user knows where to fix.
         toast.error(err.message);
+      } else if (errCode === 'refund_failed') {
+        // The user was charged but got nothing AND the automatic refund
+        // failed — never leave this ambiguous. Long duration: this one matters.
+        toast.error(t('builder.refundFailed'), { duration: 15000 });
+      } else if (errCode === 'client_timeout' || errCode === 'network_error') {
+        // Hung connection or offline — retryable, so offer the retry inline
+        // instead of making the user re-find the Generate button.
+        toast.error(
+          errCode === 'client_timeout' ? t('builder.generationTimeout') : t('builder.networkError'),
+          {
+            duration: 12000,
+            action: {
+              label: t('builder.retryCta'),
+              onClick: () => { void handleGenerate(opts); },
+            },
+          },
+        );
       } else {
-        toast.error(t('builder.optimizeFailed'));
+        toast.error(t('builder.optimizeFailed'), {
+          duration: 10000,
+          action: {
+            label: t('builder.retryCta'),
+            onClick: () => { void handleGenerate(opts); },
+          },
+        });
       }
     } finally {
       setIsGenerating(false);

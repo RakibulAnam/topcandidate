@@ -51,18 +51,48 @@ export class ApiCallError extends Error {
   }
 }
 
+// Client-side wall clock for any /api/* call. Vercel kills functions at 60s
+// (vercel.json maxDuration), so anything still pending at 90s is a hung
+// connection, not a slow server — abort and surface a retryable error instead
+// of spinning forever.
+const CLIENT_TIMEOUT_MS = 90_000;
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const token = await getAccessToken();
   const t0 = performance.now();
   console.info(`[proxy] POST ${path}`);
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), CLIENT_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+      signal: abort.signal,
+    });
+  } catch (err) {
+    const elapsedMs = Math.round(performance.now() - t0);
+    if (abort.signal.aborted) {
+      console.error(`[proxy] ${path} client-timeout after ${elapsedMs}ms`);
+      throw new ApiCallError(
+        'The request took too long and was cancelled. Please try again.',
+        408,
+        'client_timeout',
+      );
+    }
+    console.error(`[proxy] ${path} network error after ${elapsedMs}ms`, err);
+    throw new ApiCallError(
+      'Could not reach the server. Check your connection and try again.',
+      0,
+      'network_error',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   const elapsed = Math.round(performance.now() - t0);
   // Server-side handlers stamp x-request-id on every response — surface it
@@ -75,13 +105,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     const friendly = errorBody?.error
       ?? `Request failed: ${res.status} ${res.statusText}`;
     console.error(`[proxy] ${path} ${res.status} rid=${rid} ${elapsed}ms code=${errorBody?.code ?? '-'} msg="${friendly}"`);
-    if (res.status === 429 && errorBody?.used != null && errorBody?.cap != null) {
-      throw new ApiCallError(
-        `Daily limit reached (${errorBody.used}/${errorBody.cap}). Try again tomorrow.`,
-        res.status,
-        errorBody.code,
-      );
-    }
+    // 429s carry a server-built message that already names the limit that was
+    // hit (overall daily cap vs the stricter free-resume cap) — pass it
+    // through rather than rebuilding a generic one here.
     throw new ApiCallError(friendly, res.status, errorBody?.code);
   }
 

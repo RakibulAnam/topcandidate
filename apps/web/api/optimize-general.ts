@@ -3,8 +3,9 @@
 // Free path — runs the resume optimizer only (no toolkit generator, no credit
 // gate). Used exclusively for the General Resume feature, which is free for
 // every user. The 24-hour cooldown between regenerations is enforced
-// client-side by ResumeService; this endpoint only enforces auth and the
-// existing daily AI-call cap so a single user can't drain provider quota.
+// client-side by ResumeService; this endpoint enforces auth, the overall
+// daily AI-call cap, AND a stricter per-kind cap (KIND_DAILY_CAPS, 5/day) —
+// the free path has no credit gate, so this cap is its only cost control.
 //
 // Request:  { data: ResumeData }
 // Response: { optimized: OptimizedResumeData }
@@ -34,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    await assertWithinLimit(auth.userId, auth.jwt);
+    await assertWithinLimit(auth.userId, auth.jwt, 'optimize_general');
   } catch (err) {
     if (err instanceof RateLimitError) {
       res.status(429).json({ error: err.message, used: err.used, cap: err.cap });

@@ -173,18 +173,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
     // Core artifact failed — refund the credit so the user isn't charged for
-    // a generation that produced nothing.
+    // a generation that produced nothing. If the refund itself fails the user
+    // HAS been charged for nothing — that must never be silent: tell the
+    // client (code: refund_failed) so the UI can direct them to support, and
+    // log loudly so the operator can reconcile via the credit_ledger.
+    let refundFailed = false;
     if (creditConsumed) {
       const { error: refundError } = await supabase.rpc('refund_toolkit_credit', {
         p_user_id: auth.userId,
       });
       if (refundError) {
-        console.error(`[optimize ${rid}] credit refund failed: ${refundError.message}`);
+        refundFailed = true;
+        console.error(`[optimize ${rid}] REFUND FAILED user=${auth.userId}: ${refundError.message} — credit charged with no resume delivered, manual reconciliation needed`);
       } else {
         console.info(`[optimize ${rid}] credit refunded`);
       }
     }
-    res.status(502).json({ error: msg });
+    if (refundFailed) {
+      res.status(502).json({
+        error: 'Generation failed and the automatic credit refund also failed. Your credit will be restored — contact support if it is not back within a few hours.',
+        code: 'refund_failed',
+      });
+    } else {
+      res.status(502).json({ error: msg });
+    }
     return;
   }
 
