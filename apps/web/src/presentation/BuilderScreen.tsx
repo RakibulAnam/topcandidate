@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { ResumeData, AppStep, ToolkitItem } from '../domain/entities';
 import {
@@ -165,6 +165,38 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const [canRegenerate, setCanRegenerate] = useState(true);
   const [cooldownEndsAt, setCooldownEndsAt] = useState<Date | null>(null);
   const [regeneratingItem, setRegeneratingItem] = useState<ToolkitItem | null>(null);
+
+  // Persist preview edits to Supabase — 1.5 s after the last change. Inline
+  // edits (EditableElement) only update local state; before this effect, a
+  // user who polished wording in the preview and navigated away silently lost
+  // every edit (the saved row still held the original generation). Snapshot
+  // ref avoids redundant writes (e.g. right after handleGenerate already
+  // saved the merged data, or when opening an existing resume read-only).
+  const lastPersistedRef = useRef<string>(JSON.stringify(initialData));
+  useEffect(() => {
+    if (!resumeService || !activeResumeId || isGenerating) return;
+    if (step !== AppStep.PREVIEW) return;
+    const snapshot = JSON.stringify(resumeData);
+    if (snapshot === lastPersistedRef.current) return;
+    const handle = window.setTimeout(async () => {
+      try {
+        // General resumes are identified by their fixed title — never rename
+        // them here or isGeneralResume detection breaks on next load.
+        const title = isGeneralResume
+          ? ResumeService.GENERAL_RESUME_TITLE
+          : resumeData.targetJob?.title
+            ? `${resumeData.targetJob.title} Resume`
+            : `Resume - ${new Date().toLocaleDateString()}`;
+        await resumeService.updateGeneratedResume(activeResumeId, resumeData, title);
+        lastPersistedRef.current = snapshot;
+        console.info('[builder] preview edits persisted');
+      } catch (err) {
+        console.error('Preview edit autosave failed', err);
+        toast.error(t('builder.autosaveFailed'));
+      }
+    }, 1500);
+    return () => window.clearTimeout(handle);
+  }, [resumeService, resumeData, activeResumeId, step, isGenerating, isGeneralResume, t]);
 
   // Skills the user accumulated during profile setup. Used by SkillsStep to
   // surface JD-relevant suggestions (via fuse.js) before falling back to the
@@ -766,6 +798,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
             const newId = await resumeService.saveGeneratedResume(user.id, mergedData, title);
             setActiveResumeId(newId);
           }
+          // Just persisted — sync the preview-edit autosave snapshot so the
+          // effect doesn't immediately re-write the same data.
+          lastPersistedRef.current = JSON.stringify(mergedData);
         } catch (saveErr) {
           console.error('Auto-save failed', saveErr);
           toast.error(t('builder.autosaveFailed'));
