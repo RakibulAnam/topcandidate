@@ -94,10 +94,12 @@ const OPTIMIZER_SCHEMA: Record<string, unknown> = {
 export class OpenRouterResumeOptimizer implements IResumeOptimizer {
   private readonly client: OpenRouterClient;
   // Total wall-time budget across attempts (deadline-bounded — see withRetry).
-  // The optimizer runs in PARALLEL with the toolkit on /api/optimize; it's the
-  // shorter pole, so it gets the smaller budget. optimizer(30s) ‖ toolkit(48s)
-  // → ~48s + pre-AI overhead, comfortably under Vercel's 60s cap.
-  private readonly deadlineMs = 30_000;
+  // Since the 2026-06-11 split, /api/optimize runs the optimizer ALONE in its
+  // own function invocation (the toolkit lives on /api/toolkit), so the
+  // optimizer gets most of Vercel's 60s window: 50s leaves room for auth +
+  // credit RPC + telemetry overhead and buys a second attempt after a slow
+  // first one.
+  private readonly deadlineMs = 50_000;
   private readonly temperature = 0.3;
 
   constructor(apiKey: string) {

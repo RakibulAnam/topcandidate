@@ -98,50 +98,56 @@ export class ResumeService {
       throw gateErr;
     }
 
-    // Two concurrent Gemini calls instead of five — the optimizer refines the
-    // resume itself while the combined toolkit generator produces cover
-    // letter + outreach email + LinkedIn note + interview questions in one
-    // shot. Keeping them independent means the user still gets a tailored
-    // resume even if the toolkit call fails (and vice versa), and they share
-    // the same raw input, so the toolkit doesn't need the refined bullets.
-    //
-    // Do NOT wrap the toolkit call in withRetry here: in the proxy build, both
-    // halves are served by the same /api/optimize request (deduped via an
-    // inflight cache keyed by the ResumeData reference). A retry triggers a
-    // brand-new POST to /api/optimize, which the server treats as a fresh
-    // generation and charges another toolkit credit — so a transient toolkit
-    // failure would silently burn a second credit. Per-item retries go through
-    // /api/toolkit-item, which is free; the warning-card retry buttons in the
-    // Preview tabs are the supported recovery path.
+    // Optimizer only. The combined toolkit bundle runs as a SEPARATE request
+    // (/api/toolkit via generateToolkitBundle) fired by the builder in
+    // parallel with this call — each gets its own Vercel 60s window, and the
+    // user sees the tailored resume as soon as the optimizer resolves instead
+    // of waiting for the slower toolkit half.
     track('resume_generation_started', { type: 'paid_tailored' });
 
-    const [optimizeResult, toolkitResult] = await Promise.allSettled([
-      this.optimizeUseCase.execute(data),
-      this.toolkitUseCase.execute(data),
-    ]);
-
-    console.info(`[resume-service] AI settled in ${Math.round(performance.now() - t0)}ms optimizer=${optimizeResult.status} toolkit=${toolkitResult.status}`);
-
-    // Optimizer is the core artifact — if it failed, the whole flow failed
-    // and we surface the error to the caller the same way as before.
-    if (optimizeResult.status === 'rejected') {
-      console.error('[resume-service] optimizer rejected:', this.errorMessage(optimizeResult.reason));
+    let optimizedData: OptimizedResumeData;
+    try {
+      optimizedData = await this.optimizeUseCase.execute(data);
+    } catch (err) {
+      console.error('[resume-service] optimizer rejected:', this.errorMessage(err));
       track('resume_generation_completed', { type: 'paid_tailored', success: false });
-      throw optimizeResult.reason instanceof Error
-        ? optimizeResult.reason
-        : new Error(this.errorMessage(optimizeResult.reason));
+      throw err instanceof Error ? err : new Error(this.errorMessage(err));
     }
 
-    const optimizedData = optimizeResult.value;
+    console.info(`[resume-service] optimizeResume done total=${Math.round(performance.now() - t0)}ms`);
+    track('resume_generation_completed', { type: 'paid_tailored', success: true });
+    return optimizedData;
+  }
+
+  /**
+   * Generate the combined toolkit bundle (cover letter + outreach email +
+   * LinkedIn note + interview questions) for a generation. Runs as its own
+   * /api/toolkit request — free (the optimizer's credit covers the whole
+   * generation), so callers may fire it in parallel with optimizeResume.
+   *
+   * NEVER throws: a hard failure (network, provider down) is recorded under
+   * every toolkit slot so the UI renders four retryable failure cards, same
+   * contract as the per-artifact validation errors.
+   */
+  async generateToolkitBundle(
+    data: ResumeData,
+  ): Promise<{ coverLetter?: string; toolkit: JobToolkit }> {
+    const t0 = performance.now();
     const toolkit: JobToolkit = {};
     let coverLetter: string | undefined;
 
-    if (toolkitResult.status === 'fulfilled' && toolkitResult.value) {
+    try {
+      // Same pre-flight gate as optimizeResume — callers fire both in
+      // parallel, and gibberish must not burn a toolkit AI call either. The
+      // failure lands in the errors map (this method never throws); the
+      // parallel optimizeResume call throws the user-facing
+      // GibberishContentError, so the builder never shows these cards.
+      this.assertContentIsReal(data);
+
+      const value = await this.toolkitUseCase.execute(data);
+      if (!value) throw new Error('Generator returned no data');
       // Per-artifact partial result: each slot is independently populated or
       // missing, and `errors` carries the per-item reason for any failures.
-      // Successful slots flow through verbatim; failed slots stay undefined
-      // and surface as "failed" cards with retry buttons in Preview.
-      const value = toolkitResult.value;
       coverLetter = value.coverLetter;
       toolkit.outreachEmail = value.outreachEmail;
       toolkit.linkedInMessage = value.linkedInMessage;
@@ -152,13 +158,8 @@ export class ResumeService {
       } else {
         console.info('[resume-service] toolkit full — all 4 slots populated');
       }
-    } else {
-      // Hard failure (network / no API key / call rejected before the
-      // per-artifact validation runs). Record the same reason under every
-      // toolkit slot so the UI shows four retryable failure cards.
-      const reason =
-        toolkitResult.status === 'rejected' ? toolkitResult.reason : 'Generator returned no data';
-      const friendlyMessage = this.errorMessage(reason);
+    } catch (err) {
+      const friendlyMessage = this.errorMessage(err);
       console.error('[resume-service] toolkit hard-failed:', friendlyMessage);
       toolkit.errors = {
         coverLetter: friendlyMessage,
@@ -168,18 +169,8 @@ export class ResumeService {
       };
     }
 
-    console.info(`[resume-service] optimizeResume done total=${Math.round(performance.now() - t0)}ms`);
-
-    track('resume_generation_completed', { type: 'paid_tailored', success: true });
-
-    return {
-      ...optimizedData,
-      coverLetter,
-      // Always return a toolkit object once generation has been attempted, so
-      // failures are visible in the UI rather than silently collapsing into
-      // "nothing generated".
-      toolkit,
-    };
+    console.info(`[resume-service] generateToolkitBundle done total=${Math.round(performance.now() - t0)}ms`);
+    return { coverLetter, toolkit };
   }
 
   /**

@@ -1,13 +1,17 @@
 // POST /api/optimize
 //
-// Hot path. Runs the resume optimizer + toolkit generator in parallel
-// (matches the existing 2-call budget). Returns combined result so the
-// client only makes one HTTP round-trip per generation.
+// Hot path — resume optimizer ONLY. The combined toolkit bundle moved to its
+// own endpoint (/api/toolkit, 2026-06-11) so a slow toolkit generation can
+// never push this request past Vercel's 60s cap (the 2026-06-10 504 failure
+// mode), and so the client can render the tailored resume the moment the
+// optimizer returns while the toolkit keeps generating in a second request.
 //
 // Request:  { data: ResumeData }
 // Response: { optimized: OptimizedResumeData, toolkit: GeneratedToolkit }
-//   `toolkit` always present; per-artifact validation failures land in
-//   `toolkit.errors[<item>]` while successful artifacts populate their slot.
+//   `toolkit` is a STUB for stale clients only: SPA bundles loaded before the
+//   split still read `toolkit` from this response — they get an errors map
+//   pointing them at the per-item retry buttons (which still work). Current
+//   clients ignore it and call /api/toolkit instead.
 //
 // 401 if not authenticated; 402 if user has no toolkit credits;
 // 429 if user over daily cap; 503 if no AI provider configured.
@@ -16,18 +20,17 @@
 //   1. consume_toolkit_credit() — atomic decrement before AI runs.
 //      If balance was already 0, raises 'insufficient_credits' → 402.
 //   2. If the optimizer call fails → refund_toolkit_credit() so the user
-//      is not charged for a generation that produced nothing.
-//   3. If the optimizer succeeds but the toolkit call fails entirely (network
-//      / 5xx from Gemini, not a validation issue), the credit is kept —
-//      the user got their resume, and per-item retries via /api/toolkit-item
-//      are free.
+//      is not charged for a generation that produced nothing. If THAT fails
+//      too, the 502 carries code 'refund_failed'.
+//   3. The toolkit bundle (/api/toolkit) and per-item retries
+//      (/api/toolkit-item) are free — the credit covers the whole generation.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { resolveCost } from './_lib/aiCost.js';
-import { resumeOptimizer, toolkitGenerator } from './_lib/aiFactory.js';
+import { resumeOptimizer } from './_lib/aiFactory.js';
 import type { ResumeData, GeneratedToolkit } from '../src/domain/entities/Resume';
 import type { UsageSink } from '../src/infrastructure/ai/usage';
 
@@ -140,20 +143,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const creditConsumed = !creditError;
 
   // ── AI generation ─────────────────────────────────────────────────────────
-  // Two AI calls in parallel — optimizer + combined toolkit. Promise.allSettled
-  // so a toolkit failure doesn't kill the optimizer result.
+  // Optimizer only — the toolkit bundle runs on /api/toolkit in a parallel
+  // request issued by the client, each inside its own 60s function window.
   const tAI = Date.now();
-  console.info(`[optimize ${rid}] AI start (optimizer + toolkit, parallel)`);
-  // Telemetry sink — the optimizer (Groq primary / Gemini fallback via the
-  // multi-provider router) fills in the provider/model that actually served
-  // the request plus token counts. Additive: does not change the hot path.
+  console.info(`[optimize ${rid}] AI start (optimizer only — toolkit is /api/toolkit)`);
+  // Telemetry sink — the optimizer fills in the provider/model that actually
+  // served the request plus token counts. Additive: does not change the hot path.
   const optUsage: UsageSink = {};
-  const [optimizedResult, toolkitResult] = await Promise.allSettled([
+  const [optimizedResult] = await Promise.allSettled([
     resumeOptimizer.optimize(data, optUsage),
-    toolkitGenerator ? toolkitGenerator.generate(data) : Promise.reject(new Error('Toolkit generator not configured')),
   ]);
   const latencyMs = Date.now() - tAI;
-  console.info(`[optimize ${rid}] AI done in ${latencyMs}ms optimizer=${optimizedResult.status} toolkit=${toolkitResult.status}`);
+  console.info(`[optimize ${rid}] AI done in ${latencyMs}ms optimizer=${optimizedResult.status}`);
 
   if (optimizedResult.status === 'rejected') {
     const msg = optimizedResult.reason instanceof Error ? optimizedResult.reason.message : String(optimizedResult.reason);
@@ -202,37 +203,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const optimized = optimizedResult.value;
 
-  // Per-artifact validation lives inside GeminiToolkitGenerator — successful
-  // slots populate themselves and validation failures land in `errors[<item>]`.
-  // A hard failure here (network error, AI API down, no key) leaves every
-  // slot empty and records the same reason for all four items.
-  let toolkit: GeneratedToolkit;
-  if (toolkitResult.status === 'fulfilled') {
-    toolkit = toolkitResult.value;
-    const slots = {
-      coverLetter: !!toolkit.coverLetter,
-      outreachEmail: !!toolkit.outreachEmail,
-      linkedInMessage: !!toolkit.linkedInMessage,
-      interviewQuestions: !!toolkit.interviewQuestions && toolkit.interviewQuestions.length > 0,
-    };
-    const errorKeys = Object.keys(toolkit.errors);
-    if (errorKeys.length === 0) {
-      console.info(`[optimize ${rid}] toolkit full slots=${JSON.stringify(slots)}`);
-    } else {
-      console.warn(`[optimize ${rid}] toolkit partial slots=${JSON.stringify(slots)} errors=${JSON.stringify(toolkit.errors)}`);
-    }
-  } else {
-    const msg = toolkitResult.reason instanceof Error ? toolkitResult.reason.message : 'Toolkit failed';
-    console.error(`[optimize ${rid}] toolkit hard-failed (credit kept): ${msg}`);
-    toolkit = {
-      errors: {
-        coverLetter: msg,
-        outreachEmail: msg,
-        linkedInMessage: msg,
-        interviewQuestions: msg,
-      },
-    };
-  }
+  // Stale-client compatibility stub. SPA bundles cached from before the split
+  // still read `toolkit` off this response; give them an errors map so their
+  // UI renders four retryable cards (per-item retry via /api/toolkit-item
+  // still works) instead of crashing on a missing field. Current clients
+  // fetch the real bundle from /api/toolkit and never read this.
+  const staleMsg = 'Toolkit generation moved — refresh the page, then use the retry button on this tab.';
+  const toolkit: GeneratedToolkit = {
+    errors: {
+      coverLetter: staleMsg,
+      outreachEmail: staleMsg,
+      linkedInMessage: staleMsg,
+      interviewQuestions: staleMsg,
+    },
+  };
 
   // Success telemetry (status=success). Fallback token estimate uses the JD
   // (input) + the optimized summary (output) when the provider omitted usage.

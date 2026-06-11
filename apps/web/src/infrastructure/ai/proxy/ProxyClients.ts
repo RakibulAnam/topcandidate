@@ -119,51 +119,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 // Optimizer + combined toolkit (the hot path)
 // ────────────────────────────────────────────────
 //
-// /api/optimize runs BOTH the optimizer and the toolkit generator on the
-// server in parallel and returns both results plus per-item errors. To keep
-// the existing `IResumeOptimizer` + `IToolkitGenerator` separation on the
-// client, we cache the response in-flight: the first of the two calls
-// (whichever ResumeService makes first) triggers the network request; the
-// second reuses the same Promise.
-//
-// Cache key: the ResumeData reference. Cleared after both halves resolve or
-// either errors. ResumeService calls them inside the same allSettled, so the
-// references are identical and cache hits.
-//
-// `toolkit` is always present in the response since per-artifact validation
-// landed — even when every slot failed validation, the server returns the
-// errors map so the client can render four "failed" cards rather than
-// surfacing a single bundle-level failure.
-type ApiOptimizeResponse = {
-  optimized: OptimizedResumeData;
-  toolkit: GeneratedToolkit;
-};
-
-const inflight = new WeakMap<ResumeData, Promise<ApiOptimizeResponse>>();
-function callOptimize(data: ResumeData): Promise<ApiOptimizeResponse> {
-  let p = inflight.get(data);
-  if (!p) {
-    console.info('[proxy] callOptimize cache MISS — issuing /api/optimize');
-    p = postJson<ApiOptimizeResponse>('/api/optimize', { data })
-      .finally(() => {
-        // Best-effort cleanup; WeakMap entries also get GC'd naturally.
-        inflight.delete(data);
-      });
-    inflight.set(data, p);
-  } else {
-    // Critical for the credit-double-charge guarantee: when both halves
-    // (optimizer + toolkit) of ResumeService.optimizeResume hit callOptimize
-    // with the SAME ResumeData reference, the second one MUST cache-hit. If
-    // you ever see two MISS lines for a single Generate click, something
-    // upstream is cloning the data and the server will charge twice.
-    console.info('[proxy] callOptimize cache HIT — reusing in-flight /api/optimize');
-  }
-  return p;
-}
+// Since the 2026-06-11 split, the optimizer (/api/optimize, charges the
+// credit) and the combined toolkit bundle (/api/toolkit, free) are separate
+// requests on separate function invocations. The builder fires both in
+// parallel and renders the resume as soon as the optimizer resolves; the
+// toolkit fills its tabs in when its own request completes. The old
+// in-flight WeakMap dedupe is gone with the combined request — each proxy
+// posts exactly one request, so there is no double-charge surface left here
+// (only /api/optimize touches credits at all).
 
 export class ProxyResumeOptimizer implements IResumeOptimizer {
   async optimize(data: ResumeData): Promise<OptimizedResumeData> {
-    const r = await callOptimize(data);
+    const r = await postJson<{ optimized: OptimizedResumeData }>('/api/optimize', { data });
     return r.optimized;
   }
 }
@@ -179,11 +146,11 @@ export class ProxyGeneralResumeOptimizer implements IResumeOptimizer {
 
 export class ProxyToolkitGenerator implements IToolkitGenerator {
   async generate(data: ResumeData): Promise<GeneratedToolkit> {
-    const r = await callOptimize(data);
-    // Server always returns a toolkit object now: either populated, or with
-    // an `errors` map describing why each slot failed validation. The service
-    // layer merges partial artifacts + errors into `JobToolkit` and the UI
-    // renders per-card "failed" states with retry buttons.
+    // The server always returns a toolkit object on 200: either populated, or
+    // with an `errors` map describing why each slot failed validation. The
+    // service layer merges partial artifacts + errors into `JobToolkit` and
+    // the UI renders per-card "failed" states with retry buttons.
+    const r = await postJson<{ toolkit: GeneratedToolkit }>('/api/toolkit', { data });
     return r.toolkit;
   }
 }

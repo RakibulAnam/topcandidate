@@ -1369,7 +1369,7 @@ do $$ begin
     alter table ai_call_log drop constraint ai_call_log_kind_check;
   end if;
   alter table ai_call_log add constraint ai_call_log_kind_check
-    check (kind in ('optimize','optimize_general','toolkit_item','extract_resume'));
+    check (kind in ('optimize','optimize_general','toolkit','toolkit_item','extract_resume'));
 end $$;
 
 -- Free vs paid generation typing.

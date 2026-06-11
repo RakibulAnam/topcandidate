@@ -46,19 +46,30 @@ const getItemStatus = (
   data: ResumeData,
   item: ToolkitItem,
   regeneratingItem: ToolkitItem | null,
+  toolkitPending = false,
 ): ToolkitItemStatus => {
   if (regeneratingItem === item) return 'regenerating';
   if (data.toolkit?.errors?.[item]) return 'failed';
+  let present: boolean;
   switch (item) {
     case 'coverLetter':
-      return data.coverLetter ? 'success' : 'missing';
+      present = !!data.coverLetter;
+      break;
     case 'outreachEmail':
-      return data.toolkit?.outreachEmail ? 'success' : 'missing';
+      present = !!data.toolkit?.outreachEmail;
+      break;
     case 'linkedInMessage':
-      return data.toolkit?.linkedInMessage ? 'success' : 'missing';
+      present = !!data.toolkit?.linkedInMessage;
+      break;
     case 'interviewQuestions':
-      return (data.toolkit?.interviewQuestions?.length ?? 0) > 0 ? 'success' : 'missing';
+      present = (data.toolkit?.interviewQuestions?.length ?? 0) > 0;
+      break;
   }
+  if (present) return 'success';
+  // The initial toolkit bundle runs as its own request after the resume
+  // appears — while it's in flight, absent slots are "generating", not
+  // "missing" (missing implies the user has to act).
+  return toolkitPending ? 'regenerating' : 'missing';
 };
 
 const StatusDot: React.FC<{ status: ToolkitItemStatus }> = ({ status }) => {
@@ -108,6 +119,9 @@ interface PreviewProps {
   cooldownEndsAt?: Date | null;
   onRegenerateItem?: (item: ToolkitItem) => Promise<void>;
   regeneratingItem?: ToolkitItem | null;
+  // True while the initial toolkit bundle (/api/toolkit) is still in flight —
+  // absent artifacts render as "generating" spinners instead of "missing".
+  toolkitPending?: boolean;
 }
 
 export const Preview: React.FC<PreviewProps> = ({
@@ -125,6 +139,7 @@ export const Preview: React.FC<PreviewProps> = ({
   cooldownEndsAt,
   onRegenerateItem,
   regeneratingItem = null,
+  toolkitPending = false,
 }) => {
   const t = useT();
   const [isExporting, setIsExporting] = useState(false);
@@ -869,7 +884,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 }
                 disabled={
                   isExporting || 
-                  (activeTab === 'coverLetter' && (!onExportCoverLetter || getItemStatus(data, 'coverLetter', regeneratingItem) !== 'success')) ||
+                  (activeTab === 'coverLetter' && (!onExportCoverLetter || getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')) ||
                   (activeTab !== 'resume' && activeTab !== 'coverLetter')
                 }
                 className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-md hover:border-brand-700 shadow-sm transition-colors disabled:opacity-50"
@@ -881,7 +896,7 @@ export const Preview: React.FC<PreviewProps> = ({
               <button
                 type="button"
                 onClick={handlePDFExport}
-                disabled={isPdfGenerating || (activeTab === 'coverLetter' && getItemStatus(data, 'coverLetter', regeneratingItem) !== 'success')}
+                disabled={isPdfGenerating || (activeTab === 'coverLetter' && getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')}
                 className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-md hover:bg-brand-800 shadow-sm transition-colors disabled:opacity-50"
               >
                 {isPdfGenerating ? (
@@ -977,7 +992,7 @@ export const Preview: React.FC<PreviewProps> = ({
                     />
                     <span className="text-sm font-semibold">{t('preview.tabCoverLetter')}</span>
                   </div>
-                  <StatusDot status={getItemStatus(data, 'coverLetter', regeneratingItem)} />
+                  <StatusDot status={getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending)} />
                 </button>
               </div>
             </div>
@@ -1008,7 +1023,7 @@ export const Preview: React.FC<PreviewProps> = ({
                     />
                     <span className="text-sm font-semibold">{t('preview.tabOutreachEmail')}</span>
                   </div>
-                  <StatusDot status={getItemStatus(data, 'outreachEmail', regeneratingItem)} />
+                  <StatusDot status={getItemStatus(data, 'outreachEmail', regeneratingItem, toolkitPending)} />
                 </button>
                 <button
                   type="button"
@@ -1030,7 +1045,7 @@ export const Preview: React.FC<PreviewProps> = ({
                     />
                     <span className="text-sm font-semibold">{t('preview.tabLinkedIn')}</span>
                   </div>
-                  <StatusDot status={getItemStatus(data, 'linkedInMessage', regeneratingItem)} />
+                  <StatusDot status={getItemStatus(data, 'linkedInMessage', regeneratingItem, toolkitPending)} />
                 </button>
               </div>
             </div>
@@ -1067,7 +1082,7 @@ export const Preview: React.FC<PreviewProps> = ({
                     )}
                   </span>
                 </div>
-                <StatusDot status={getItemStatus(data, 'interviewQuestions', regeneratingItem)} />
+                <StatusDot status={getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending)} />
               </button>
             </div>
 
@@ -1086,7 +1101,7 @@ export const Preview: React.FC<PreviewProps> = ({
           )}
           {activeTab === 'coverLetter' && (
             <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0">
-              {getItemStatus(data, 'coverLetter', regeneratingItem) === 'success' ? (
+              {getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) === 'success' ? (
                 coverLetterContent
               ) : (
                 <ToolkitStatusCard
@@ -1094,7 +1109,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   eyebrow={t('preview.tabCoverLetter')}
                   title={t('preview.statusCoverLetterTitle')}
                   description={t('preview.statusCoverLetterDesc')}
-                  status={getItemStatus(data, 'coverLetter', regeneratingItem) as Exclude<ToolkitItemStatus, 'success'>}
+                  status={getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) as Exclude<ToolkitItemStatus, 'success'>}
                   errorMessage={data.toolkit?.errors?.coverLetter}
                   onRetry={() => onRegenerateItem?.('coverLetter')}
                   busy={!!regeneratingItem && regeneratingItem !== 'coverLetter'}
@@ -1104,7 +1119,7 @@ export const Preview: React.FC<PreviewProps> = ({
           )}
           {activeTab === 'outreachEmail' && (
             <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
-              {getItemStatus(data, 'outreachEmail', regeneratingItem) === 'success' ? (
+              {getItemStatus(data, 'outreachEmail', regeneratingItem, toolkitPending) === 'success' ? (
                 <OutreachEmailViewer email={data.toolkit!.outreachEmail!} />
               ) : (
                 <ToolkitStatusCard
@@ -1112,7 +1127,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   eyebrow={t('preview.sidebarOutreach')}
                   title={t('preview.statusOutreachTitle')}
                   description={t('preview.statusOutreachDesc')}
-                  status={getItemStatus(data, 'outreachEmail', regeneratingItem) as Exclude<ToolkitItemStatus, 'success'>}
+                  status={getItemStatus(data, 'outreachEmail', regeneratingItem, toolkitPending) as Exclude<ToolkitItemStatus, 'success'>}
                   errorMessage={data.toolkit?.errors?.outreachEmail}
                   onRetry={() => onRegenerateItem?.('outreachEmail')}
                   busy={!!regeneratingItem && regeneratingItem !== 'outreachEmail'}
@@ -1122,7 +1137,7 @@ export const Preview: React.FC<PreviewProps> = ({
           )}
           {activeTab === 'linkedInMessage' && (
             <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
-              {getItemStatus(data, 'linkedInMessage', regeneratingItem) === 'success' ? (
+              {getItemStatus(data, 'linkedInMessage', regeneratingItem, toolkitPending) === 'success' ? (
                 <LinkedInMessageViewer message={data.toolkit!.linkedInMessage!} />
               ) : (
                 <ToolkitStatusCard
@@ -1130,7 +1145,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   eyebrow={t('preview.sidebarOutreach')}
                   title={t('preview.statusLinkedInTitle')}
                   description={t('preview.statusLinkedInDesc')}
-                  status={getItemStatus(data, 'linkedInMessage', regeneratingItem) as Exclude<ToolkitItemStatus, 'success'>}
+                  status={getItemStatus(data, 'linkedInMessage', regeneratingItem, toolkitPending) as Exclude<ToolkitItemStatus, 'success'>}
                   errorMessage={data.toolkit?.errors?.linkedInMessage}
                   onRetry={() => onRegenerateItem?.('linkedInMessage')}
                   busy={!!regeneratingItem && regeneratingItem !== 'linkedInMessage'}
@@ -1140,7 +1155,7 @@ export const Preview: React.FC<PreviewProps> = ({
           )}
           {activeTab === 'interviewPrep' && (
             <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
-              {getItemStatus(data, 'interviewQuestions', regeneratingItem) === 'success' ? (
+              {getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending) === 'success' ? (
                 <InterviewPrepViewer questions={data.toolkit!.interviewQuestions!} />
               ) : (
                 <ToolkitStatusCard
@@ -1148,7 +1163,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   eyebrow={t('preview.sidebarInterview')}
                   title={t('preview.statusInterviewTitle')}
                   description={t('preview.statusInterviewDesc')}
-                  status={getItemStatus(data, 'interviewQuestions', regeneratingItem) as Exclude<ToolkitItemStatus, 'success'>}
+                  status={getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending) as Exclude<ToolkitItemStatus, 'success'>}
                   errorMessage={data.toolkit?.errors?.interviewQuestions}
                   onRetry={() => onRegenerateItem?.('interviewQuestions')}
                   busy={!!regeneratingItem && regeneratingItem !== 'interviewQuestions'}

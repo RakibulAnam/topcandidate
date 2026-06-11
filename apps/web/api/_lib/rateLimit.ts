@@ -24,7 +24,7 @@ import { userClient } from './auth.js';
 
 export const DEFAULT_DAILY_CAP = 20;
 
-export type CallKind = 'optimize' | 'optimize_general' | 'toolkit_item' | 'extract_resume';
+export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_item' | 'extract_resume';
 
 // Per-kind daily caps, enforced IN ADDITION to the overall cap. The free
 // general-resume path has no credit gate, so its only cost control is this
