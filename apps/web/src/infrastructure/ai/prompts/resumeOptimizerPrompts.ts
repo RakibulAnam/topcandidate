@@ -104,7 +104,13 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     endDate: e.endDate,
     isCurrent: e.isCurrent,
     description: e.rawDescription,
+    // "Polished profile" (normalized once on profile save): pre-cleaned
+    // professional bullets derived from the raw description. When present,
+    // the EXPERIENCE note below tells the model to use them as primary
+    // evidence — stabler output than re-interpreting Banglish per generation.
+    ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
   }));
+  const hasCanonical = cleanExperience.some(e => 'canonicalBullets' in e);
 
   const cleanProjects = data.projects.map(p => ({
     id: p.id,
@@ -139,7 +145,7 @@ Total experience: ${totalExperience}
 SENIORITY: ${seniority} — calibrate verb choice, ownership claims, and scope language accordingly (see RULE 9).
 Skills (input): ${data.skills.join(', ') || '(none)'}
 
-EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
+EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):${hasCanonical ? '\nNOTE: items with "canonicalBullets" carry a pre-cleaned professional rendering of the raw description. Treat canonicalBullets as the PRIMARY evidence and the raw description as backup detail; still reorder, reword, and emphasize for THIS JD.' : ''}
 ${JSON.stringify(cleanExperience)}
 
 PROJECTS (${cleanProjects.length} items — each MUST produce refinedBullets):

@@ -24,7 +24,7 @@ import { userClient } from './auth.js';
 
 export const DEFAULT_DAILY_CAP = 20;
 
-export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_item' | 'extract_resume';
+export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_item' | 'extract_resume' | 'normalize';
 
 // Per-kind daily caps, enforced IN ADDITION to the overall cap. The free
 // general-resume path has no credit gate, so its only cost control is this
@@ -32,7 +32,13 @@ export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_it
 // (~$0.16/day per account) with no funnel benefit past the first few.
 export const KIND_DAILY_CAPS: Partial<Record<CallKind, number>> = {
   optimize_general: 5,
+  normalize: 40,
 };
+
+// Kinds excluded from the OVERALL daily cap (they still hit their own
+// per-kind cap above). 'normalize' fires on profile edits — a user polishing
+// 10 experience entries must not starve their paid generations.
+const EXCLUDED_FROM_OVERALL: ReadonlySet<string> = new Set(['normalize']);
 
 // Optional cost/telemetry metadata recorded alongside each call. Every field
 // is optional so existing callers (and partial-data paths) keep working — a
@@ -71,12 +77,15 @@ export async function assertWithinLimit(
   cap: number = DEFAULT_DAILY_CAP
 ): Promise<void> {
   const supabase = userClient(jwt);
+  // Row volume per user per day is small (overall cap + per-kind caps), so we
+  // fetch kinds and count in JS — one round-trip covers both checks. The 200
+  // ceiling is a sanity bound far above any legitimate day's rows.
   const { data, error } = await supabase
     .from('ai_call_log')
     .select('kind')
     .eq('user_id', userId)
     .gte('created_at', dayAgoIso())
-    .limit(cap + 1);
+    .limit(200);
 
   if (error) {
     // Don't fail-open on the daily cap — but don't fail-closed either; if
@@ -86,8 +95,9 @@ export async function assertWithinLimit(
   }
 
   const rows = data ?? [];
-  if (rows.length >= cap) {
-    throw new RateLimitError(rows.length, cap);
+  const overallUsed = rows.filter((r) => !EXCLUDED_FROM_OVERALL.has(r.kind as string)).length;
+  if (overallUsed >= cap) {
+    throw new RateLimitError(overallUsed, cap);
   }
 
   const kindCap = kind ? KIND_DAILY_CAPS[kind] : undefined;

@@ -1,4 +1,4 @@
-import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurricular, Award, Certification, Affiliation, Publication, Language, Reference } from '../entities/Resume';
+import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurricular, Award, Certification, Affiliation, Publication, Language, Reference, NormalizedItemContent } from '../entities/Resume';
 
 export interface IProfileRepository {
     // Profile completeness
@@ -15,7 +15,10 @@ export interface IProfileRepository {
     getToolkitCredits(userId: string): Promise<number>;
 
     getExperiences(userId: string): Promise<WorkExperience[]>;
-    saveExperience(userId: string, experience: WorkExperience): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveExperience(userId: string, experience: WorkExperience): Promise<string>;
+    /** Persist the background AI normalization ("polished profile") for a row. */
+    saveExperienceNormalized(id: string, normalized: NormalizedItemContent, sourceHash: string): Promise<void>;
     deleteExperience(id: string): Promise<void>;
 
     getEducations(userId: string): Promise<Education[]>;

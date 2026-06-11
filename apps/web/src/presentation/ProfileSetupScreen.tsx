@@ -7,7 +7,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
-import { profileRepository } from '../infrastructure/config/dependencies';
+import { profileRepository, profileNormalizer } from '../infrastructure/config/dependencies';
+import { contentHash } from '../application/validation/contentHash';
 import { ResumeService } from '../application/services/ResumeService';
 import { toast } from 'sonner';
 import {
@@ -413,7 +414,24 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     break;
                 case SetupStep.EXPERIENCE_OR_PROJECTS:
                     if (userType === 'experienced') {
-                        for (const exp of experiences) await profileRepository.saveExperience(user.id, exp);
+                        for (const exp of experiences) {
+                            const savedId = await profileRepository.saveExperience(user.id, exp);
+                            // Fire-and-forget "polished profile" pass — never
+                            // blocks setup; results appear on the Profile
+                            // screen and feed every later generation. The raw
+                            // text remains the source of truth, so a failure
+                            // here costs nothing (next save retries).
+                            const text = exp.rawDescription?.trim();
+                            if (text) {
+                                const hash = contentHash(text);
+                                if (exp.normalizedSourceHash !== hash) {
+                                    profileNormalizer
+                                        .normalize(text, { role: exp.role, company: exp.company })
+                                        .then(normalized => profileRepository.saveExperienceNormalized(savedId, normalized, hash))
+                                        .catch(err => console.warn('Profile polish failed (non-blocking):', err));
+                                }
+                            }
+                        }
                     } else {
                         for (const proj of projects) await profileRepository.saveProject(user.id, proj);
                     }

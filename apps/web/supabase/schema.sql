@@ -60,6 +60,11 @@ create table experiences (
   end_date text,
   is_current boolean default false,
   description text,
+  -- "Polished profile" (migration 015): AI-normalized rendering of the raw
+  -- description — { bullets, skills, gaps } — computed once on save and
+  -- reused by every generation. Raw `description` stays the source of truth.
+  normalized jsonb,
+  normalized_source_hash text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -1369,7 +1374,7 @@ do $$ begin
     alter table ai_call_log drop constraint ai_call_log_kind_check;
   end if;
   alter table ai_call_log add constraint ai_call_log_kind_check
-    check (kind in ('optimize','optimize_general','toolkit','toolkit_item','extract_resume'));
+    check (kind in ('optimize','optimize_general','toolkit','toolkit_item','extract_resume','normalize'));
 end $$;
 
 -- Free vs paid generation typing.

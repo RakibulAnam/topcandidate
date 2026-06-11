@@ -15,7 +15,12 @@ import {
   GeneratedToolkit,
   OutreachEmail,
   InterviewQuestion,
+  NormalizedItemContent,
 } from '../../../domain/entities/Resume';
+import {
+  IProfileItemNormalizer,
+  ProfileItemContext,
+} from '../../../domain/usecases/NormalizeProfileItemUseCase';
 import { IResumeOptimizer } from '../../../domain/usecases/OptimizeResumeUseCase';
 import { IToolkitGenerator } from '../../../domain/usecases/GenerateToolkitUseCase';
 import { ICoverLetterGenerator } from '../../../domain/usecases/GenerateCoverLetterUseCase';
@@ -197,6 +202,19 @@ export class ProxyResumeExtractor implements IResumeExtractor {
     const { result } = await postJson<{ result: ExtractedProfileData }>(
       '/api/extract-resume',
       { fileData, mimeType }
+    );
+    return result;
+  }
+}
+
+// ────────────────────────────────────────────────
+// Profile-item normalizer ("polished profile")
+// ────────────────────────────────────────────────
+export class ProxyProfileNormalizer implements IProfileItemNormalizer {
+  async normalize(text: string, context: ProfileItemContext): Promise<NormalizedItemContent> {
+    const { result } = await postJson<{ result: NormalizedItemContent }>(
+      '/api/normalize-item',
+      { text, context }
     );
     return result;
   }

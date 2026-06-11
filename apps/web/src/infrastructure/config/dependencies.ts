@@ -13,6 +13,7 @@ import {
   ProxyLinkedInMessageGenerator,
   ProxyInterviewQuestionsGenerator,
   ProxyResumeExtractor,
+  ProxyProfileNormalizer,
 } from '../ai/proxy/ProxyClients';
 import { CompositeResumeExporter } from '../export/CompositeResumeExporter';
 import { ResumeService } from '../../application/services/ResumeService';
@@ -32,6 +33,11 @@ const resumeExporter = new CompositeResumeExporter();
 const resumeRepository = new SupabaseResumeRepository();
 
 export const resumeExtractor = new ProxyResumeExtractor();
+
+// Profile-item normalizer ("polished profile") — fired in the background on
+// profile save by the profile sections; not part of ResumeService's
+// generation flow.
+export const profileNormalizer = new ProxyProfileNormalizer();
 
 // Supabase Repositories
 export const profileRepository = new SupabaseProfileRepository();
