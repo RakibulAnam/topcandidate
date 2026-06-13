@@ -3,9 +3,11 @@ import { Extracurricular } from '../../../domain/entities/Resume';
 import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Save, Users } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Users } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
-import { needsPolish, polishInBackground, PolishedPreview } from './polish';
+import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+
+const EXTRACURRICULAR_FIELDS = ['organization', 'title', 'description', 'startDate', 'endDate'];
 
 interface Props {
     items: Extracurricular[];
@@ -78,14 +80,18 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
             toast.success('Activity saved');
 
             if (needsPolish(item.description, items.find(x => x.id === savedId))) {
-                polishInBackground({
-                    text: item.description,
-                    context: { kind: 'extracurricular', title: item.title, organization: item.organization },
-                    persist: (n, h) => profileRepository.saveExtracurricularNormalized(savedId, n, h),
-                    onStart: () => markPolishing(savedId, true),
-                    onSettle: () => markPolishing(savedId, false),
-                    onDone: onRefresh,
-                });
+                if (tryConsumeRenorm('extracurricular')) {
+                    polishInBackground({
+                        text: item.description,
+                        context: { kind: 'extracurricular', title: item.title, organization: item.organization },
+                        persist: (n, h) => profileRepository.saveExtracurricularNormalized(savedId, n, h),
+                        onStart: () => markPolishing(savedId, true),
+                        onSettle: () => markPolishing(savedId, false),
+                        onDone: onRefresh,
+                    });
+                } else {
+                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                }
             }
 
             resetForm();
@@ -139,8 +145,14 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                         <textarea className="w-full p-2 border rounded-lg h-24 text-sm" value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="e.g. Organized regional tournaments and mentored junior members." />
                     </div>
                     <div className="flex justify-end gap-2">
-                        <button type="button" onClick={resetForm} className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm">Cancel</button>
-                        <button type="submit" disabled={saving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"><Save size={16} /> Save</button>
+                        {editingId && fieldsEqual(formData as Record<string, unknown>, items.find(x => x.id === editingId) as Record<string, unknown> | undefined, EXTRACURRICULAR_FIELDS) ? (
+                            <button type="button" onClick={resetForm} className="px-4 py-2 bg-charcoal-200 text-charcoal-700 rounded-lg text-sm font-medium hover:bg-charcoal-300 flex items-center gap-2"><X size={16} /> Close</button>
+                        ) : (
+                            <>
+                                <button type="button" onClick={resetForm} className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm">Cancel</button>
+                                <button type="submit" disabled={saving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"><Save size={16} /> Save</button>
+                            </>
+                        )}
                     </div>
                 </form>
             )}
@@ -154,9 +166,9 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                                 <h4 className="font-bold text-charcoal-900">{item.title}</h4>
                                 <div className="text-brand-600 font-medium text-sm">{item.organization}</div>
                             </div>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleEdit(item)} className="p-1.5 text-charcoal-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
-                                <button onClick={() => handleDelete(item.id)} className="p-1.5 text-charcoal-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                            <div className="flex gap-1 shrink-0">
+                                <button type="button" onClick={() => handleEdit(item)} aria-label="Edit activity" className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
+                                <button type="button" onClick={() => handleDelete(item.id)} aria-label="Delete activity" className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                             </div>
                         </div>
                         {item.description && <p className="mt-2 text-sm text-charcoal-600 whitespace-pre-line">{item.description}</p>}

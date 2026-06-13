@@ -5,7 +5,9 @@ import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, X, Briefcase } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
-import { needsPolish, polishInBackground, PolishedPreview } from './polish';
+import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+
+const EXPERIENCE_FIELDS = ['company', 'role', 'startDate', 'endDate', 'isCurrent', 'rawDescription'];
 
 interface Props {
     experiences: WorkExperience[];
@@ -84,16 +86,22 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
 
             // Re-polish only when the description actually changed since the
             // last normalization (hash comparison) — saves the AI call on
-            // date/title-only edits.
+            // date/title-only edits. Gated by a per-section daily limit
+            // (client-side); over the limit the raw text still saves, we just
+            // skip the AI refresh and say so subtly.
             if (needsPolish(exp.rawDescription, experiences.find(x => x.id === savedId))) {
-                polishInBackground({
-                    text: exp.rawDescription,
-                    context: { kind: 'experience', title: exp.role, organization: exp.company },
-                    persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
-                    onStart: () => markPolishing(savedId, true),
-                    onSettle: () => markPolishing(savedId, false),
-                    onDone: onRefresh,
-                });
+                if (tryConsumeRenorm('experience')) {
+                    polishInBackground({
+                        text: exp.rawDescription,
+                        context: { kind: 'experience', title: exp.role, organization: exp.company },
+                        persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
+                        onStart: () => markPolishing(savedId, true),
+                        onSettle: () => markPolishing(savedId, false),
+                        onDone: onRefresh,
+                    });
+                } else {
+                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                }
             }
 
             resetForm();
@@ -194,20 +202,33 @@ Examples from different fields:
                         />
                     </div>
                     <div className="flex justify-end gap-2">
-                        <button
-                            type="button"
-                            onClick={resetForm}
-                            className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={saving}
-                            className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"
-                        >
-                            <Save size={16} /> Save
-                        </button>
+                        {editingId && fieldsEqual(formData as Record<string, unknown>, experiences.find(x => x.id === editingId) as Record<string, unknown> | undefined, EXPERIENCE_FIELDS) ? (
+                            // Edit opened but nothing changed — offer Close, not Save.
+                            <button
+                                type="button"
+                                onClick={resetForm}
+                                className="px-4 py-2 bg-charcoal-200 text-charcoal-700 rounded-lg text-sm font-medium hover:bg-charcoal-300 flex items-center gap-2"
+                            >
+                                <X size={16} /> Close
+                            </button>
+                        ) : (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={resetForm}
+                                    className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={saving}
+                                    className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"
+                                >
+                                    <Save size={16} /> Save
+                                </button>
+                            </>
+                        )}
                     </div>
                 </form>
             )}
@@ -226,16 +247,20 @@ Examples from different fields:
                                     {exp.startDate} - {exp.isCurrent ? 'Present' : exp.endDate}
                                 </div>
                             </div>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex gap-1 shrink-0">
                                 <button
+                                    type="button"
                                     onClick={() => handleEdit(exp)}
-                                    className="p-1.5 text-charcoal-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"
+                                    aria-label="Edit experience"
+                                    className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"
                                 >
                                     <Edit2 size={16} />
                                 </button>
                                 <button
+                                    type="button"
                                     onClick={() => handleDelete(exp.id)}
-                                    className="p-1.5 text-charcoal-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                    aria-label="Delete experience"
+                                    className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
                                 >
                                     <Trash2 size={16} />
                                 </button>

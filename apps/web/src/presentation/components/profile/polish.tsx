@@ -25,6 +25,60 @@ export function needsPolish(
   return !prior?.normalized || prior.normalizedSourceHash !== contentHash(trimmed);
 }
 
+// ── Per-section daily re-polish guard ────────────────────────────────────────
+// Editing a saved description re-runs the AI polish. To keep that from being
+// spammed (cost), each section TYPE allows a small number of re-polishes per
+// day. This is a lightweight CLIENT-side counter (localStorage) — exactly the
+// "small guard" the product wants; the real backstop is the server-side
+// per-user `normalize` daily cap. Initial onboarding polish does NOT go
+// through here, so first-time profile creation is never limited.
+export type PolishSection = 'experience' | 'project' | 'extracurricular';
+export const RENORM_DAILY_LIMIT = 5;
+
+function renormKey(section: PolishSection): string {
+  // UTC calendar day — resets at midnight UTC. Good enough for a soft guard.
+  const day = new Date().toISOString().slice(0, 10);
+  return `tc.renorm.${section}.${day}`;
+}
+
+function renormCount(section: PolishSection): number {
+  try {
+    const n = parseInt(localStorage.getItem(renormKey(section)) ?? '0', 10);
+    return Number.isNaN(n) ? 0 : n;
+  } catch {
+    return 0;
+  }
+}
+
+export function renormRemaining(section: PolishSection): number {
+  return Math.max(0, RENORM_DAILY_LIMIT - renormCount(section));
+}
+
+// Consume one re-polish slot for the section. Returns false (without
+// consuming) when the daily limit is already reached.
+export function tryConsumeRenorm(section: PolishSection): boolean {
+  if (renormRemaining(section) <= 0) return false;
+  try {
+    localStorage.setItem(renormKey(section), String(renormCount(section) + 1));
+  } catch {
+    // localStorage unavailable (private mode) — allow the polish rather than
+    // block a legitimate edit; the server cap still applies.
+  }
+  return true;
+}
+
+// Shallow "did any editable field change" check for the Close-vs-Save button.
+// Returns true when `b` exists and every listed key is unchanged. String-cast
+// so a boolean (isCurrent) and an empty/undefined value compare cleanly.
+export function fieldsEqual(
+  a: Record<string, unknown>,
+  b: Record<string, unknown> | undefined,
+  keys: string[],
+): boolean {
+  if (!b) return false;
+  return keys.every(k => String(a[k] ?? '') === String(b[k] ?? ''));
+}
+
 // Run the polish call and persist the result. Never throws and never blocks
 // the save — the raw text is always the source of truth; a failure simply
 // means the next save retries. Callers track in-flight state via the
