@@ -73,21 +73,44 @@ export class SupabaseProfileRepository implements IProfileRepository {
     }
 
     async saveProfile(userId: string, data: PersonalInfo): Promise<void> {
-        const { error } = await supabase
+        // profiles has COLUMN-LEVEL update grants (migration 005 locked the
+        // table so users can't self-grant toolkit_credits): `authenticated`
+        // may UPDATE only the user-editable columns, NOT `id`. A PostgREST
+        // .upsert() compiles to `INSERT ... ON CONFLICT (id) DO UPDATE SET ...`
+        // which puts `id` in the SET clause → "permission denied for table
+        // profiles" (42501). The row is created on signup by the
+        // handle_new_user trigger, so UPDATE is the correct operation here
+        // (same pattern as saveUserType / markProfileComplete).
+        const fields = {
+            full_name: data.fullName,
+            email: data.email,
+            phone: data.phone,
+            location: data.location,
+            linkedin: data.linkedin,
+            github: data.github,
+            website: data.website,
+            updated_at: new Date().toISOString(),
+        };
+
+        const { data: updated, error } = await supabase
             .from('profiles')
-            .upsert({
-                id: userId,
-                full_name: data.fullName,
-                email: data.email,
-                phone: data.phone,
-                location: data.location,
-                linkedin: data.linkedin,
-                github: data.github,
-                website: data.website,
-                updated_at: new Date().toISOString(),
-            });
+            .update(fields)
+            .eq('id', userId)
+            .select('id');
 
         if (error) throw error;
+        if (updated && updated.length > 0) return;
+
+        // No row matched — the signup trigger didn't run for this user (or it's
+        // a pre-trigger account). Create it. `authenticated` has full INSERT
+        // grant on profiles and the "insert own profile" RLS policy allows
+        // auth.uid() = id, so `id` is fine in an INSERT (only UPDATE on `id`
+        // is revoked).
+        const { error: insertError } = await supabase
+            .from('profiles')
+            .insert({ id: userId, ...fields });
+
+        if (insertError) throw insertError;
     }
 
     async deleteProfile(userId: string): Promise<void> {
