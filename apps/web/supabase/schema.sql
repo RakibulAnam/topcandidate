@@ -767,14 +767,19 @@ begin
   delete from public.certifications where user_id = auth.uid();
   delete from public.affiliations where user_id = auth.uid();
   delete from public.publications where user_id = auth.uid();
+  delete from public.languages where user_id = auth.uid();
+  delete from public.references_list where user_id = auth.uid();
   delete from public.applications where user_id = auth.uid();
   delete from public.generated_resumes where user_id = auth.uid();
+  delete from public.ai_call_log where user_id = auth.uid();
   delete from public.purchase_disputes where user_id = auth.uid();
   -- purchase_topups + purchase_overpayments + purchase_state_changes cascade
   -- via the purchases FK; delete purchases last among the related rows.
   delete from public.purchases where user_id = auth.uid();
 
-  -- Delete the profile
+  -- credit_ledger + profile_notes reference profiles with ON DELETE CASCADE,
+  -- so they clear automatically when the profile row is deleted below.
+  -- (languages, references_list, ai_call_log do NOT cascade — deleted above.)
   delete from public.profiles where id = auth.uid();
 
   -- Finally, delete the user from auth.users
