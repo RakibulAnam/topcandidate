@@ -30,7 +30,16 @@ export function buildNormalizerUserPrompt(text: string, context: ProfileItemCont
   if (context.title) lines.push(`Title/Role: ${context.title}`);
   if (context.organization) lines.push(`Company/Organization: ${context.organization}`);
   if (context.technologies) lines.push(`Tools/Technologies (user-listed): ${context.technologies}`);
-  lines.push('', 'RAW DESCRIPTION (verbatim user input):', text);
+  if (context.guided) {
+    // Guided Mode: the text below is the candidate's answers to specific
+    // profile questions, each line prefixed with its topic (e.g.
+    // "Numbers / scale: ..."). Treat each label as the topic of that answer;
+    // weave them into bullets — do NOT echo the labels in the output.
+    lines.push('', 'The following are the candidate\'s answers to guided profile questions. Each line is "Topic: answer". Use the topics to understand each answer, but never repeat a topic label in your bullets.');
+    lines.push('', 'ANSWERS (verbatim, may be English/Bangla/Banglish):', text);
+  } else {
+    lines.push('', 'RAW DESCRIPTION (verbatim user input):', text);
+  }
   return lines.join('\n');
 }
 

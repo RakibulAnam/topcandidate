@@ -210,6 +210,23 @@ export const GUIDED_QUESTIONS: Record<GuidedSection, GuidedQuestion[]> = {
   ],
 };
 
+// Bilingual UI chrome for the guided field (kept here so every guided string
+// is reviewable in one file).
+export const GUIDED_UI: Record<string, LocalizedText> = {
+  guidedTab: { en: 'Guided', bn: 'গাইডেড' },
+  freeTab: { en: 'Free write', bn: 'নিজে লিখুন' },
+  modeHint: { en: 'Answer a few quick questions — we’ll turn them into a polished resume.', bn: 'কয়েকটি সহজ প্রশ্নের উত্তর দিন — আমরা সুন্দর রিজিউমে বানিয়ে দেব।' },
+  required: { en: 'required', bn: 'আবশ্যক' },
+  optional: { en: 'optional', bn: 'ঐচ্ছিক' },
+  moreOptional: { en: 'A few more (optional)', bn: 'আরও কয়েকটি (ঐচ্ছিক)' },
+  showFewer: { en: 'Show fewer', bn: 'কম দেখান' },
+};
+
+export function uiText(key: keyof typeof GUIDED_UI | string, locale: Locale): string {
+  const t = GUIDED_UI[key as string];
+  return t ? (t[locale] ?? t.en) : (key as string);
+}
+
 // ── Helpers (pure; shared by the form, the sections, and assembly) ───────────
 
 export function questionLabel(q: GuidedQuestion, locale: Locale): string {

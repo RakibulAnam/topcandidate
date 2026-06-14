@@ -47,9 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // context is passed straight through to the normalizer (kind/title/
+  // organization/technologies/guided). Typed loosely here; the prompt builder
+  // owns the real shape (ProfileItemContext).
   const { text, context } = (req.body ?? {}) as {
     text?: string;
-    context?: { role?: string; company?: string };
+    context?: Record<string, unknown>;
   };
   if (!text || !text.trim()) {
     res.status(400).json({ error: 'Missing text' });

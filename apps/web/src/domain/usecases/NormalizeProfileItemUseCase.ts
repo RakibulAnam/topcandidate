@@ -11,10 +11,13 @@ import { NormalizedItemContent } from '../entities/Resume';
 // headline (job role / project name / activity title); `organization` is the
 // company or organization when there is one; `technologies` only for projects.
 export interface ProfileItemContext {
-  kind?: 'experience' | 'project' | 'extracurricular';
+  kind?: 'experience' | 'project' | 'extracurricular' | 'award';
   title?: string;
   organization?: string;
   technologies?: string;
+  // True when `text` is an assembled block of guided-questionnaire answers
+  // ("Topic: answer" per line) rather than a free brain dump.
+  guided?: boolean;
 }
 
 export interface IProfileItemNormalizer {
