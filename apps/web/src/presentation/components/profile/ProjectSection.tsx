@@ -214,7 +214,7 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                                 })}
                             </div>
                         )}
-                        <PolishedPreview normalized={p.normalized} polishing={polishingIds.has(p.id)} />
+                        <PolishedPreview normalized={p.normalized} polishing={polishingIds.has(p.id)} sourceText={p.rawDescription} sourceHash={p.normalizedSourceHash} />
                     </div>
                 ))}
             </div>

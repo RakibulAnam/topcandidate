@@ -203,7 +203,7 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                             </div>
                         </div>
                         {item.description && <p className="mt-2 text-sm text-charcoal-600 whitespace-pre-line">{item.description}</p>}
-                        <PolishedPreview normalized={item.normalized} polishing={polishingIds.has(item.id)} />
+                        <PolishedPreview normalized={item.normalized} polishing={polishingIds.has(item.id)} sourceText={item.description} sourceHash={item.normalizedSourceHash} />
                     </div>
                 ))}
             </div>

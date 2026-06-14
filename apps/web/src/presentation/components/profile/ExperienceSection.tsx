@@ -300,7 +300,7 @@ Examples from different fields:
                             </p>
                         )}
 
-                        <PolishedPreview normalized={exp.normalized} polishing={polishingIds.has(exp.id)} />
+                        <PolishedPreview normalized={exp.normalized} polishing={polishingIds.has(exp.id)} sourceText={exp.rawDescription} sourceHash={exp.normalizedSourceHash} />
                     </div>
                 ))}
             </div>

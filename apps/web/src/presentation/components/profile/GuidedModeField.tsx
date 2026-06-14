@@ -19,6 +19,7 @@ import {
   questionLabel,
   questionExample,
   assembleGuided,
+  guidedHasAnyContent,
   uiText,
 } from './guidedQuestions';
 
@@ -52,12 +53,18 @@ export const GuidedModeField: React.FC<Props> = ({
 
   const switchMode = (next: InputMode) => {
     if (next === mode) return;
-    // Preserve content across the switch. Guided → Free: seed the box with the
-    // assembled answers (only if empty) so nothing is lost. Free → Guided:
-    // keep the free text untouched in state; we don't auto-parse it.
+    // Preserve content across the switch.
+    // Guided → Free: seed the box with the assembled answers (only if empty).
     if (next === 'free' && !freeText.trim()) {
       const assembled = assembleGuided(section, answers);
       if (assembled) onFreeTextChange(assembled);
+    }
+    // Free → Guided: if they'd typed a free paragraph and have no answers yet,
+    // carry that text into the first (required) question so it isn't dropped
+    // when we save the assembled answers instead of the free box.
+    if (next === 'guided' && !guidedHasAnyContent(answers) && freeText.trim()) {
+      const requiredId = GUIDED_QUESTIONS[section].find(q => q.required)?.id;
+      if (requiredId) onAnswersChange({ ...answers, [requiredId]: freeText.trim() });
     }
     onModeChange(next);
   };
