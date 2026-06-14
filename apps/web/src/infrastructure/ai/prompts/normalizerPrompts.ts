@@ -8,7 +8,7 @@
 
 import type { ProfileItemContext } from '../../../domain/usecases/NormalizeProfileItemUseCase.js';
 
-export const NORMALIZER_SYSTEM_INSTRUCTION = `You convert ONE raw profile item description (a work experience, project, or activity) from a resume profile into clean professional resume evidence. The input may be informal English, Bangla, or Banglish (Bengali written in Latin script) — translate and professionalize it.
+export const NORMALIZER_SYSTEM_INSTRUCTION = `You convert ONE raw profile item description (a work experience, project, activity, or award/honor) from a resume profile into clean professional resume evidence. The input may be informal English, Bangla, or Banglish (Bengali written in Latin script) — translate and professionalize it.
 
 RULES
 1. OUTPUT ENGLISH ONLY.
@@ -23,6 +23,7 @@ const KIND_LABELS: Record<string, string> = {
   experience: 'Work experience',
   project: 'Project',
   extracurricular: 'Activity / extracurricular',
+  award: 'Award / honor',
 };
 
 export function buildNormalizerUserPrompt(text: string, context: ProfileItemContext): string {
