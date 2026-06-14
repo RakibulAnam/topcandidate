@@ -11,7 +11,7 @@
 
 import { jsPDF } from 'jspdf';
 import FileSaver from 'file-saver';
-import { ResumeData } from '../../domain/entities/Resume';
+import { ResumeData, awardDetailText } from '../../domain/entities/Resume';
 import {
   TemplateDefinition,
   resolveTemplate,
@@ -170,7 +170,8 @@ export class PdfResumeExporter {
       for (const award of data.awards) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 3, t.margin);
         this.renderItemTitleRow(doc, award.title, award.date, t, cursor, contentWidth);
-        const issuerLine = `${award.issuer}${award.description ? ` \u2013 ${award.description}` : ''}`;
+        const awardDetail = awardDetailText(award);
+        const issuerLine = `${award.issuer}${awardDetail ? ` \u2013 ${awardDetail}` : ''}`;
         this.renderBodyLine(doc, issuerLine, t, cursor, contentWidth);
         cursor.y += t.itemGap;
       }

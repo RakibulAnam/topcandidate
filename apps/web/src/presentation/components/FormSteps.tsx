@@ -1320,7 +1320,9 @@ export const SkillsStep: React.FC<{
    * the suggestion pool — these are "yours", not generic dictionary picks.
    */
   profilePool?: string[];
-}> = ({ data, update, userType, jdText, profilePool = [] }) => {
+  /** Target company — excluded from JD skill matches so it isn't suggested as a skill. */
+  companyName?: string;
+}> = ({ data, update, userType, jdText, profilePool = [], companyName }) => {
   const t = useT();
   const [currentSkill, setCurrentSkill] = useState('');
 
@@ -1371,10 +1373,12 @@ export const SkillsStep: React.FC<{
     () =>
       extractSkillsFromJD(jdText ?? '', {
         knownSkills: canonicalPool,
-        exclude: data,
+        // Exclude already-added skills AND the target company name, so the
+        // employer (e.g. "Renata Limited") isn't surfaced as a skill chip.
+        exclude: companyName ? [...data, companyName] : data,
         maxResults: 24,
       }),
-    [jdText, canonicalPool, data],
+    [jdText, canonicalPool, data, companyName],
   );
 
   // Lower-priority "common picks" — starter chips for the user type, minus

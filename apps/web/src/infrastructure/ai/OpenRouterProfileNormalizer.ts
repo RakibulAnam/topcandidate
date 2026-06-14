@@ -68,8 +68,10 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
       if (!Array.isArray(parsed.bullets) || parsed.bullets.length === 0) {
         throw new Error('Normalizer returned no bullets');
       }
-      // Defensive trims — tiny payload, cheap to sanitize.
-      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, 5);
+      // Defensive trims — tiny payload, cheap to sanitize. Awards belong on a
+      // resume as one tight line, not a 3-bullet block, so cap them lower.
+      const maxBullets = context.kind === 'award' ? 2 : 5;
+      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, maxBullets);
       parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 10);
       // Subtle coaching only: a single hint at most — the polish itself is
       // the product; we never pile instructions on the user.

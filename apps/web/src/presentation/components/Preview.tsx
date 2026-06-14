@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { ResumeData, ToolkitItem } from '../../domain/entities/Resume';
+import { ResumeData, ToolkitItem, awardDetailText } from '../../domain/entities/Resume';
 import {
   templateRegistry,
   resolveTemplate,
@@ -147,12 +147,16 @@ export const Preview: React.FC<PreviewProps> = ({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [cooldownText, setCooldownText] = useState<string | null>(null);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
-  // Edit mode is only available on the first visit (readOnly=false). Starts on.
+  // Editing starts ON for a fresh generation (readOnly=false) and OFF for a
+  // reopened/saved resume (readOnly=true) — but it's no longer permanent: the
+  // user can toggle editing back on at any time, and edits autosave to the
+  // saved resume (BuilderScreen persists them). So a typo found later is fixable.
   const [editModeActive, setEditModeActive] = useState(!readOnly);
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  // Actual read-only state fed to EditableElement instances.
-  const isReadOnly = readOnly || !editModeActive;
+  // Actual read-only state fed to EditableElement instances — driven purely by
+  // the edit toggle now, not the (initial) readOnly prop.
+  const isReadOnly = !editModeActive;
 
   useEffect(() => {
     if (!cooldownEndsAt || canRegenerate) {
@@ -620,7 +624,7 @@ export const Preview: React.FC<PreviewProps> = ({
               </div>
               <div style={bodyTextStyle}>
                 {award.issuer}
-                {award.description ? ` – ${award.description}` : ''}
+                {awardDetailText(award) ? ` – ${awardDetailText(award)}` : ''}
               </div>
             </div>
           ))}
@@ -829,8 +833,9 @@ export const Preview: React.FC<PreviewProps> = ({
         </div>
 
         <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-end flex-wrap overflow-x-auto scrollbar-hide">
-          {/* Edit mode toggle — only shown when the session allows editing */}
-          {!readOnly && (
+          {/* Edit mode toggle — always available; edits autosave so a resume
+              can be re-edited later, not just on first generation. */}
+          {!isGeneralResume && (
             <button
               type="button"
               onClick={() => setEditModeActive(v => !v)}
@@ -911,8 +916,8 @@ export const Preview: React.FC<PreviewProps> = ({
         </div>
       </header>
 
-      {/* One-time edit banner — shown only on fresh post-generation visit */}
-      {!readOnly && editModeActive && !bannerDismissed && (
+      {/* Edit banner — shown whenever editing is active (fresh or reopened). */}
+      {!isGeneralResume && editModeActive && !bannerDismissed && (
         <div className="shrink-0 flex items-start gap-4 bg-accent-50 border-b border-accent-300 px-4 md:px-6 py-3.5">
           <div className="w-8 h-8 rounded-full bg-accent-400 text-brand-900 flex items-center justify-center shrink-0 mt-0.5">
             <Pencil size={15} />

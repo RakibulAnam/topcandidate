@@ -110,6 +110,17 @@ export interface Award extends GuidedFields {
   normalizedSourceHash?: string; // hash of the description `normalized` was computed from
 }
 
+// The detail text to render for an award on the resume. Awards do NOT go
+// through the optimizer (it only refines experience/projects/extracurriculars),
+// so their raw `description` would otherwise show verbatim — which for a Guided
+// Mode award is the assembled "Topic: answer" block (possibly Banglish). Prefer
+// the AI-polished bullets; fall back to the raw description only when there's
+// no polish (free-text awards typed directly, or pre-polish data).
+export function awardDetailText(award: Pick<Award, 'description' | 'normalized'>): string {
+  if (award.normalized?.bullets?.length) return award.normalized.bullets.join(' ');
+  return award.description ?? '';
+}
+
 export interface Certification {
   id: string;
   name: string;

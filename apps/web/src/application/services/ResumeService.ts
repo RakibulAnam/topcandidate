@@ -432,7 +432,7 @@ export class ResumeService {
     const resumeData: ResumeData = {
       userType: uType || undefined,
       targetJob: {
-        title: 'General Purpose Resume',
+        title: 'General Purpose', // header appends " Resume - <year>"; avoid "Resume Resume"
         company: '',
         description: 'Create a strong, general-purpose professional resume that highlights the candidate\'s key strengths, experiences, and skills. Focus on versatility and broad appeal to multiple industries and roles. Emphasize transferable skills, measurable achievements, and professional growth.',
       },
@@ -525,7 +525,7 @@ export class ResumeService {
     const resumeData: ResumeData = {
       userType: uType || undefined,
       targetJob: {
-        title: 'General Purpose Resume',
+        title: 'General Purpose', // header appends " Resume - <year>"; avoid "Resume Resume"
         company: '',
         description: 'Create a strong, general-purpose professional resume that highlights the candidate\'s key strengths, experiences, and skills. Focus on versatility and broad appeal to multiple industries and roles. Emphasize transferable skills, measurable achievements, and professional growth.',
       },
