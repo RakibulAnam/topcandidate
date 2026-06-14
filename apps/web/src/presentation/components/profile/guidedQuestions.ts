@@ -220,6 +220,11 @@ export const GUIDED_UI: Record<string, LocalizedText> = {
   optional: { en: 'optional', bn: 'ঐচ্ছিক' },
   moreOptional: { en: 'A few more (optional)', bn: 'আরও কয়েকটি (ঐচ্ছিক)' },
   showFewer: { en: 'Show fewer', bn: 'কম দেখান' },
+  inputModeAria: { en: 'How to add this — guided questions or free writing', bn: 'কীভাবে যোগ করবেন — গাইডেড প্রশ্ন নাকি নিজে লেখা' },
+  // Section-save feedback (kept here so guided strings stay bilingual + in one place).
+  answerFirst: { en: 'Please answer the first question.', bn: 'প্রথম প্রশ্নটির উত্তর দিন।' },
+  addShortDesc: { en: 'Please add a short description.', bn: 'একটি সংক্ষিপ্ত বিবরণ যোগ করুন।' },
+  capReached: { en: 'Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.', bn: 'সংরক্ষিত হয়েছে। এই অংশের AI পলিশ আজ ৫ বার রিফ্রেশ হয়েছে — আগামীকাল আবার রিফ্রেশ হবে।' },
 };
 
 export function uiText(key: keyof typeof GUIDED_UI | string, locale: Locale): string {

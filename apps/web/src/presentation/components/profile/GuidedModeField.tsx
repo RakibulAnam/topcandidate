@@ -10,7 +10,7 @@
 // by showing, never a format to follow. One required question; the rest are
 // optional and collapsed behind a gentle "a few more" disclosure.
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { useLocale } from '../../i18n/LocaleContext';
 import { InputMode, GuidedAnswers } from '../../../domain/entities/Resume';
 import {
@@ -87,7 +87,7 @@ export const GuidedModeField: React.FC<Props> = ({
         </span>
         <div
           role="group"
-          aria-label="Input mode"
+          aria-label={uiText('inputModeAria', locale)}
           className="inline-flex rounded-full border border-charcoal-300 bg-charcoal-50 p-0.5 shrink-0"
         >
           {tabBtn('guided', uiText('guidedTab', locale))}
@@ -134,15 +134,13 @@ export const GuidedModeField: React.FC<Props> = ({
                   onChange={v => setAnswer(q.id, v)}
                 />
               ))}
-              {secondary.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowMore(false)}
-                  className="text-sm font-medium text-charcoal-500 hover:text-charcoal-700"
-                >
-                  {uiText('showFewer', locale)}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowMore(false)}
+                className="text-sm font-medium text-charcoal-500 hover:text-charcoal-700"
+              >
+                {uiText('showFewer', locale)}
+              </button>
             </>
           )}
         </div>
@@ -166,21 +164,30 @@ const GuidedQuestionRow: React.FC<{
   optionalText: string;
   value: string;
   onChange: (v: string) => void;
-}> = ({ label, example, required, requiredText, optionalText, value, onChange }) => (
-  <div>
-    <div className="flex items-baseline gap-2 mb-0.5">
-      <label className="text-sm font-semibold text-charcoal-800">{label}</label>
-      <span className={`text-[10px] uppercase tracking-wide ${required ? 'text-accent-600 font-semibold' : 'text-charcoal-400'}`}>
-        {required ? requiredText : optionalText}
-      </span>
+}> = ({ label, example, required, requiredText, optionalText, value, onChange }) => {
+  const fieldId = useId();
+  // Only flag a required field red AFTER the user has interacted (touched) —
+  // a red box on a pristine form reads as scolding, not "a friend asking".
+  const [touched, setTouched] = useState(false);
+  const showError = required && touched && !value.trim();
+  return (
+    <div>
+      <div className="flex items-baseline gap-2 mb-0.5">
+        <label htmlFor={fieldId} className="text-sm font-semibold text-charcoal-800">{label}</label>
+        <span className={`text-[10px] uppercase tracking-wide ${required ? 'text-accent-600 font-semibold' : 'text-charcoal-400'}`}>
+          {required ? requiredText : optionalText}
+        </span>
+      </div>
+      {/* Example ANSWER, always visible — teaches by showing, not a format. */}
+      <p className="text-xs text-charcoal-400 mb-1.5 leading-relaxed">{example}</p>
+      <textarea
+        id={fieldId}
+        className={`w-full p-2 border rounded-lg text-sm ${showError ? 'border-red-400' : 'border-charcoal-300'}`}
+        rows={2}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onBlur={() => setTouched(true)}
+      />
     </div>
-    {/* Example ANSWER, always visible — teaches by showing, not a format. */}
-    <p className="text-xs text-charcoal-400 mb-1.5 leading-relaxed">{example}</p>
-    <textarea
-      className={`w-full p-2 border rounded-lg text-sm ${required && !value.trim() ? 'border-red-400' : 'border-charcoal-300'}`}
-      rows={2}
-      value={value}
-      onChange={e => onChange(e.target.value)}
-    />
-  </div>
-);
+  );
+};
