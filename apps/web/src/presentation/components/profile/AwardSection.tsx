@@ -3,8 +3,13 @@ import { Award } from '../../../domain/entities/Resume';
 import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Save, Award as AwardIcon } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, Award as AwardIcon } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
+import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+import { GuidedModeField } from './GuidedModeField';
+import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION } from './guidedQuestions';
+
+const AWARD_FIELDS = ['title', 'issuer', 'date', 'description', 'inputMode', 'guided'];
 
 interface Props {
     items: Award[];
@@ -17,9 +22,16 @@ export const AwardSection = ({ items, onRefresh }: Props) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Award>>({});
     const [saving, setSaving] = useState(false);
+    const [polishingIds, setPolishingIds] = useState<Set<string>>(new Set());
+    const markPolishing = (id: string, on: boolean) =>
+        setPolishingIds(prev => {
+            const next = new Set(prev);
+            if (on) next.add(id); else next.delete(id);
+            return next;
+        });
 
     const resetForm = () => {
-        setFormData({ title: '', issuer: '', date: '', description: '' });
+        setFormData({ title: '', issuer: '', date: '', description: '', inputMode: 'guided', guided: {} });
         setEditingId(null);
         setIsEditing(false);
     };
@@ -44,16 +56,50 @@ export const AwardSection = ({ items, onRefresh }: Props) => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+
+        const mode = formData.inputMode ?? 'guided';
+        const answers = formData.guided ?? {};
+        const description = mode === 'guided'
+            ? assembleGuided('award', answers)
+            : (formData.description || '');
+
+        if (mode === 'guided' && !guidedRequiredFilled('award', answers)) {
+            toast.error('Please answer the first question.');
+            return;
+        }
+        // Awards: the description is optional in free mode (title + issuer carry
+        // it), so no free-mode block — assembling an empty block is fine.
+
         setSaving(true);
         try {
-            await profileRepository.saveAward(user.id, {
+            const award: Award = {
                 id: editingId || '',
                 title: formData.title || '',
                 issuer: formData.issuer || '',
                 date: formData.date || '',
-                description: formData.description || '',
-            });
+                description,
+                inputMode: mode,
+                guided: answers,
+                guidedVersion: mode === 'guided' ? GUIDED_VERSION : formData.guidedVersion,
+            };
+            const savedId = await profileRepository.saveAward(user.id, award);
             toast.success('Award saved');
+
+            if (description.trim() && needsPolish(description, items.find(x => x.id === savedId))) {
+                if (tryConsumeRenorm('award')) {
+                    polishInBackground({
+                        text: description,
+                        context: { kind: 'award', title: award.title, organization: award.issuer, guided: mode === 'guided' },
+                        persist: (n, h) => profileRepository.saveAwardNormalized(savedId, n, h),
+                        onStart: () => markPolishing(savedId, true),
+                        onSettle: () => markPolishing(savedId, false),
+                        onDone: onRefresh,
+                    });
+                } else {
+                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                }
+            }
+
             resetForm();
             onRefresh();
         } catch (error) { toast.error('Failed to save award'); } finally { setSaving(false); }
@@ -79,7 +125,7 @@ export const AwardSection = ({ items, onRefresh }: Props) => {
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Issuer</label>
-                            <input required className={`w-full p-2 border rounded-lg ${!formData.issuer ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`} value={formData.issuer || ''} onChange={e => setFormData({ ...formData, issuer: e.target.value })} placeholder="e.g. Google" />
+                            <input required className={`w-full p-2 border rounded-lg ${!formData.issuer ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`} value={formData.issuer || ''} onChange={e => setFormData({ ...formData, issuer: e.target.value })} placeholder="e.g. Acme Corp, Dhaka University" />
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Date</label>
@@ -87,12 +133,26 @@ export const AwardSection = ({ items, onRefresh }: Props) => {
                         </div>
                     </div>
                     <div className="mb-4">
-                        <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Description</label>
-                        <textarea className="w-full p-2 border rounded-lg h-24 text-sm" value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="e.g. Recognized for outstanding performance in Q2..." />
+                        <GuidedModeField
+                            section="award"
+                            mode={formData.inputMode ?? 'guided'}
+                            answers={formData.guided ?? {}}
+                            freeText={formData.description ?? ''}
+                            freePlaceholder="e.g. Recognized for outstanding sales performance, chosen out of 200 staff."
+                            onModeChange={m => setFormData({ ...formData, inputMode: m })}
+                            onAnswersChange={a => setFormData({ ...formData, guided: a })}
+                            onFreeTextChange={t => setFormData({ ...formData, description: t })}
+                        />
                     </div>
                     <div className="flex justify-end gap-2">
-                        <button type="button" onClick={resetForm} className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm">Cancel</button>
-                        <button type="submit" disabled={saving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"><Save size={16} /> Save</button>
+                        {editingId && fieldsEqual(formData as Record<string, unknown>, items.find(x => x.id === editingId) as Record<string, unknown> | undefined, AWARD_FIELDS) ? (
+                            <button type="button" onClick={resetForm} className="px-4 py-2 bg-charcoal-200 text-charcoal-700 rounded-lg text-sm font-medium hover:bg-charcoal-300 flex items-center gap-2"><X size={16} /> Close</button>
+                        ) : (
+                            <>
+                                <button type="button" onClick={resetForm} className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm">Cancel</button>
+                                <button type="submit" disabled={saving} className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"><Save size={16} /> Save</button>
+                            </>
+                        )}
                     </div>
                 </form>
             )}
@@ -107,12 +167,13 @@ export const AwardSection = ({ items, onRefresh }: Props) => {
                                 <div className="text-brand-600 font-medium text-sm">{item.issuer}</div>
                                 <div className="text-charcoal-400 text-xs mt-1">{item.date}</div>
                             </div>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleEdit(item)} className="p-1.5 text-charcoal-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
-                                <button onClick={() => handleDelete(item.id)} className="p-1.5 text-charcoal-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                            <div className="flex gap-1 shrink-0">
+                                <button type="button" onClick={() => handleEdit(item)} aria-label="Edit award" className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
+                                <button type="button" onClick={() => handleDelete(item.id)} aria-label="Delete award" className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                             </div>
                         </div>
                         {item.description && <p className="mt-2 text-sm text-charcoal-600 whitespace-pre-line">{item.description}</p>}
+                        <PolishedPreview normalized={item.normalized} polishing={polishingIds.has(item.id)} />
                     </div>
                 ))}
             </div>

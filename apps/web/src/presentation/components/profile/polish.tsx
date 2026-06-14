@@ -76,7 +76,16 @@ export function fieldsEqual(
   keys: string[],
 ): boolean {
   if (!b) return false;
-  return keys.every(k => String(a[k] ?? '') === String(b[k] ?? ''));
+  return keys.every(k => {
+    const av = a[k];
+    const bv = b[k];
+    // Objects (e.g. the `guided` answers map) need a deep compare — String()
+    // would collapse every object to "[object Object]" and mask real edits.
+    if ((av && typeof av === 'object') || (bv && typeof bv === 'object')) {
+      return JSON.stringify(av ?? null) === JSON.stringify(bv ?? null);
+    }
+    return String(av ?? '') === String(bv ?? '');
+  });
 }
 
 // Run the polish call and persist the result. Never throws and never blocks

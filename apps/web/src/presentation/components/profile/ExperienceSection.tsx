@@ -6,8 +6,10 @@ import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, X, Briefcase } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
 import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+import { GuidedModeField } from './GuidedModeField';
+import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION } from './guidedQuestions';
 
-const EXPERIENCE_FIELDS = ['company', 'role', 'startDate', 'endDate', 'isCurrent', 'rawDescription'];
+const EXPERIENCE_FIELDS = ['company', 'role', 'startDate', 'endDate', 'isCurrent', 'rawDescription', 'inputMode', 'guided'];
 
 interface Props {
     experiences: WorkExperience[];
@@ -37,6 +39,8 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
             endDate: '',
             isCurrent: false,
             rawDescription: '',
+            inputMode: 'guided',
+            guided: {},
         });
         setEditingId(null);
         setIsEditing(false);
@@ -69,17 +73,38 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+        const mode = formData.inputMode ?? 'guided';
+        const answers = formData.guided ?? {};
+        // In guided mode the description the AI consumes is assembled from the
+        // answers; in free mode it's the brain-dump box.
+        const description = mode === 'guided'
+            ? assembleGuided('experience', answers)
+            : (formData.rawDescription || '');
+
+        // Required gate: guided needs its anchor question; free needs text.
+        if (mode === 'guided' && !guidedRequiredFilled('experience', answers)) {
+            toast.error('Please answer the first question.');
+            return;
+        }
+        if (mode === 'free' && !description.trim()) {
+            toast.error('Please add a short description.');
+            return;
+        }
+
         setSaving(true);
         try {
-            const exp = {
+            const exp: WorkExperience = {
                 id: editingId || '', // Empty ID for new, handled by Repo
                 company: formData.company || '',
                 role: formData.role || '',
                 startDate: formData.startDate || '',
                 endDate: formData.endDate || '',
                 isCurrent: formData.isCurrent || false,
-                rawDescription: formData.rawDescription || '',
+                rawDescription: description,
                 refinedBullets: [],
+                inputMode: mode,
+                guided: answers,
+                guidedVersion: mode === 'guided' ? GUIDED_VERSION : formData.guidedVersion,
             };
             const savedId = await profileRepository.saveExperience(user.id, exp);
             toast.success('Experience saved');
@@ -87,13 +112,13 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
             // Re-polish only when the description actually changed since the
             // last normalization (hash comparison) — saves the AI call on
             // date/title-only edits. Gated by a per-section daily limit
-            // (client-side); over the limit the raw text still saves, we just
+            // (client-side); over the limit the text still saves, we just
             // skip the AI refresh and say so subtly.
             if (needsPolish(exp.rawDescription, experiences.find(x => x.id === savedId))) {
                 if (tryConsumeRenorm('experience')) {
                     polishInBackground({
                         text: exp.rawDescription,
-                        context: { kind: 'experience', title: exp.role, organization: exp.company },
+                        context: { kind: 'experience', title: exp.role, organization: exp.company, guided: mode === 'guided' },
                         persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
                         onStart: () => markPolishing(savedId, true),
                         onSettle: () => markPolishing(savedId, false),
@@ -187,18 +212,21 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
                         </div>
                     </div>
                     <div className="mb-4">
-                        <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Description (Brain dump — AI will refine)</label>
-                        <textarea
-                            className={`w-full p-2 border rounded-lg h-40 text-sm ${!formData.rawDescription ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`}
-                            value={formData.rawDescription || ''}
-                            onChange={e => setFormData({ ...formData, rawDescription: e.target.value })}
-                            placeholder={`List your main responsibilities, achievements, and outcomes — include real numbers where you have them.
+                        <GuidedModeField
+                            section="experience"
+                            mode={formData.inputMode ?? 'guided'}
+                            answers={formData.guided ?? {}}
+                            freeText={formData.rawDescription ?? ''}
+                            freePlaceholder={`List your main responsibilities, achievements, and outcomes — include real numbers where you have them.
 
 Examples from different fields:
 - Led a team of 5 and shipped features that cut site load time 50%.
 - Managed a caseload of 20+ patients across 3 units; reduced readmissions 15%.
 - Designed lesson plans for 120 students; raised state assessment scores 12%.
-- Closed $1.2M in new business; grew territory pipeline 35% YoY.`}
+- Closed ৳12 lakh in new business; grew territory pipeline 35% YoY.`}
+                            onModeChange={m => setFormData({ ...formData, inputMode: m })}
+                            onAnswersChange={a => setFormData({ ...formData, guided: a })}
+                            onFreeTextChange={t => setFormData({ ...formData, rawDescription: t })}
                         />
                     </div>
                     <div className="flex justify-end gap-2">

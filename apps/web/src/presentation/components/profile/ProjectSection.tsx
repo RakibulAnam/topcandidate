@@ -5,8 +5,10 @@ import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, X, FolderGit2 } from 'lucide-react';
 import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+import { GuidedModeField } from './GuidedModeField';
+import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION } from './guidedQuestions';
 
-const PROJECT_FIELDS = ['name', 'rawDescription', 'technologies', 'link'];
+const PROJECT_FIELDS = ['name', 'rawDescription', 'technologies', 'link', 'inputMode', 'guided'];
 
 interface Props {
     projects: Project[];
@@ -28,7 +30,7 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
         });
 
     const resetForm = () => {
-        setFormData({ name: '', rawDescription: '', technologies: '', link: '' });
+        setFormData({ name: '', rawDescription: '', technologies: '', link: '', inputMode: 'guided', guided: {} });
         setEditingId(null);
         setIsEditing(false);
     };
@@ -45,15 +47,34 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+
+        const mode = formData.inputMode ?? 'guided';
+        const answers = formData.guided ?? {};
+        const description = mode === 'guided'
+            ? assembleGuided('project', answers)
+            : (formData.rawDescription || '');
+
+        if (mode === 'guided' && !guidedRequiredFilled('project', answers)) {
+            toast.error('Please answer the first question.');
+            return;
+        }
+        if (mode === 'free' && !description.trim()) {
+            toast.error('Please add a short description.');
+            return;
+        }
+
         setSaving(true);
         try {
-            const proj = {
+            const proj: Project = {
                 id: editingId || '',
                 name: formData.name || '',
-                rawDescription: formData.rawDescription || '',
+                rawDescription: description,
                 refinedBullets: [],
                 technologies: formData.technologies || '',
                 link: formData.link,
+                inputMode: mode,
+                guided: answers,
+                guidedVersion: mode === 'guided' ? GUIDED_VERSION : formData.guidedVersion,
             };
             const savedId = await profileRepository.saveProject(user.id, proj);
             toast.success('Saved');
@@ -62,7 +83,7 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                 if (tryConsumeRenorm('project')) {
                     polishInBackground({
                         text: proj.rawDescription,
-                        context: { kind: 'project', title: proj.name, technologies: proj.technologies },
+                        context: { kind: 'project', title: proj.name, technologies: proj.technologies, guided: mode === 'guided' },
                         persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
                         onStart: () => markPolishing(savedId, true),
                         onSettle: () => markPolishing(savedId, false),
@@ -124,15 +145,18 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Description (Brain dump — AI will refine)</label>
-                            <textarea
-                                className={`w-full p-2 border rounded-lg h-32 text-sm ${!formData.rawDescription ? 'border-red-500 ring-1 ring-red-500' : 'border-charcoal-300'}`}
-                                value={formData.rawDescription || ''}
-                                onChange={e => setFormData({ ...formData, rawDescription: e.target.value })}
-                                placeholder={`Describe what you created, delivered, or contributed to — your role, scope, and outcome. Examples:
+                            <GuidedModeField
+                                section="project"
+                                mode={formData.inputMode ?? 'guided'}
+                                answers={formData.guided ?? {}}
+                                freeText={formData.rawDescription ?? ''}
+                                freePlaceholder={`Describe what you created, delivered, or contributed to — your role, scope, and outcome. Examples:
 - Led a 6-month rebrand; grew social engagement 40%.
-- Designed K-5 literacy curriculum adopted district-wide.
-- Built customer dashboard with React and Node.js; reduced support tickets 30%.`}
+- Designed a literacy programme adopted across the district.
+- Built a customer dashboard; reduced support calls 30%.`}
+                                onModeChange={m => setFormData({ ...formData, inputMode: m })}
+                                onAnswersChange={a => setFormData({ ...formData, guided: a })}
+                                onFreeTextChange={t => setFormData({ ...formData, rawDescription: t })}
                             />
                         </div>
                         <div className="flex justify-end gap-2">
