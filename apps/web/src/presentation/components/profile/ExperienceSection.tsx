@@ -7,7 +7,8 @@ import { Plus, Trash2, Edit2, Save, X, Briefcase } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
 import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
 import { GuidedModeField } from './GuidedModeField';
-import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION } from './guidedQuestions';
+import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION, uiText } from './guidedQuestions';
+import { useLocale } from '../../i18n/LocaleContext';
 
 const EXPERIENCE_FIELDS = ['company', 'role', 'startDate', 'endDate', 'isCurrent', 'rawDescription', 'inputMode', 'guided'];
 
@@ -18,6 +19,7 @@ interface Props {
 
 export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
     const { user } = useAuth();
+    const { locale } = useLocale();
     const [isEditing, setIsEditing] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<WorkExperience>>({});
@@ -83,11 +85,11 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
 
         // Required gate: guided needs its anchor question; free needs text.
         if (mode === 'guided' && !guidedRequiredFilled('experience', answers)) {
-            toast.error('Please answer the first question.');
+            toast.error(uiText('answerFirst', locale));
             return;
         }
         if (mode === 'free' && !description.trim()) {
-            toast.error('Please add a short description.');
+            toast.error(uiText('addShortDesc', locale));
             return;
         }
 
@@ -125,7 +127,7 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
                         onDone: onRefresh,
                     });
                 } else {
-                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                    toast(uiText('capReached', locale));
                 }
             }
 

@@ -1579,6 +1579,9 @@ export const ExtracurricularStep: React.FC<{
         endDate: '',
         description: '',
         refinedBullets: [],
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
 
@@ -1678,14 +1681,23 @@ export const ExtracurricularStep: React.FC<{
               </InputGroup>
             </div>
             <InputGroup label={t('formSteps.extracurricularsDescLabel')} optional>
-              <PolishHint />
-              <TextArea
-                rows={3}
-                value={item.description}
-                onChange={e =>
-                  updateItem(item.id, 'description', e.target.value)
+              <GuidedModeField
+                section="extracurricular"
+                mode={item.inputMode ?? 'guided'}
+                answers={item.guided ?? {}}
+                freeText={item.description ?? ''}
+                freePlaceholder={t('formSteps.extracurricularsDescPlaceholder')}
+                onModeChange={m => updateItem(item.id, 'inputMode', m)}
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === item.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, description: assembleGuided('extracurricular', a) }
+                        : x,
+                    ),
+                  )
                 }
-                placeholder={t('formSteps.extracurricularsDescPlaceholder')}
+                onFreeTextChange={v => updateItem(item.id, 'description', v)}
               />
             </InputGroup>
           </CollapsibleItem>
@@ -1712,6 +1724,9 @@ export const AwardsStep: React.FC<{
         issuer: '',
         date: '',
         description: '',
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
   const removeItem = (id: string) => update(data.filter(x => x.id !== id));
@@ -1786,12 +1801,23 @@ export const AwardsStep: React.FC<{
               optional
               helper={t('formSteps.awardsDescHelper')}
             >
-              <TextArea
-                rows={2}
-                value={item.description}
-                onChange={e =>
-                  updateItem(item.id, 'description', e.target.value)
+              <GuidedModeField
+                section="award"
+                mode={item.inputMode ?? 'guided'}
+                answers={item.guided ?? {}}
+                freeText={item.description ?? ''}
+                freePlaceholder=""
+                onModeChange={m => updateItem(item.id, 'inputMode', m)}
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === item.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, description: assembleGuided('award', a) }
+                        : x,
+                    ),
+                  )
                 }
+                onFreeTextChange={v => updateItem(item.id, 'description', v)}
               />
             </InputGroup>
           </CollapsibleItem>

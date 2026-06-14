@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, X, FolderGit2 } from 'lucide-react';
 import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
 import { GuidedModeField } from './GuidedModeField';
-import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION } from './guidedQuestions';
+import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION, uiText } from './guidedQuestions';
+import { useLocale } from '../../i18n/LocaleContext';
 
 const PROJECT_FIELDS = ['name', 'rawDescription', 'technologies', 'link', 'inputMode', 'guided'];
 
@@ -17,6 +18,7 @@ interface Props {
 
 export const ProjectSection = ({ projects, onRefresh }: Props) => {
     const { user } = useAuth();
+    const { locale } = useLocale();
     const [isEditing, setIsEditing] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Project>>({});
@@ -55,11 +57,11 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
             : (formData.rawDescription || '');
 
         if (mode === 'guided' && !guidedRequiredFilled('project', answers)) {
-            toast.error('Please answer the first question.');
+            toast.error(uiText('answerFirst', locale));
             return;
         }
         if (mode === 'free' && !description.trim()) {
-            toast.error('Please add a short description.');
+            toast.error(uiText('addShortDesc', locale));
             return;
         }
 
@@ -90,7 +92,7 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                         onDone: onRefresh,
                     });
                 } else {
-                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                    toast(uiText('capReached', locale));
                 }
             }
 
