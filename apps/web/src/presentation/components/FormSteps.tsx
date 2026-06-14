@@ -57,6 +57,8 @@ import { EmailInput } from './ui/EmailInput';
 import { PhoneInput } from './ui/PhoneInput';
 import { LanguagePicker } from './ui/LanguagePicker';
 import { useT } from '../i18n/LocaleContext';
+import { GuidedModeField } from './profile/GuidedModeField';
+import { assembleGuided, GUIDED_VERSION } from './profile/guidedQuestions';
 
 // -----------------------------------------------------------------------------
 // Shared primitives
@@ -820,6 +822,9 @@ export const ProjectsStep: React.FC<{
         rawDescription: '',
         refinedBullets: [],
         technologies: '',
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
   };
@@ -919,15 +924,23 @@ export const ProjectsStep: React.FC<{
               required
               error={errors?.[`projects.${index}.rawDescription`]}
             >
-              <PolishHint />
-              <TextArea
-                error={errors?.[`projects.${index}.rawDescription`]}
-                rows={5}
-                value={project.rawDescription}
-                onChange={e =>
-                  updateProject(project.id, 'rawDescription', e.target.value)
+              <GuidedModeField
+                section="project"
+                mode={project.inputMode ?? 'guided'}
+                answers={project.guided ?? {}}
+                freeText={project.rawDescription ?? ''}
+                freePlaceholder={t('formSteps.projectsDescPlaceholder')}
+                onModeChange={m => updateProject(project.id, 'inputMode', m)}
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === project.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, rawDescription: assembleGuided('project', a) }
+                        : x,
+                    ),
+                  )
                 }
-                placeholder={t('formSteps.projectsDescPlaceholder')}
+                onFreeTextChange={v => updateProject(project.id, 'rawDescription', v)}
               />
             </InputGroup>
           </CollapsibleItem>
@@ -957,6 +970,9 @@ export const ExperienceStep: React.FC<{
         isCurrent: false,
         rawDescription: '',
         refinedBullets: [],
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
   };
@@ -1103,15 +1119,26 @@ export const ExperienceStep: React.FC<{
               required
               error={errors?.[`experience.${index}.rawDescription`]}
             >
-              <PolishHint />
-              <TextArea
-                error={errors?.[`experience.${index}.rawDescription`]}
-                rows={6}
-                value={exp.rawDescription}
-                onChange={e =>
-                  updateExp(exp.id, 'rawDescription', e.target.value)
+              <GuidedModeField
+                section="experience"
+                mode={exp.inputMode ?? 'guided'}
+                answers={exp.guided ?? {}}
+                freeText={exp.rawDescription ?? ''}
+                freePlaceholder={t('formSteps.experienceDescPlaceholder')}
+                onModeChange={m => updateExp(exp.id, 'inputMode', m)}
+                // Live-assemble answers into rawDescription so onboarding's
+                // existing validation/gibberish/save/polish (which all read
+                // rawDescription) keep working unchanged.
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === exp.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, rawDescription: assembleGuided('experience', a) }
+                        : x,
+                    ),
+                  )
                 }
-                placeholder={t('formSteps.experienceDescPlaceholder')}
+                onFreeTextChange={v => updateExp(exp.id, 'rawDescription', v)}
               />
             </InputGroup>
           </CollapsibleItem>

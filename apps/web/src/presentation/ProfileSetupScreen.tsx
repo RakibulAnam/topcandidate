@@ -424,7 +424,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             if (needsPolish(exp.rawDescription ?? '', exp)) {
                                 polishInBackground({
                                     text: exp.rawDescription ?? '',
-                                    context: { kind: 'experience', title: exp.role, organization: exp.company },
+                                    context: { kind: 'experience', title: exp.role, organization: exp.company, guided: (exp.inputMode ?? 'guided') === 'guided' },
                                     persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
                                 });
                             }
@@ -435,7 +435,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             if (needsPolish(proj.rawDescription ?? '', proj)) {
                                 polishInBackground({
                                     text: proj.rawDescription ?? '',
-                                    context: { kind: 'project', title: proj.name, technologies: proj.technologies },
+                                    context: { kind: 'project', title: proj.name, technologies: proj.technologies, guided: (proj.inputMode ?? 'guided') === 'guided' },
                                     persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
                                 });
                             }
