@@ -69,13 +69,20 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
         throw new Error('Normalizer returned no bullets');
       }
       // Defensive trims — tiny payload, cheap to sanitize. Awards belong on a
-      // resume as one tight line, not a 3-bullet block, so cap them lower.
-      const maxBullets = context.kind === 'award' ? 2 : 5;
-      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, maxBullets);
+      // resume as a single tight line, not a multi-bullet block.
+      const isAward = context.kind === 'award';
+      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, isAward ? 1 : 5);
       parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 10);
       // Subtle coaching only: a single hint at most — the polish itself is
       // the product; we never pile instructions on the user.
-      parsed.gaps = (parsed.gaps ?? []).map(g => g.trim()).filter(Boolean).slice(0, 1);
+      let gaps = (parsed.gaps ?? []).map(g => g.trim()).filter(Boolean);
+      if (isAward) {
+        // Awards capture title/issuer/date in structured fields, so the model
+        // must not nudge for them. The prompt asks this, but models still slip
+        // ("add the year/timeframe") — so drop such gaps deterministically.
+        gaps = gaps.filter(g => !/\b(year|date|timeframe|time frame|when|month)\b/i.test(g));
+      }
+      parsed.gaps = gaps.slice(0, 1);
       return parsed;
     }, this.deadlineMs);
   }
