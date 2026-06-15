@@ -200,7 +200,10 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Affiliations', t, cursor);
       for (const aff of data.affiliations) {
         this.ensureSpace(doc, cursor, t.sizeBody * 2, t.margin);
-        const line = `${aff.role}, ${aff.organization} (${aff.startDate} \u2013 ${aff.endDate})`;
+        const affDates = aff.startDate
+          ? ` (${aff.startDate} \u2013 ${aff.endDate || 'Present'})`
+          : '';
+        const line = `${aff.role}, ${aff.organization}${affDates}`;
         this.renderBodyLine(doc, line, t, cursor, contentWidth);
         cursor.y += 2;
       }

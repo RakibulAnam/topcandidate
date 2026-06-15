@@ -476,7 +476,7 @@ export class WordResumeExporter implements IResumeExporter {
           new Paragraph({
             children: [
               new TextRun({
-                text: `${aff.role}, ${aff.organization} (${aff.startDate} \u2013 ${aff.endDate})`,
+                text: `${aff.role}, ${aff.organization}${aff.startDate ? ` (${aff.startDate} \u2013 ${aff.endDate || 'Present'})` : ''}`,
                 size: pt(t.sizeBody),
               }),
             ],

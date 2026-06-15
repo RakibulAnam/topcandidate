@@ -653,7 +653,10 @@ export const Preview: React.FC<PreviewProps> = ({
             <h3 style={sectionHeadingStyle}>Affiliations</h3>
             {data.affiliations.map((aff) => (
               <div key={aff.id} style={bodyTextStyle}>
-                {aff.role}, {aff.organization} ({aff.startDate} – {aff.endDate})
+                {aff.role}, {aff.organization}
+                {aff.startDate
+                  ? ` (${aff.startDate}${aff.endDate ? ` – ${aff.endDate}` : ' – Present'})`
+                  : ''}
               </div>
             ))}
           </section>

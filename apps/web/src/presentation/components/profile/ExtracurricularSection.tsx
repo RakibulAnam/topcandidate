@@ -161,8 +161,8 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                             <MonthPicker isError={!formData.startDate} value={formData.startDate || ''} onChange={val => setFormData({ ...formData, startDate: val })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date</label>
-                            <MonthPicker isError={!formData.endDate} value={formData.endDate || ''} onChange={val => setFormData({ ...formData, endDate: val })} />
+                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date (Optional)</label>
+                            <MonthPicker isError={false} value={formData.endDate || ''} onChange={val => setFormData({ ...formData, endDate: val })} />
                         </div>
                     </div>
                     <div className="mb-4">
