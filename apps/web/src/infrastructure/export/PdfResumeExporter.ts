@@ -11,7 +11,7 @@
 
 import { jsPDF } from 'jspdf';
 import FileSaver from 'file-saver';
-import { ResumeData } from '../../domain/entities/Resume';
+import { ResumeData, awardDetailText } from '../../domain/entities/Resume';
 import {
   TemplateDefinition,
   resolveTemplate,
@@ -170,7 +170,8 @@ export class PdfResumeExporter {
       for (const award of data.awards) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 3, t.margin);
         this.renderItemTitleRow(doc, award.title, award.date, t, cursor, contentWidth);
-        const issuerLine = `${award.issuer}${award.description ? ` \u2013 ${award.description}` : ''}`;
+        const awardDetail = awardDetailText(award);
+        const issuerLine = `${award.issuer}${awardDetail ? ` \u2013 ${awardDetail}` : ''}`;
         this.renderBodyLine(doc, issuerLine, t, cursor, contentWidth);
         cursor.y += t.itemGap;
       }
@@ -199,7 +200,10 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Affiliations', t, cursor);
       for (const aff of data.affiliations) {
         this.ensureSpace(doc, cursor, t.sizeBody * 2, t.margin);
-        const line = `${aff.role}, ${aff.organization} (${aff.startDate} \u2013 ${aff.endDate})`;
+        const affDates = aff.startDate
+          ? ` (${aff.startDate} \u2013 ${aff.endDate || 'Present'})`
+          : '';
+        const line = `${aff.role}, ${aff.organization}${affDates}`;
         this.renderBodyLine(doc, line, t, cursor, contentWidth);
         cursor.y += 2;
       }

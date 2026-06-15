@@ -1,4 +1,5 @@
-// GET /api/cron/expire-pending
+// GET /api/cron/expire-pending  (rewritten to /api/purchase-ops/expire-pending
+// — see vercel.json. URL is unchanged for callers / manual triggers.)
 //
 // Calls expire_stale_pending_purchases() — flips pending rows older than 24h
 // to 'expired' and writes audit rows. Idempotent.

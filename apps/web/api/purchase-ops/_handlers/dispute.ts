@@ -1,4 +1,5 @@
-// POST /api/dispute-purchase
+// POST /api/dispute-purchase  (rewritten to /api/purchase-ops/dispute — see
+// vercel.json. URL is unchanged for callers.)
 //
 // Customer-facing. Captures "I sent the money but never got credits" reports.
 // Inserts a row into purchase_disputes for operator review. Auth required.
@@ -8,7 +9,7 @@
 // Response: { success: true, disputeId }
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { authenticate, userClient } from './_lib/auth.js';
+import { authenticate, userClient } from '../../_lib/auth.js';
 
 interface Body {
   transactionId?: string;

@@ -42,7 +42,9 @@ export interface IProfileRepository {
     deleteExtracurricular(id: string): Promise<void>;
 
     getAwards(userId: string): Promise<Award[]>;
-    saveAward(userId: string, item: Award): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveAward(userId: string, item: Award): Promise<string>;
+    saveAwardNormalized(id: string, normalized: NormalizedItemContent, sourceHash: string): Promise<void>;
     deleteAward(id: string): Promise<void>;
 
     getCertifications(userId: string): Promise<Certification[]>;

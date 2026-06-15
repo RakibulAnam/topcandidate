@@ -9,6 +9,9 @@
     }
   },
   "rewrites": [
+    { "source": "/api/my-purchase-status", "destination": "/api/purchase-ops/status" },
+    { "source": "/api/dispute-purchase", "destination": "/api/purchase-ops/dispute" },
+    { "source": "/api/cron/expire-pending", "destination": "/api/purchase-ops/expire-pending" },
     { "source": "/((?!api/|@|src/|node_modules/|assets/|.*\\.).*)", "destination": "/index.html" }
   ],
   "headers": [

@@ -1,4 +1,5 @@
-// GET /api/my-purchase-status?txnId=<bkash TrxID>
+// GET /api/my-purchase-status?txnId=<bkash TrxID>  (rewritten to
+// /api/purchase-ops/status — see vercel.json. URL is unchanged for callers.)
 //
 // Customer-facing. Looks up the caller's purchase row and returns a derived
 // state for the VerifyingPurchasePill in the navbar. Auth required.
@@ -17,7 +18,7 @@
 // 401 missing/invalid auth; 400 missing txnId; 404 no row for this user.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { authenticate, userClient } from './_lib/auth.js';
+import { authenticate, userClient } from '../../_lib/auth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {

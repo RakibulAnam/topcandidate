@@ -6,8 +6,11 @@ import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Save, X, Users } from 'lucide-react';
 import { MonthPicker } from '../ui/month-picker';
 import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+import { GuidedModeField } from './GuidedModeField';
+import { assembleGuided, guidedRequiredFilled, GUIDED_VERSION, uiText } from './guidedQuestions';
+import { useLocale } from '../../i18n/LocaleContext';
 
-const EXTRACURRICULAR_FIELDS = ['organization', 'title', 'description', 'startDate', 'endDate'];
+const EXTRACURRICULAR_FIELDS = ['organization', 'title', 'description', 'startDate', 'endDate', 'inputMode', 'guided'];
 
 interface Props {
     items: Extracurricular[];
@@ -16,6 +19,7 @@ interface Props {
 
 export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
     const { user } = useAuth();
+    const { locale } = useLocale();
     const [isEditing, setIsEditing] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Extracurricular>>({});
@@ -35,6 +39,8 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
             description: '',
             startDate: '',
             endDate: '',
+            inputMode: 'guided',
+            guided: {},
         });
         setEditingId(null);
         setIsEditing(false);
@@ -65,16 +71,35 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+
+        const mode = formData.inputMode ?? 'guided';
+        const answers = formData.guided ?? {};
+        const description = mode === 'guided'
+            ? assembleGuided('extracurricular', answers)
+            : (formData.description || '');
+
+        if (mode === 'guided' && !guidedRequiredFilled('extracurricular', answers)) {
+            toast.error(uiText('answerFirst', locale));
+            return;
+        }
+        if (mode === 'free' && !description.trim()) {
+            toast.error(uiText('addShortDesc', locale));
+            return;
+        }
+
         setSaving(true);
         try {
-            const item = {
+            const item: Extracurricular = {
                 id: editingId || '',
                 organization: formData.organization || '',
                 title: formData.title || '',
-                description: formData.description || '',
+                description,
                 startDate: formData.startDate || '',
                 endDate: formData.endDate || '',
                 refinedBullets: [],
+                inputMode: mode,
+                guided: answers,
+                guidedVersion: mode === 'guided' ? GUIDED_VERSION : formData.guidedVersion,
             };
             const savedId = await profileRepository.saveExtracurricular(user.id, item);
             toast.success('Activity saved');
@@ -83,14 +108,14 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                 if (tryConsumeRenorm('extracurricular')) {
                     polishInBackground({
                         text: item.description,
-                        context: { kind: 'extracurricular', title: item.title, organization: item.organization },
+                        context: { kind: 'extracurricular', title: item.title, organization: item.organization, guided: mode === 'guided' },
                         persist: (n, h) => profileRepository.saveExtracurricularNormalized(savedId, n, h),
                         onStart: () => markPolishing(savedId, true),
                         onSettle: () => markPolishing(savedId, false),
                         onDone: onRefresh,
                     });
                 } else {
-                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                    toast(uiText('capReached', locale));
                 }
             }
 
@@ -136,13 +161,21 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                             <MonthPicker isError={!formData.startDate} value={formData.startDate || ''} onChange={val => setFormData({ ...formData, startDate: val })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date</label>
-                            <MonthPicker isError={!formData.endDate} value={formData.endDate || ''} onChange={val => setFormData({ ...formData, endDate: val })} />
+                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date (Optional)</label>
+                            <MonthPicker isError={false} value={formData.endDate || ''} onChange={val => setFormData({ ...formData, endDate: val })} />
                         </div>
                     </div>
                     <div className="mb-4">
-                        <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Description</label>
-                        <textarea className="w-full p-2 border rounded-lg h-24 text-sm" value={formData.description || ''} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="e.g. Organized regional tournaments and mentored junior members." />
+                        <GuidedModeField
+                            section="extracurricular"
+                            mode={formData.inputMode ?? 'guided'}
+                            answers={formData.guided ?? {}}
+                            freeText={formData.description ?? ''}
+                            freePlaceholder="e.g. Organized regional tournaments and mentored junior members."
+                            onModeChange={m => setFormData({ ...formData, inputMode: m })}
+                            onAnswersChange={a => setFormData({ ...formData, guided: a })}
+                            onFreeTextChange={t => setFormData({ ...formData, description: t })}
+                        />
                     </div>
                     <div className="flex justify-end gap-2">
                         {editingId && fieldsEqual(formData as Record<string, unknown>, items.find(x => x.id === editingId) as Record<string, unknown> | undefined, EXTRACURRICULAR_FIELDS) ? (
@@ -172,7 +205,7 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                             </div>
                         </div>
                         {item.description && <p className="mt-2 text-sm text-charcoal-600 whitespace-pre-line">{item.description}</p>}
-                        <PolishedPreview normalized={item.normalized} polishing={polishingIds.has(item.id)} />
+                        <PolishedPreview normalized={item.normalized} polishing={polishingIds.has(item.id)} sourceText={item.description} sourceHash={item.normalizedSourceHash} />
                     </div>
                 ))}
             </div>

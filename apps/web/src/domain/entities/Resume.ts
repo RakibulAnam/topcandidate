@@ -23,14 +23,35 @@ export interface NormalizedItemContent {
   gaps: string[];
 }
 
-export interface WorkExperience {
+// Guided Mode: how a description-bearing item was filled in.
+//   'free'   — single brain-dump box (the original experience).
+//   'guided' — a short questionnaire; answers stored in `guided` and
+//              deterministically assembled into the item's description text,
+//              which the AI then refines exactly as a free brain dump.
+export type InputMode = 'free' | 'guided';
+
+// Structured guided answers, keyed by stable question id (see
+// presentation/components/profile/guidedQuestions.ts). Only answered keys are
+// present. Stored verbatim (any language) as the user's original input.
+export type GuidedAnswers = Record<string, string>;
+
+// Fields shared by every description-bearing item that supports Guided Mode.
+// `inputMode` defaults to 'guided'. `guidedVersion` records which question-set
+// version `guided` maps to, so the questions can evolve without orphaning data.
+export interface GuidedFields {
+  inputMode?: InputMode;
+  guided?: GuidedAnswers;
+  guidedVersion?: number;
+}
+
+export interface WorkExperience extends GuidedFields {
   id: string;
   company: string;
   role: string;
   startDate: string;
   endDate: string;
   isCurrent: boolean;
-  rawDescription: string; // User input
+  rawDescription: string; // User input (free mode) OR assembled from `guided` (guided mode)
   refinedBullets: string[]; // AI Generated
   normalized?: NormalizedItemContent; // AI-polished profile evidence (see above)
   normalizedSourceHash?: string; // hash of the rawDescription `normalized` was computed from
@@ -52,7 +73,7 @@ export interface TargetJob {
   description: string;
 }
 
-export interface Project {
+export interface Project extends GuidedFields {
   id: string;
   name: string;
   rawDescription: string;
@@ -67,24 +88,37 @@ export interface Project {
 }
 
 
-export interface Extracurricular {
+export interface Extracurricular extends GuidedFields {
   id: string;
   title: string;
   organization: string;
   startDate: string;
   endDate: string;
-  description: string; // raw description
+  description: string; // raw description OR assembled from `guided`
   refinedBullets: string[]; // AI refined
   normalized?: NormalizedItemContent; // AI-polished profile evidence
   normalizedSourceHash?: string; // hash of the description `normalized` was computed from
 }
 
-export interface Award {
+export interface Award extends GuidedFields {
   id: string;
   title: string;
   issuer: string;
   date: string;
-  description: string;
+  description: string; // raw description OR assembled from `guided`
+  normalized?: NormalizedItemContent; // AI-polished profile evidence (added with Guided Mode)
+  normalizedSourceHash?: string; // hash of the description `normalized` was computed from
+}
+
+// The detail text to render for an award on the resume. Awards do NOT go
+// through the optimizer (it only refines experience/projects/extracurriculars),
+// so their raw `description` would otherwise show verbatim — which for a Guided
+// Mode award is the assembled "Topic: answer" block (possibly Banglish). Prefer
+// the AI-polished bullets; fall back to the raw description only when there's
+// no polish (free-text awards typed directly, or pre-polish data).
+export function awardDetailText(award: Pick<Award, 'description' | 'normalized'>): string {
+  if (award.normalized?.bullets?.length) return award.normalized.bullets.join(' ');
+  return award.description ?? '';
 }
 
 export interface Certification {

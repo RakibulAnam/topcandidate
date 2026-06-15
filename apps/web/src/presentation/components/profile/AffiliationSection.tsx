@@ -86,8 +86,8 @@ export const AffiliationSection = ({ items, onRefresh }: Props) => {
                             <MonthPicker isError={!formData.startDate} value={formData.startDate || ''} onChange={val => setFormData({ ...formData, startDate: val })} />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date</label>
-                            <MonthPicker isError={!formData.endDate} value={formData.endDate || ''} onChange={val => setFormData({ ...formData, endDate: val })} />
+                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date (Optional)</label>
+                            <MonthPicker isError={false} value={formData.endDate || ''} onChange={val => setFormData({ ...formData, endDate: val })} />
                         </div>
                     </div>
                     <div className="flex justify-end gap-2">
@@ -105,7 +105,7 @@ export const AffiliationSection = ({ items, onRefresh }: Props) => {
                             <div>
                                 <h4 className="font-bold text-charcoal-900">{item.organization}</h4>
                                 <div className="text-brand-600 font-medium text-sm">{item.role}</div>
-                                <div className="text-charcoal-400 text-xs mt-1">{item.startDate} - {item.endDate}</div>
+                                <div className="text-charcoal-400 text-xs mt-1">{item.startDate}{item.endDate ? ` - ${item.endDate}` : item.startDate ? ' - Present' : ''}</div>
                             </div>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => handleEdit(item)} className="p-1.5 text-charcoal-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
