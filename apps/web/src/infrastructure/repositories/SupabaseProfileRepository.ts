@@ -1,6 +1,23 @@
 import { supabase } from '../supabase/client';
 import { IProfileRepository } from '../../domain/repositories/IProfileRepository';
-import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurricular, Award, Certification, Affiliation, Publication, Language, Reference, NormalizedItemContent } from '../../domain/entities/Resume';
+import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurricular, Award, Certification, Affiliation, Publication, Language, Reference, NormalizedItemContent, GuidedFields, InputMode } from '../../domain/entities/Resume';
+
+// Guided Mode columns (input_mode/guided/guided_version) round-trip on every
+// description-bearing table. These two helpers keep the mapping in one place.
+function guidedColumns(item: Partial<GuidedFields>): Record<string, unknown> {
+    return {
+        input_mode: item.inputMode ?? 'guided',
+        guided: item.guided ?? null,
+        guided_version: item.guidedVersion ?? null,
+    };
+}
+function mapGuided(row: any): GuidedFields {
+    return {
+        inputMode: (row.input_mode ?? undefined) as InputMode | undefined,
+        guided: row.guided ?? undefined,
+        guidedVersion: row.guided_version ?? undefined,
+    };
+}
 
 export class SupabaseProfileRepository implements IProfileRepository {
 
@@ -149,6 +166,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             refinedBullets: [], // Stored in applications, not master profile usually, or we can add it later
             normalized: item.normalized ?? undefined,
             normalizedSourceHash: item.normalized_source_hash ?? undefined,
+            ...mapGuided(item),
         }));
     }
 
@@ -167,6 +185,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             end_date: experience.endDate,
             is_current: experience.isCurrent,
             description: experience.rawDescription,
+            ...guidedColumns(experience),
         };
 
         if (experience.id && experience.id.length > 20) { // Simple check for UUID-like length
@@ -268,6 +287,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             refinedBullets: [],
             normalized: item.normalized ?? undefined,
             normalizedSourceHash: item.normalized_source_hash ?? undefined,
+            ...mapGuided(item),
         }));
     }
 
@@ -279,6 +299,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             description: project.rawDescription,
             technologies: project.technologies,
             link: project.link,
+            ...guidedColumns(project),
         };
 
         if (project.id && project.id.length > 20) {
@@ -370,6 +391,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             refinedBullets: [],
             normalized: item.normalized ?? undefined,
             normalizedSourceHash: item.normalized_source_hash ?? undefined,
+            ...mapGuided(item),
         }));
     }
 
@@ -382,6 +404,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             start_date: item.startDate,
             end_date: item.endDate,
             description: item.description,
+            ...guidedColumns(item),
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
         const { data, error } = await supabase
@@ -425,19 +448,42 @@ export class SupabaseProfileRepository implements IProfileRepository {
             issuer: item.issuer,
             date: item.date,
             description: item.description,
+            normalized: item.normalized ?? undefined,
+            normalizedSourceHash: item.normalized_source_hash ?? undefined,
+            ...mapGuided(item),
         }));
     }
 
-    async saveAward(userId: string, item: Award): Promise<void> {
+    // Returns the row id (DB-generated for new items) so the polish pass can
+    // attach the normalization — same pattern as saveExperience.
+    async saveAward(userId: string, item: Award): Promise<string> {
         const payload: any = {
             user_id: userId,
             title: item.title,
             issuer: item.issuer,
             date: item.date,
             description: item.description,
+            ...guidedColumns(item),
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('awards').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('awards')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
+        if (error) throw error;
+        return data.id as string;
+    }
+
+    async saveAwardNormalized(
+        id: string,
+        normalized: NormalizedItemContent,
+        sourceHash: string,
+    ): Promise<void> {
+        const { error } = await supabase
+            .from('awards')
+            .update({ normalized, normalized_source_hash: sourceHash })
+            .eq('id', id);
         if (error) throw error;
     }
 

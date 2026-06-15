@@ -1068,6 +1068,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               userType={resumeData.userType}
               jdText={resumeData.targetJob?.description}
               profilePool={profileSkills}
+              companyName={resumeData.targetJob?.company}
             />
           )}
           {step === AppStep.EXTRACURRICULARS && (

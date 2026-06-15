@@ -65,6 +65,11 @@ create table experiences (
   -- reused by every generation. Raw `description` stays the source of truth.
   normalized jsonb,
   normalized_source_hash text,
+  -- Guided Mode (migration 018): structured questionnaire answers; `description`
+  -- above is assembled from these in guided mode. See migration for semantics.
+  input_mode text default 'guided',
+  guided jsonb,
+  guided_version int,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -120,6 +125,10 @@ create table projects (
   -- "Polished profile" (migration 016) — see experiences.normalized.
   normalized jsonb,
   normalized_source_hash text,
+  -- Guided Mode (migration 018) — see experiences.
+  input_mode text default 'guided',
+  guided jsonb,
+  guided_version int,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -168,6 +177,10 @@ create table extracurriculars (
   -- "Polished profile" (migration 016) — see experiences.normalized.
   normalized jsonb,
   normalized_source_hash text,
+  -- Guided Mode (migration 018) — see experiences.
+  input_mode text default 'guided',
+  guided jsonb,
+  guided_version int,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -193,6 +206,13 @@ create table awards (
   issuer text,
   date text,
   description text,
+  -- "Polished profile" + Guided Mode (migration 018): awards gained AI polish
+  -- and the questionnaire alongside experiences/projects/extracurriculars.
+  normalized jsonb,
+  normalized_source_hash text,
+  input_mode text default 'guided',
+  guided jsonb,
+  guided_version int,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 

@@ -8,7 +8,7 @@
 
 import type { ProfileItemContext } from '../../../domain/usecases/NormalizeProfileItemUseCase.js';
 
-export const NORMALIZER_SYSTEM_INSTRUCTION = `You convert ONE raw profile item description (a work experience, project, or activity) from a resume profile into clean professional resume evidence. The input may be informal English, Bangla, or Banglish (Bengali written in Latin script) — translate and professionalize it.
+export const NORMALIZER_SYSTEM_INSTRUCTION = `You convert ONE raw profile item description (a work experience, project, activity, or award/honor) from a resume profile into clean professional resume evidence. The input may be informal English, Bangla, or Banglish (Bengali written in Latin script) — translate and professionalize it.
 
 RULES
 1. OUTPUT ENGLISH ONLY.
@@ -23,6 +23,7 @@ const KIND_LABELS: Record<string, string> = {
   experience: 'Work experience',
   project: 'Project',
   extracurricular: 'Activity / extracurricular',
+  award: 'Award / honor',
 };
 
 export function buildNormalizerUserPrompt(text: string, context: ProfileItemContext): string {
@@ -30,7 +31,22 @@ export function buildNormalizerUserPrompt(text: string, context: ProfileItemCont
   if (context.title) lines.push(`Title/Role: ${context.title}`);
   if (context.organization) lines.push(`Company/Organization: ${context.organization}`);
   if (context.technologies) lines.push(`Tools/Technologies (user-listed): ${context.technologies}`);
-  lines.push('', 'RAW DESCRIPTION (verbatim user input):', text);
+  if (context.kind === 'award') {
+    // Awards render as a single tight resume line, and their title/issuer/date
+    // are captured in separate structured fields — so keep it short and never
+    // ask for those in `gaps` (they're already on the resume).
+    lines.push('', 'This is an AWARD: produce ONE concise line (at most two) combining what the award recognized and how selective it was. The award title, issuer, and date are already captured separately — do NOT ask for them in gaps.');
+  }
+  if (context.guided) {
+    // Guided Mode: the text below is the candidate's answers to specific
+    // profile questions, each line prefixed with its topic (e.g.
+    // "Numbers / scale: ..."). Treat each label as the topic of that answer;
+    // weave them into bullets — do NOT echo the labels in the output.
+    lines.push('', 'The following are the candidate\'s answers to guided profile questions. Each line is "Topic: answer". Use the topics to understand each answer, but never repeat a topic label in your bullets.');
+    lines.push('', 'ANSWERS (verbatim, may be English/Bangla/Banglish):', text);
+  } else {
+    lines.push('', 'RAW DESCRIPTION (verbatim user input):', text);
+  }
   return lines.join('\n');
 }
 

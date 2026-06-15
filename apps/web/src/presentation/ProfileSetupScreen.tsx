@@ -424,7 +424,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             if (needsPolish(exp.rawDescription ?? '', exp)) {
                                 polishInBackground({
                                     text: exp.rawDescription ?? '',
-                                    context: { kind: 'experience', title: exp.role, organization: exp.company },
+                                    context: { kind: 'experience', title: exp.role, organization: exp.company, guided: (exp.inputMode ?? 'guided') === 'guided' },
                                     persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
                                 });
                             }
@@ -435,7 +435,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             if (needsPolish(proj.rawDescription ?? '', proj)) {
                                 polishInBackground({
                                     text: proj.rawDescription ?? '',
-                                    context: { kind: 'project', title: proj.name, technologies: proj.technologies },
+                                    context: { kind: 'project', title: proj.name, technologies: proj.technologies, guided: (proj.inputMode ?? 'guided') === 'guided' },
                                     persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
                                 });
                             }
@@ -451,14 +451,23 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                         if (needsPolish(item.description ?? '', item)) {
                             polishInBackground({
                                 text: item.description ?? '',
-                                context: { kind: 'extracurricular', title: item.title, organization: item.organization },
+                                context: { kind: 'extracurricular', title: item.title, organization: item.organization, guided: (item.inputMode ?? 'guided') === 'guided' },
                                 persist: (n, h) => profileRepository.saveExtracurricularNormalized(savedId, n, h),
                             });
                         }
                     }
                     break;
                 case SetupStep.AWARDS:
-                    for (const item of awards) await profileRepository.saveAward(user.id, item);
+                    for (const item of awards) {
+                        const savedId = await profileRepository.saveAward(user.id, item);
+                        if ((item.description ?? '').trim() && needsPolish(item.description ?? '', item)) {
+                            polishInBackground({
+                                text: item.description ?? '',
+                                context: { kind: 'award', title: item.title, organization: item.issuer, guided: (item.inputMode ?? 'guided') === 'guided' },
+                                persist: (n, h) => profileRepository.saveAwardNormalized(savedId, n, h),
+                            });
+                        }
+                    }
                     break;
                 case SetupStep.CERTIFICATIONS:
                     for (const item of certifications) await profileRepository.saveCertification(user.id, item);

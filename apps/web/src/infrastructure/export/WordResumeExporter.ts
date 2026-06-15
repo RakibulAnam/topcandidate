@@ -18,7 +18,7 @@ import {
   BorderStyle,
 } from 'docx';
 import FileSaver from 'file-saver';
-import { ResumeData } from '../../domain/entities/Resume';
+import { ResumeData, awardDetailText } from '../../domain/entities/Resume';
 import { IResumeExporter } from '../../domain/usecases/ExportResumeUseCase';
 import {
   TemplateDefinition,
@@ -434,7 +434,7 @@ export class WordResumeExporter implements IResumeExporter {
           new Paragraph({
             children: [
               new TextRun({
-                text: `${award.issuer}${award.description ? ` \u2013 ${award.description}` : ''}`,
+                text: `${award.issuer}${awardDetailText(award) ? ` \u2013 ${awardDetailText(award)}` : ''}`,
                 size: pt(t.sizeBody),
               }),
             ],
@@ -476,7 +476,7 @@ export class WordResumeExporter implements IResumeExporter {
           new Paragraph({
             children: [
               new TextRun({
-                text: `${aff.role}, ${aff.organization} (${aff.startDate} \u2013 ${aff.endDate})`,
+                text: `${aff.role}, ${aff.organization}${aff.startDate ? ` (${aff.startDate} \u2013 ${aff.endDate || 'Present'})` : ''}`,
                 size: pt(t.sizeBody),
               }),
             ],

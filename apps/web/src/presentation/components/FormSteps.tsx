@@ -57,6 +57,8 @@ import { EmailInput } from './ui/EmailInput';
 import { PhoneInput } from './ui/PhoneInput';
 import { LanguagePicker } from './ui/LanguagePicker';
 import { useT } from '../i18n/LocaleContext';
+import { GuidedModeField } from './profile/GuidedModeField';
+import { assembleGuided, GUIDED_VERSION } from './profile/guidedQuestions';
 
 // -----------------------------------------------------------------------------
 // Shared primitives
@@ -820,6 +822,9 @@ export const ProjectsStep: React.FC<{
         rawDescription: '',
         refinedBullets: [],
         technologies: '',
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
   };
@@ -919,15 +924,23 @@ export const ProjectsStep: React.FC<{
               required
               error={errors?.[`projects.${index}.rawDescription`]}
             >
-              <PolishHint />
-              <TextArea
-                error={errors?.[`projects.${index}.rawDescription`]}
-                rows={5}
-                value={project.rawDescription}
-                onChange={e =>
-                  updateProject(project.id, 'rawDescription', e.target.value)
+              <GuidedModeField
+                section="project"
+                mode={project.inputMode ?? 'guided'}
+                answers={project.guided ?? {}}
+                freeText={project.rawDescription ?? ''}
+                freePlaceholder={t('formSteps.projectsDescPlaceholder')}
+                onModeChange={m => updateProject(project.id, 'inputMode', m)}
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === project.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, rawDescription: assembleGuided('project', a) }
+                        : x,
+                    ),
+                  )
                 }
-                placeholder={t('formSteps.projectsDescPlaceholder')}
+                onFreeTextChange={v => updateProject(project.id, 'rawDescription', v)}
               />
             </InputGroup>
           </CollapsibleItem>
@@ -957,6 +970,9 @@ export const ExperienceStep: React.FC<{
         isCurrent: false,
         rawDescription: '',
         refinedBullets: [],
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
   };
@@ -1103,15 +1119,26 @@ export const ExperienceStep: React.FC<{
               required
               error={errors?.[`experience.${index}.rawDescription`]}
             >
-              <PolishHint />
-              <TextArea
-                error={errors?.[`experience.${index}.rawDescription`]}
-                rows={6}
-                value={exp.rawDescription}
-                onChange={e =>
-                  updateExp(exp.id, 'rawDescription', e.target.value)
+              <GuidedModeField
+                section="experience"
+                mode={exp.inputMode ?? 'guided'}
+                answers={exp.guided ?? {}}
+                freeText={exp.rawDescription ?? ''}
+                freePlaceholder={t('formSteps.experienceDescPlaceholder')}
+                onModeChange={m => updateExp(exp.id, 'inputMode', m)}
+                // Live-assemble answers into rawDescription so onboarding's
+                // existing validation/gibberish/save/polish (which all read
+                // rawDescription) keep working unchanged.
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === exp.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, rawDescription: assembleGuided('experience', a) }
+                        : x,
+                    ),
+                  )
                 }
-                placeholder={t('formSteps.experienceDescPlaceholder')}
+                onFreeTextChange={v => updateExp(exp.id, 'rawDescription', v)}
               />
             </InputGroup>
           </CollapsibleItem>
@@ -1293,7 +1320,9 @@ export const SkillsStep: React.FC<{
    * the suggestion pool — these are "yours", not generic dictionary picks.
    */
   profilePool?: string[];
-}> = ({ data, update, userType, jdText, profilePool = [] }) => {
+  /** Target company — excluded from JD skill matches so it isn't suggested as a skill. */
+  companyName?: string;
+}> = ({ data, update, userType, jdText, profilePool = [], companyName }) => {
   const t = useT();
   const [currentSkill, setCurrentSkill] = useState('');
 
@@ -1344,10 +1373,12 @@ export const SkillsStep: React.FC<{
     () =>
       extractSkillsFromJD(jdText ?? '', {
         knownSkills: canonicalPool,
-        exclude: data,
+        // Exclude already-added skills AND the target company name, so the
+        // employer (e.g. "Renata Limited") isn't surfaced as a skill chip.
+        exclude: companyName ? [...data, companyName] : data,
         maxResults: 24,
       }),
-    [jdText, canonicalPool, data],
+    [jdText, canonicalPool, data, companyName],
   );
 
   // Lower-priority "common picks" — starter chips for the user type, minus
@@ -1552,6 +1583,9 @@ export const ExtracurricularStep: React.FC<{
         endDate: '',
         description: '',
         refinedBullets: [],
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
 
@@ -1651,14 +1685,23 @@ export const ExtracurricularStep: React.FC<{
               </InputGroup>
             </div>
             <InputGroup label={t('formSteps.extracurricularsDescLabel')} optional>
-              <PolishHint />
-              <TextArea
-                rows={3}
-                value={item.description}
-                onChange={e =>
-                  updateItem(item.id, 'description', e.target.value)
+              <GuidedModeField
+                section="extracurricular"
+                mode={item.inputMode ?? 'guided'}
+                answers={item.guided ?? {}}
+                freeText={item.description ?? ''}
+                freePlaceholder={t('formSteps.extracurricularsDescPlaceholder')}
+                onModeChange={m => updateItem(item.id, 'inputMode', m)}
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === item.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, description: assembleGuided('extracurricular', a) }
+                        : x,
+                    ),
+                  )
                 }
-                placeholder={t('formSteps.extracurricularsDescPlaceholder')}
+                onFreeTextChange={v => updateItem(item.id, 'description', v)}
               />
             </InputGroup>
           </CollapsibleItem>
@@ -1685,6 +1728,9 @@ export const AwardsStep: React.FC<{
         issuer: '',
         date: '',
         description: '',
+        inputMode: 'guided',
+        guided: {},
+        guidedVersion: GUIDED_VERSION,
       },
     ]);
   const removeItem = (id: string) => update(data.filter(x => x.id !== id));
@@ -1759,12 +1805,23 @@ export const AwardsStep: React.FC<{
               optional
               helper={t('formSteps.awardsDescHelper')}
             >
-              <TextArea
-                rows={2}
-                value={item.description}
-                onChange={e =>
-                  updateItem(item.id, 'description', e.target.value)
+              <GuidedModeField
+                section="award"
+                mode={item.inputMode ?? 'guided'}
+                answers={item.guided ?? {}}
+                freeText={item.description ?? ''}
+                freePlaceholder=""
+                onModeChange={m => updateItem(item.id, 'inputMode', m)}
+                onAnswersChange={a =>
+                  update(
+                    data.map(x =>
+                      x.id === item.id
+                        ? { ...x, guided: a, guidedVersion: GUIDED_VERSION, description: assembleGuided('award', a) }
+                        : x,
+                    ),
+                  )
                 }
+                onFreeTextChange={v => updateItem(item.id, 'description', v)}
               />
             </InputGroup>
           </CollapsibleItem>
