@@ -12,6 +12,17 @@ export interface PersonalInfo {
   website?: string;
 }
 
+// AI-normalized rendering of one profile item's raw description ("polished
+// profile"). Computed once on profile save (cheap flash-lite call), stored
+// beside the raw text — NEVER replacing it — and reused by every subsequent
+// generation as pre-cleaned evidence. `gaps` are coaching hints shown to the
+// user (e.g. "No measurable outcome — add team size or % improvement").
+export interface NormalizedItemContent {
+  bullets: string[];
+  skills: string[];
+  gaps: string[];
+}
+
 export interface WorkExperience {
   id: string;
   company: string;
@@ -21,6 +32,8 @@ export interface WorkExperience {
   isCurrent: boolean;
   rawDescription: string; // User input
   refinedBullets: string[]; // AI Generated
+  normalized?: NormalizedItemContent; // AI-polished profile evidence (see above)
+  normalizedSourceHash?: string; // hash of the rawDescription `normalized` was computed from
 }
 
 export interface Education {
@@ -49,6 +62,8 @@ export interface Project {
   // study, a curriculum design, a legal case). Leave blank when not applicable.
   technologies?: string;
   link?: string;
+  normalized?: NormalizedItemContent; // AI-polished profile evidence
+  normalizedSourceHash?: string; // hash of the rawDescription `normalized` was computed from
 }
 
 
@@ -60,6 +75,8 @@ export interface Extracurricular {
   endDate: string;
   description: string; // raw description
   refinedBullets: string[]; // AI refined
+  normalized?: NormalizedItemContent; // AI-polished profile evidence
+  normalizedSourceHash?: string; // hash of the description `normalized` was computed from
 }
 
 export interface Award {

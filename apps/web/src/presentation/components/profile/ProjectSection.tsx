@@ -3,7 +3,10 @@ import { Project } from '../../../domain/entities/Resume';
 import { profileRepository } from '../../../infrastructure/config/dependencies';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Save, FolderGit2 } from 'lucide-react';
+import { Plus, Trash2, Edit2, Save, X, FolderGit2 } from 'lucide-react';
+import { needsPolish, polishInBackground, PolishedPreview, fieldsEqual, tryConsumeRenorm } from './polish';
+
+const PROJECT_FIELDS = ['name', 'rawDescription', 'technologies', 'link'];
 
 interface Props {
     projects: Project[];
@@ -16,6 +19,13 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Project>>({});
     const [saving, setSaving] = useState(false);
+    const [polishingIds, setPolishingIds] = useState<Set<string>>(new Set());
+    const markPolishing = (id: string, on: boolean) =>
+        setPolishingIds(prev => {
+            const next = new Set(prev);
+            if (on) next.add(id); else next.delete(id);
+            return next;
+        });
 
     const resetForm = () => {
         setFormData({ name: '', rawDescription: '', technologies: '', link: '' });
@@ -37,15 +47,32 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
         if (!user) return;
         setSaving(true);
         try {
-            await profileRepository.saveProject(user.id, {
+            const proj = {
                 id: editingId || '',
                 name: formData.name || '',
                 rawDescription: formData.rawDescription || '',
                 refinedBullets: [],
                 technologies: formData.technologies || '',
                 link: formData.link,
-            });
+            };
+            const savedId = await profileRepository.saveProject(user.id, proj);
             toast.success('Saved');
+
+            if (needsPolish(proj.rawDescription, projects.find(x => x.id === savedId))) {
+                if (tryConsumeRenorm('project')) {
+                    polishInBackground({
+                        text: proj.rawDescription,
+                        context: { kind: 'project', title: proj.name, technologies: proj.technologies },
+                        persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
+                        onStart: () => markPolishing(savedId, true),
+                        onSettle: () => markPolishing(savedId, false),
+                        onDone: onRefresh,
+                    });
+                } else {
+                    toast('Saved. AI polish for this section has refreshed 5 times today — it’ll refresh again tomorrow.');
+                }
+            }
+
             resetForm();
             onRefresh();
         } catch (e) { toast.error('Failed to save'); }
@@ -109,20 +136,32 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                             />
                         </div>
                         <div className="flex justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={resetForm}
-                                className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={saving}
-                                className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"
-                            >
-                                <Save size={16} /> Save
-                            </button>
+                            {editingId && fieldsEqual(formData as Record<string, unknown>, projects.find(x => x.id === editingId) as Record<string, unknown> | undefined, PROJECT_FIELDS) ? (
+                                <button
+                                    type="button"
+                                    onClick={resetForm}
+                                    className="px-4 py-2 bg-charcoal-200 text-charcoal-700 rounded-lg text-sm font-medium hover:bg-charcoal-300 flex items-center gap-2"
+                                >
+                                    <X size={16} /> Close
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={resetForm}
+                                        className="px-4 py-2 text-charcoal-600 hover:bg-charcoal-200 rounded-lg text-sm"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={saving}
+                                        className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        <Save size={16} /> Save
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 </form>
@@ -134,9 +173,9 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                     <div key={p.id} className="bg-white border p-4 rounded-xl relative group">
                         <div className="flex justify-between">
                             <h4 className="font-bold">{p.name}</h4>
-                            <div className="opacity-0 group-hover:opacity-100 flex gap-1">
-                                <button onClick={() => handleEdit(p)} className="icon-btn"><Edit2 size={16} /></button>
-                                <button onClick={() => handleDelete(p.id)} className="icon-btn-danger"><Trash2 size={16} /></button>
+                            <div className="flex gap-1 shrink-0">
+                                <button type="button" onClick={() => handleEdit(p)} aria-label="Edit project" className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
+                                <button type="button" onClick={() => handleDelete(p.id)} aria-label="Delete project" className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                             </div>
                         </div>
                         <p className="text-sm text-charcoal-600 mt-1 line-clamp-2">{p.rawDescription}</p>
@@ -151,6 +190,7 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                                 })}
                             </div>
                         )}
+                        <PolishedPreview normalized={p.normalized} polishing={polishingIds.has(p.id)} />
                     </div>
                 ))}
             </div>

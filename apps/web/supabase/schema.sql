@@ -60,6 +60,11 @@ create table experiences (
   end_date text,
   is_current boolean default false,
   description text,
+  -- "Polished profile" (migration 015): AI-normalized rendering of the raw
+  -- description — { bullets, skills, gaps } — computed once on save and
+  -- reused by every generation. Raw `description` stays the source of truth.
+  normalized jsonb,
+  normalized_source_hash text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -112,6 +117,9 @@ create table projects (
   description text,
   technologies text[],
   link text,
+  -- "Polished profile" (migration 016) — see experiences.normalized.
+  normalized jsonb,
+  normalized_source_hash text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -157,6 +165,9 @@ create table extracurriculars (
   start_date text,
   end_date text,
   description text,
+  -- "Polished profile" (migration 016) — see experiences.normalized.
+  normalized jsonb,
+  normalized_source_hash text,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
 
@@ -756,14 +767,19 @@ begin
   delete from public.certifications where user_id = auth.uid();
   delete from public.affiliations where user_id = auth.uid();
   delete from public.publications where user_id = auth.uid();
+  delete from public.languages where user_id = auth.uid();
+  delete from public.references_list where user_id = auth.uid();
   delete from public.applications where user_id = auth.uid();
   delete from public.generated_resumes where user_id = auth.uid();
+  delete from public.ai_call_log where user_id = auth.uid();
   delete from public.purchase_disputes where user_id = auth.uid();
   -- purchase_topups + purchase_overpayments + purchase_state_changes cascade
   -- via the purchases FK; delete purchases last among the related rows.
   delete from public.purchases where user_id = auth.uid();
 
-  -- Delete the profile
+  -- credit_ledger + profile_notes reference profiles with ON DELETE CASCADE,
+  -- so they clear automatically when the profile row is deleted below.
+  -- (languages, references_list, ai_call_log do NOT cascade — deleted above.)
   delete from public.profiles where id = auth.uid();
 
   -- Finally, delete the user from auth.users
@@ -1369,7 +1385,7 @@ do $$ begin
     alter table ai_call_log drop constraint ai_call_log_kind_check;
   end if;
   alter table ai_call_log add constraint ai_call_log_kind_check
-    check (kind in ('optimize','optimize_general','toolkit_item','extract_resume'));
+    check (kind in ('optimize','optimize_general','toolkit','toolkit_item','extract_resume','normalize'));
 end $$;
 
 -- Free vs paid generation typing.

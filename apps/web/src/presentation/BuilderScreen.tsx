@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { ResumeData, AppStep, ToolkitItem } from '../domain/entities';
 import {
@@ -165,6 +165,50 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const [canRegenerate, setCanRegenerate] = useState(true);
   const [cooldownEndsAt, setCooldownEndsAt] = useState<Date | null>(null);
   const [regeneratingItem, setRegeneratingItem] = useState<ToolkitItem | null>(null);
+  // True while the initial toolkit bundle (/api/toolkit) is in flight. The
+  // resume preview is already visible at that point; toolkit tabs show
+  // per-item "generating" spinners until the bundle lands.
+  const [toolkitPending, setToolkitPending] = useState(false);
+
+  // Always-fresh mirror of resumeData for async continuations (the toolkit
+  // bundle resolves long after the user may have started editing the preview;
+  // merging against a stale closure would wipe those edits).
+  const resumeDataRef = useRef(resumeData);
+  useEffect(() => {
+    resumeDataRef.current = resumeData;
+  }, [resumeData]);
+
+  // Persist preview edits to Supabase — 1.5 s after the last change. Inline
+  // edits (EditableElement) only update local state; before this effect, a
+  // user who polished wording in the preview and navigated away silently lost
+  // every edit (the saved row still held the original generation). Snapshot
+  // ref avoids redundant writes (e.g. right after handleGenerate already
+  // saved the merged data, or when opening an existing resume read-only).
+  const lastPersistedRef = useRef<string>(JSON.stringify(initialData));
+  useEffect(() => {
+    if (!resumeService || !activeResumeId || isGenerating) return;
+    if (step !== AppStep.PREVIEW) return;
+    const snapshot = JSON.stringify(resumeData);
+    if (snapshot === lastPersistedRef.current) return;
+    const handle = window.setTimeout(async () => {
+      try {
+        // General resumes are identified by their fixed title — never rename
+        // them here or isGeneralResume detection breaks on next load.
+        const title = isGeneralResume
+          ? ResumeService.GENERAL_RESUME_TITLE
+          : resumeData.targetJob?.title
+            ? `${resumeData.targetJob.title} Resume`
+            : `Resume - ${new Date().toLocaleDateString()}`;
+        await resumeService.updateGeneratedResume(activeResumeId, resumeData, title);
+        lastPersistedRef.current = snapshot;
+        console.info('[builder] preview edits persisted');
+      } catch (err) {
+        console.error('Preview edit autosave failed', err);
+        toast.error(t('builder.autosaveFailed'));
+      }
+    }, 1500);
+    return () => window.clearTimeout(handle);
+  }, [resumeService, resumeData, activeResumeId, step, isGenerating, isGeneralResume, t]);
 
   // Skills the user accumulated during profile setup. Used by SkillsStep to
   // surface JD-relevant suggestions (via fuse.js) before falling back to the
@@ -715,9 +759,24 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
           }
         : resumeData;
 
+      // Fire the toolkit bundle in PARALLEL with the optimizer — separate
+      // /api/toolkit request, free (the optimizer's credit covers the whole
+      // generation), never throws (failures land in its errors map). The
+      // resume renders the moment the optimizer resolves; the toolkit fills
+      // its tabs in when this promise settles.
+      setToolkitPending(true);
+      const toolkitPromise = resumeService.generateToolkitBundle(dataForGeneration);
+
       const optimizedData = await resumeService.optimizeResume(dataForGeneration);
-      const mergedData = resumeService.mergeOptimizedData(dataForGeneration, optimizedData);
+      const mergedData: ResumeData = {
+        ...resumeService.mergeOptimizedData(dataForGeneration, optimizedData),
+        // Clear artifacts from any previous generation — the new bundle is in
+        // flight, and stale artifacts must not render as "success" meanwhile.
+        coverLetter: undefined,
+        toolkit: undefined,
+      };
       setResumeData(mergedData);
+      resumeDataRef.current = mergedData;
       setStep(AppStep.PREVIEW);
 
       // Server consumed one credit on success — keep the local count in sync.
@@ -728,20 +787,10 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         return next;
       });
 
-      // With the combined toolkit call, success is all-or-nothing on the
-      // initial generation — either every toolkit item is present or every
-      // one is in the failed state. The warning-card retry path lives on
-      // each tab, so we just tell the user where to look.
-      const errorKeys = Object.keys(mergedData.toolkit?.errors ?? {});
-      const toolkitFailed = errorKeys.length > 0;
-      if (!toolkitFailed) {
-        console.info('[builder] generation success — full toolkit');
-        toast.success(t('builder.toolkitReady'));
-      } else {
-        console.warn(`[builder] generation success — partial toolkit, failed slots=${errorKeys.join(',')}`);
-        toast.warning(t('builder.toolkitPartial'));
-      }
-
+      // Persist the resume right away (the toolkit lands in a second write) —
+      // the user's core artifact must survive even if they close the tab
+      // before the toolkit finishes.
+      let savedId = activeResumeId;
       if (user) {
         try {
           const title = mergedData.targetJob?.title
@@ -754,13 +803,67 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
           } else {
             const newId = await resumeService.saveGeneratedResume(user.id, mergedData, title);
             setActiveResumeId(newId);
+            savedId = newId;
           }
+          // Just persisted — sync the preview-edit autosave snapshot so the
+          // effect doesn't immediately re-write the same data.
+          lastPersistedRef.current = JSON.stringify(mergedData);
         } catch (saveErr) {
           console.error('Auto-save failed', saveErr);
           toast.error(t('builder.autosaveFailed'));
         }
       }
+
+      // Toolkit continuation — merge against the LATEST data (the user may be
+      // editing the preview while this resolves), toast the outcome, persist.
+      void toolkitPromise.then(async ({ coverLetter, toolkit }) => {
+        const latest = resumeDataRef.current;
+        const withToolkit: ResumeData = {
+          ...latest,
+          coverLetter: coverLetter ?? latest.coverLetter,
+          toolkit,
+        };
+        setResumeData(withToolkit);
+        resumeDataRef.current = withToolkit;
+        setToolkitPending(false);
+
+        const errorKeys = Object.keys(toolkit.errors ?? {});
+        if (errorKeys.length === 0) {
+          console.info('[builder] toolkit bundle complete — all slots');
+          toast.success(t('builder.toolkitReady'));
+        } else {
+          console.warn(`[builder] toolkit bundle partial, failed slots=${errorKeys.join(',')}`);
+          // Name the failed artifacts so the user knows exactly which tabs to
+          // retry instead of hunting for the empty ones.
+          const itemLabelKeys: Record<string, string> = {
+            coverLetter: 'preview.tabCoverLetter',
+            outreachEmail: 'preview.tabOutreachEmail',
+            linkedInMessage: 'preview.tabLinkedIn',
+            interviewQuestions: 'preview.tabQuestionPrep',
+          };
+          const failedNames = errorKeys
+            .map(k => (itemLabelKeys[k] ? t(itemLabelKeys[k]) : k))
+            .join(', ');
+          toast.warning(t('builder.toolkitPartialNamed', { items: failedNames }), { duration: 8000 });
+        }
+
+        if (user && savedId) {
+          try {
+            const title = withToolkit.targetJob?.title
+              ? `${withToolkit.targetJob.title} Resume`
+              : `Resume - ${new Date().toLocaleDateString()}`;
+            await resumeService.updateGeneratedResume(savedId, withToolkit, title);
+            lastPersistedRef.current = JSON.stringify(withToolkit);
+          } catch (saveErr) {
+            console.error('Toolkit auto-save failed', saveErr);
+            toast.error(t('builder.autosaveFailed'));
+          }
+        }
+      });
     } catch (err) {
+      // Optimizer failed — the toolkit promise (if started) resolves into an
+      // errors map on its own and is irrelevant now; drop the pending state.
+      setToolkitPending(false);
       const errCode = err instanceof ApiCallError ? err.code : undefined;
       const errStatus = err instanceof ApiCallError ? err.status : undefined;
       const errName = err instanceof Error ? err.name : 'Unknown';
@@ -778,8 +881,31 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         // GibberishContentError carries a user-actionable message naming the
         // offending field — surface it verbatim so the user knows where to fix.
         toast.error(err.message);
+      } else if (errCode === 'refund_failed') {
+        // The user was charged but got nothing AND the automatic refund
+        // failed — never leave this ambiguous. Long duration: this one matters.
+        toast.error(t('builder.refundFailed'), { duration: 15000 });
+      } else if (errCode === 'client_timeout' || errCode === 'network_error') {
+        // Hung connection or offline — retryable, so offer the retry inline
+        // instead of making the user re-find the Generate button.
+        toast.error(
+          errCode === 'client_timeout' ? t('builder.generationTimeout') : t('builder.networkError'),
+          {
+            duration: 12000,
+            action: {
+              label: t('builder.retryCta'),
+              onClick: () => { void handleGenerate(opts); },
+            },
+          },
+        );
       } else {
-        toast.error(t('builder.optimizeFailed'));
+        toast.error(t('builder.optimizeFailed'), {
+          duration: 10000,
+          action: {
+            label: t('builder.retryCta'),
+            onClick: () => { void handleGenerate(opts); },
+          },
+        });
       }
     } finally {
       setIsGenerating(false);
@@ -849,6 +975,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onRegenerate={handleRegenerateGeneralResume}
         onRegenerateItem={handleRegenerateItem}
         regeneratingItem={regeneratingItem}
+        toolkitPending={toolkitPending}
       />
     );
   }

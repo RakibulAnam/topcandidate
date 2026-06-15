@@ -15,7 +15,12 @@ import {
   GeneratedToolkit,
   OutreachEmail,
   InterviewQuestion,
+  NormalizedItemContent,
 } from '../../../domain/entities/Resume';
+import {
+  IProfileItemNormalizer,
+  ProfileItemContext,
+} from '../../../domain/usecases/NormalizeProfileItemUseCase';
 import { IResumeOptimizer } from '../../../domain/usecases/OptimizeResumeUseCase';
 import { IToolkitGenerator } from '../../../domain/usecases/GenerateToolkitUseCase';
 import { ICoverLetterGenerator } from '../../../domain/usecases/GenerateCoverLetterUseCase';
@@ -51,18 +56,48 @@ export class ApiCallError extends Error {
   }
 }
 
+// Client-side wall clock for any /api/* call. Vercel kills functions at 60s
+// (vercel.json maxDuration), so anything still pending at 90s is a hung
+// connection, not a slow server — abort and surface a retryable error instead
+// of spinning forever.
+const CLIENT_TIMEOUT_MS = 90_000;
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const token = await getAccessToken();
   const t0 = performance.now();
   console.info(`[proxy] POST ${path}`);
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), CLIENT_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+      signal: abort.signal,
+    });
+  } catch (err) {
+    const elapsedMs = Math.round(performance.now() - t0);
+    if (abort.signal.aborted) {
+      console.error(`[proxy] ${path} client-timeout after ${elapsedMs}ms`);
+      throw new ApiCallError(
+        'The request took too long and was cancelled. Please try again.',
+        408,
+        'client_timeout',
+      );
+    }
+    console.error(`[proxy] ${path} network error after ${elapsedMs}ms`, err);
+    throw new ApiCallError(
+      'Could not reach the server. Check your connection and try again.',
+      0,
+      'network_error',
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   const elapsed = Math.round(performance.now() - t0);
   // Server-side handlers stamp x-request-id on every response — surface it
@@ -75,13 +110,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     const friendly = errorBody?.error
       ?? `Request failed: ${res.status} ${res.statusText}`;
     console.error(`[proxy] ${path} ${res.status} rid=${rid} ${elapsed}ms code=${errorBody?.code ?? '-'} msg="${friendly}"`);
-    if (res.status === 429 && errorBody?.used != null && errorBody?.cap != null) {
-      throw new ApiCallError(
-        `Daily limit reached (${errorBody.used}/${errorBody.cap}). Try again tomorrow.`,
-        res.status,
-        errorBody.code,
-      );
-    }
+    // 429s carry a server-built message that already names the limit that was
+    // hit (overall daily cap vs the stricter free-resume cap) — pass it
+    // through rather than rebuilding a generic one here.
     throw new ApiCallError(friendly, res.status, errorBody?.code);
   }
 
@@ -93,51 +124,18 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 // Optimizer + combined toolkit (the hot path)
 // ────────────────────────────────────────────────
 //
-// /api/optimize runs BOTH the optimizer and the toolkit generator on the
-// server in parallel and returns both results plus per-item errors. To keep
-// the existing `IResumeOptimizer` + `IToolkitGenerator` separation on the
-// client, we cache the response in-flight: the first of the two calls
-// (whichever ResumeService makes first) triggers the network request; the
-// second reuses the same Promise.
-//
-// Cache key: the ResumeData reference. Cleared after both halves resolve or
-// either errors. ResumeService calls them inside the same allSettled, so the
-// references are identical and cache hits.
-//
-// `toolkit` is always present in the response since per-artifact validation
-// landed — even when every slot failed validation, the server returns the
-// errors map so the client can render four "failed" cards rather than
-// surfacing a single bundle-level failure.
-type ApiOptimizeResponse = {
-  optimized: OptimizedResumeData;
-  toolkit: GeneratedToolkit;
-};
-
-const inflight = new WeakMap<ResumeData, Promise<ApiOptimizeResponse>>();
-function callOptimize(data: ResumeData): Promise<ApiOptimizeResponse> {
-  let p = inflight.get(data);
-  if (!p) {
-    console.info('[proxy] callOptimize cache MISS — issuing /api/optimize');
-    p = postJson<ApiOptimizeResponse>('/api/optimize', { data })
-      .finally(() => {
-        // Best-effort cleanup; WeakMap entries also get GC'd naturally.
-        inflight.delete(data);
-      });
-    inflight.set(data, p);
-  } else {
-    // Critical for the credit-double-charge guarantee: when both halves
-    // (optimizer + toolkit) of ResumeService.optimizeResume hit callOptimize
-    // with the SAME ResumeData reference, the second one MUST cache-hit. If
-    // you ever see two MISS lines for a single Generate click, something
-    // upstream is cloning the data and the server will charge twice.
-    console.info('[proxy] callOptimize cache HIT — reusing in-flight /api/optimize');
-  }
-  return p;
-}
+// Since the 2026-06-11 split, the optimizer (/api/optimize, charges the
+// credit) and the combined toolkit bundle (/api/toolkit, free) are separate
+// requests on separate function invocations. The builder fires both in
+// parallel and renders the resume as soon as the optimizer resolves; the
+// toolkit fills its tabs in when its own request completes. The old
+// in-flight WeakMap dedupe is gone with the combined request — each proxy
+// posts exactly one request, so there is no double-charge surface left here
+// (only /api/optimize touches credits at all).
 
 export class ProxyResumeOptimizer implements IResumeOptimizer {
   async optimize(data: ResumeData): Promise<OptimizedResumeData> {
-    const r = await callOptimize(data);
+    const r = await postJson<{ optimized: OptimizedResumeData }>('/api/optimize', { data });
     return r.optimized;
   }
 }
@@ -153,11 +151,11 @@ export class ProxyGeneralResumeOptimizer implements IResumeOptimizer {
 
 export class ProxyToolkitGenerator implements IToolkitGenerator {
   async generate(data: ResumeData): Promise<GeneratedToolkit> {
-    const r = await callOptimize(data);
-    // Server always returns a toolkit object now: either populated, or with
-    // an `errors` map describing why each slot failed validation. The service
-    // layer merges partial artifacts + errors into `JobToolkit` and the UI
-    // renders per-card "failed" states with retry buttons.
+    // The server always returns a toolkit object on 200: either populated, or
+    // with an `errors` map describing why each slot failed validation. The
+    // service layer merges partial artifacts + errors into `JobToolkit` and
+    // the UI renders per-card "failed" states with retry buttons.
+    const r = await postJson<{ toolkit: GeneratedToolkit }>('/api/toolkit', { data });
     return r.toolkit;
   }
 }
@@ -204,6 +202,19 @@ export class ProxyResumeExtractor implements IResumeExtractor {
     const { result } = await postJson<{ result: ExtractedProfileData }>(
       '/api/extract-resume',
       { fileData, mimeType }
+    );
+    return result;
+  }
+}
+
+// ────────────────────────────────────────────────
+// Profile-item normalizer ("polished profile")
+// ────────────────────────────────────────────────
+export class ProxyProfileNormalizer implements IProfileItemNormalizer {
+  async normalize(text: string, context: ProfileItemContext): Promise<NormalizedItemContent> {
+    const { result } = await postJson<{ result: NormalizedItemContent }>(
+      '/api/normalize-item',
+      { text, context }
     );
     return result;
   }

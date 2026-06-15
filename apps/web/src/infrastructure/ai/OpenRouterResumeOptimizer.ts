@@ -10,11 +10,13 @@
 // once every generator is ported and validated. Until then the live path stays
 // Groq→Gemini.
 //
-// JSON mode caveat: OpenRouter `json_object` does NOT enforce a schema for
-// DeepSeek/Llama, so we embed the shape spec in the user prompt
-// (`embedSchemaSpec: true`) and validate the parsed payload ourselves — exactly
-// what the Groq path does. Reasoning is disabled (reasoning tokens bill as
-// output and would blow up cost on a structured task).
+// Structured output: `json_schema` (strict) — the provider enforces the shape,
+// same as the toolkit generator (2026-06-10 lesson: `json_object` truncates/
+// malforms large structured payloads). We STILL embed the shape spec in the
+// user prompt (`embedSchemaSpec: true`) because the schema can't express
+// "echo back exactly these input IDs" — the spec text lists them, and
+// validateOptimizedResponse() remains the final gate. Reasoning is disabled
+// (reasoning tokens bill as output and would blow up cost on a structured task).
 
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
@@ -47,13 +49,57 @@ const OPTIMIZER_MODELS = [
   'meta-llama/llama-3.3-70b-instruct',
 ];
 
+// Structured-output schema (mirrors OptimizedResumeData). Strict mode requires
+// every property listed in `required`, so the optional sections are required
+//-as-empty-arrays — validateOptimizedResponse() still checks the counts and
+// IDs against the input afterwards.
+const REFINED_SECTION = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      refinedBullets: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['id', 'refinedBullets'],
+    additionalProperties: false,
+  },
+} as const;
+
+const OPTIMIZER_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    skills: { type: 'array', items: { type: 'string' } },
+    skillCategories: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          category: { type: 'string' },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['category', 'items'],
+        additionalProperties: false,
+      },
+    },
+    experience: REFINED_SECTION,
+    projects: REFINED_SECTION,
+    extracurriculars: REFINED_SECTION,
+  },
+  required: ['summary', 'skills', 'skillCategories', 'experience', 'projects', 'extracurriculars'],
+  additionalProperties: false,
+};
+
 export class OpenRouterResumeOptimizer implements IResumeOptimizer {
   private readonly client: OpenRouterClient;
   // Total wall-time budget across attempts (deadline-bounded — see withRetry).
-  // The optimizer runs in PARALLEL with the toolkit on /api/optimize; it's the
-  // shorter pole, so it gets the smaller budget. optimizer(30s) ‖ toolkit(48s)
-  // → ~48s + pre-AI overhead, comfortably under Vercel's 60s cap.
-  private readonly deadlineMs = 30_000;
+  // Since the 2026-06-11 split, /api/optimize runs the optimizer ALONE in its
+  // own function invocation (the toolkit lives on /api/toolkit), so the
+  // optimizer gets most of Vercel's 60s window: 50s leaves room for auth +
+  // credit RPC + telemetry overhead and buys a second attempt after a slow
+  // first one.
+  private readonly deadlineMs = 50_000;
   private readonly temperature = 0.3;
 
   constructor(apiKey: string) {
@@ -75,7 +121,7 @@ export class OpenRouterResumeOptimizer implements IResumeOptimizer {
               { role: 'system', content: systemInstruction },
               { role: 'user', content: userPrompt },
             ],
-            response_format: { type: 'json_object' },
+            response_format: { type: 'json_schema', json_schema: { name: 'optimized_resume', strict: true, schema: OPTIMIZER_SCHEMA } },
             temperature: this.temperature,
             max_tokens: 8000,
             reasoning: { enabled: false },

@@ -8,6 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { profileRepository } from '../infrastructure/config/dependencies';
+import { needsPolish, polishInBackground } from './components/profile/polish';
 import { ResumeService } from '../application/services/ResumeService';
 import { toast } from 'sonner';
 import {
@@ -412,17 +413,49 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     for (const edu of education) await profileRepository.saveEducation(user.id, edu);
                     break;
                 case SetupStep.EXPERIENCE_OR_PROJECTS:
+                    // Each save fires a "polished profile" pass in the
+                    // background (hash-guarded) — never blocks setup; results
+                    // appear on the Profile screen and feed every later
+                    // generation. The raw text remains the source of truth,
+                    // so a polish failure costs nothing (next save retries).
                     if (userType === 'experienced') {
-                        for (const exp of experiences) await profileRepository.saveExperience(user.id, exp);
+                        for (const exp of experiences) {
+                            const savedId = await profileRepository.saveExperience(user.id, exp);
+                            if (needsPolish(exp.rawDescription ?? '', exp)) {
+                                polishInBackground({
+                                    text: exp.rawDescription ?? '',
+                                    context: { kind: 'experience', title: exp.role, organization: exp.company },
+                                    persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
+                                });
+                            }
+                        }
                     } else {
-                        for (const proj of projects) await profileRepository.saveProject(user.id, proj);
+                        for (const proj of projects) {
+                            const savedId = await profileRepository.saveProject(user.id, proj);
+                            if (needsPolish(proj.rawDescription ?? '', proj)) {
+                                polishInBackground({
+                                    text: proj.rawDescription ?? '',
+                                    context: { kind: 'project', title: proj.name, technologies: proj.technologies },
+                                    persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
+                                });
+                            }
+                        }
                     }
                     break;
                 case SetupStep.SKILLS:
                     await profileRepository.saveSkills(user.id, skills);
                     break;
                 case SetupStep.EXTRACURRICULARS:
-                    for (const item of extracurriculars) await profileRepository.saveExtracurricular(user.id, item);
+                    for (const item of extracurriculars) {
+                        const savedId = await profileRepository.saveExtracurricular(user.id, item);
+                        if (needsPolish(item.description ?? '', item)) {
+                            polishInBackground({
+                                text: item.description ?? '',
+                                context: { kind: 'extracurricular', title: item.title, organization: item.organization },
+                                persist: (n, h) => profileRepository.saveExtracurricularNormalized(savedId, n, h),
+                            });
+                        }
+                    }
                     break;
                 case SetupStep.AWARDS:
                     for (const item of awards) await profileRepository.saveAward(user.id, item);

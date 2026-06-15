@@ -34,6 +34,7 @@ import { OpenRouterOutreachEmailGenerator } from '../../src/infrastructure/ai/Op
 import { OpenRouterLinkedInMessageGenerator } from '../../src/infrastructure/ai/OpenRouterLinkedInMessageGenerator.js';
 import { OpenRouterInterviewQuestionsGenerator } from '../../src/infrastructure/ai/OpenRouterInterviewQuestionsGenerator.js';
 import { OpenRouterResumeExtractor } from '../../src/infrastructure/ai/OpenRouterResumeExtractor.js';
+import { OpenRouterProfileNormalizer } from '../../src/infrastructure/ai/OpenRouterProfileNormalizer.js';
 
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY ?? '';
 const GROQ_KEY = process.env.GROQ_API_KEY ?? '';
@@ -95,3 +96,11 @@ export const interviewQuestionsGenerator = useOpenRouter
 export const resumeExtractor = useOpenRouter
   ? new OpenRouterResumeExtractor(OPENROUTER_KEY)
   : (GEMINI_KEY ? new GeminiResumeExtractor(GEMINI_KEY) : null);
+
+// Profile-item normalizer ("polished profile") — OpenRouter only; there is no
+// legacy Gemini sibling (the feature shipped after the OpenRouter cutover).
+// On the legacy path the endpoint returns 503 and the client treats
+// normalization as unavailable — profile saves are unaffected.
+export const profileNormalizer = useOpenRouter
+  ? new OpenRouterProfileNormalizer(OPENROUTER_KEY)
+  : null;

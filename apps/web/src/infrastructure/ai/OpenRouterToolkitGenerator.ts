@@ -113,11 +113,12 @@ const TOOLKIT_SCHEMA: Record<string, unknown> = {
 export class OpenRouterToolkitGenerator implements IToolkitGenerator {
   private readonly client: OpenRouterClient;
   // Total wall-time budget across attempts (deadline-bounded — see withRetry).
-  // Toolkit is the slower, larger-output half; it runs in PARALLEL with the
-  // optimizer (30s) on /api/optimize, so 48s here → ~48s + pre-AI overhead,
-  // under Vercel's 60s cap. One slow attempt may use the whole budget; a fast
+  // Since the 2026-06-11 split, the toolkit runs on its OWN /api/toolkit
+  // function invocation (the optimizer lives on /api/optimize), so it gets
+  // most of Vercel's 60s window: 52s + auth/rate-limit/telemetry overhead
+  // stays under the cap. One slow attempt may use the whole budget; a fast
   // parse-fail leaves room for one bounded retry.
-  private readonly deadlineMs = 48_000;
+  private readonly deadlineMs = 52_000;
 
   constructor(apiKey: string) {
     this.client = new OpenRouterClient(apiKey);

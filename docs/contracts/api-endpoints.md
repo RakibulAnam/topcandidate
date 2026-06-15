@@ -13,8 +13,9 @@ There are four auth models in play:
 
 | Endpoint | File | Purpose |
 | --- | --- | --- |
-| `POST /api/optimize` | `optimize.ts` | Hot path. Consumes **1 toolkit credit**, then runs the optimizer + combined toolkit generator in parallel. `402` if no credits, `429` over daily cap (20/24h), `413` if JD > 20k chars, `503` if no AI provider. |
-| `POST /api/optimize-general` | `optimize-general.ts` | General resume optimization (no target job description). Free — no credit gate. |
+| `POST /api/optimize` | `optimize.ts` | Hot path. Consumes **1 toolkit credit**, then runs the resume optimizer only (toolkit moved to `/api/toolkit`, 2026-06-11; the response's `toolkit` field is a stale-client stub). `402` if no credits, `429` over daily cap (20/24h), `413` if JD > 20k chars, `503` if no AI provider. |
+| `POST /api/toolkit` | `toolkit.ts` | Combined toolkit bundle (cover letter + outreach + LinkedIn note + interview prep), fired by the client in parallel with `/api/optimize`. Free — the optimizer's credit covers the generation. `429` over daily cap, `413` if JD > 20k chars. |
+| `POST /api/optimize-general` | `optimize-general.ts` | General resume optimization (no target job description). Free — no credit gate; per-kind cap 5/24h on top of the overall 20/24h. |
 | `POST /api/toolkit-item` | `toolkit-item.ts` | Regenerate a single toolkit artifact (cover letter / outreach / LinkedIn / interview Qs). Free. |
 | `POST /api/extract-resume` | `extract-resume.ts` | Parse an uploaded PDF/Word resume into profile data. |
 | `POST /api/purchase` | `purchase.ts` | Record a **`pending`** row in the `purchases` table via the `initiate_purchase` RPC. No credits granted here. `409` duplicate TrxID, `429` if ≥ 5 pending in 24h. |

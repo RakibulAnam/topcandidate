@@ -104,6 +104,11 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     endDate: e.endDate,
     isCurrent: e.isCurrent,
     description: e.rawDescription,
+    // "Polished profile" (normalized once on profile save): pre-cleaned
+    // professional bullets derived from the raw description. When present,
+    // the NOTE in the prompt tells the model to use them as primary
+    // evidence — stabler output than re-interpreting Banglish per generation.
+    ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
   }));
 
   const cleanProjects = data.projects.map(p => ({
@@ -112,6 +117,7 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     description: p.rawDescription,
     technologies: p.technologies,
     link: p.link,
+    ...(p.normalized?.bullets?.length ? { canonicalBullets: p.normalized.bullets } : {}),
   }));
 
   const cleanExtracurriculars = (data.extracurriculars || []).map(e => ({
@@ -121,7 +127,13 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     startDate: e.startDate,
     endDate: e.endDate,
     description: e.description,
+    ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
   }));
+
+  const hasCanonical =
+    cleanExperience.some(e => 'canonicalBullets' in e) ||
+    cleanProjects.some(p => 'canonicalBullets' in p) ||
+    cleanExtracurriculars.some(e => 'canonicalBullets' in e);
 
   const schemaSpec = opts.embedSchemaSpec ? buildSchemaSpec(data) : '';
 
@@ -139,7 +151,7 @@ Total experience: ${totalExperience}
 SENIORITY: ${seniority} — calibrate verb choice, ownership claims, and scope language accordingly (see RULE 9).
 Skills (input): ${data.skills.join(', ') || '(none)'}
 
-EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
+${hasCanonical ? 'NOTE: items below with "canonicalBullets" carry a pre-cleaned professional rendering of their raw description. Treat canonicalBullets as the PRIMARY evidence and the raw description as backup detail; still reorder, reword, and emphasize for THIS JD.\n\n' : ''}EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
 ${JSON.stringify(cleanExperience)}
 
 PROJECTS (${cleanProjects.length} items — each MUST produce refinedBullets):
@@ -416,8 +428,22 @@ const SKILL_ALIASES: Record<string, string[]> = {
 
 function buildEvidenceText(c: ResumeData): string {
   const parts: string[] = [...(c.skills ?? [])];
-  for (const e of c.experience ?? []) parts.push(e.role ?? '', e.company ?? '', e.rawDescription ?? '');
-  for (const p of c.projects ?? []) parts.push(p.name ?? '', p.rawDescription ?? '', p.technologies ?? '');
+  // Polished-profile bullets/skills count as evidence too — they are
+  // AI-verified renderings of the raw text (e.g. "PostgreSQL" where the
+  // Banglish raw says "postgres diye"); without them, canonical-cased terms
+  // the model echoes from canonicalBullets would be false-flagged.
+  for (const e of c.experience ?? []) {
+    parts.push(e.role ?? '', e.company ?? '', e.rawDescription ?? '');
+    if (e.normalized) parts.push(...e.normalized.bullets, ...e.normalized.skills);
+  }
+  for (const p of c.projects ?? []) {
+    parts.push(p.name ?? '', p.rawDescription ?? '', p.technologies ?? '');
+    if (p.normalized) parts.push(...p.normalized.bullets, ...p.normalized.skills);
+  }
+  for (const x of c.extracurriculars ?? []) {
+    parts.push(x.title ?? '', x.organization ?? '', x.description ?? '');
+    if (x.normalized) parts.push(...x.normalized.bullets, ...x.normalized.skills);
+  }
   for (const ed of c.education ?? []) parts.push(ed.school ?? '', ed.degree ?? '', ed.field ?? '');
   for (const cert of c.certifications ?? []) parts.push(cert.name ?? '', cert.issuer ?? '');
   return parts.join(' ');
