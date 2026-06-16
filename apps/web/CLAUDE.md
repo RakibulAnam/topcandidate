@@ -38,7 +38,17 @@
 ## Verification commands
 
 ```bash
-npm run build          # vite build — must pass clean (transpiles TS, does NOT type-check)
+npm run build          # = `npm run typecheck:api && vite build` — must pass clean.
+                       # vite build transpiles the CLIENT but does NOT type-check it
+                       # (the presentation layer carries pre-existing, tolerated TS
+                       # noise). The prepended `typecheck:api` step DOES type-check the
+                       # api/ serverless functions (tsconfig.api.json) — the same thing
+                       # Vercel checks on deploy. This guards the failure class that
+                       # silently broke prod for days: an api/ type error that passes a
+                       # client-only build but fails every deploy. Vercel's buildCommand
+                       # is also `npm run build`, so the check runs identically there.
+
+npm run typecheck:api  # run the api/ type-check alone (fast feedback while editing api)
 
 # Smoke-test that the server-only API code path imports cleanly. `vite build`
 # only bundles client code and tree-shakes server-only files (api/_lib/aiFactory

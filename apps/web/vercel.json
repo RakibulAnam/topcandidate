@@ -1,6 +1,6 @@
 {
   "framework": "vite",
-  "buildCommand": "vite build",
+  "buildCommand": "npm run build",
   "devCommand": "vite --port $PORT",
   "outputDirectory": "dist",
   "functions": {

@@ -664,11 +664,12 @@ Skill packages live at `.agent/skills/` and are also mirrored to `~/.claude/skil
 ```bash
 npm install          # first time
 npm run dev          # Vite dev server
-npm run build        # typecheck (tsc is part of Vite) + production bundle
+npm run typecheck:api # tsc -p tsconfig.api.json — type-check the api/ serverless functions only
+npm run build        # = typecheck:api + vite build (Vite transpiles the client but does NOT type-check it)
 npm run preview      # serve the dist/ build
 ```
 
-No test suite currently (no `npm test`). Verification = successful `npm run build` + manual browser pass.
+No test suite currently (no `npm test`). Verification = successful `npm run build` + manual browser pass. NOTE: `vite build` does NOT type-check — it only transpiles. The client (presentation layer) carries pre-existing, tolerated TS noise and is intentionally not type-checked. `npm run build` prepends `typecheck:api`, which DOES type-check the `api/` serverless functions (the surface Vercel type-checks on deploy) so an api/ type error can't pass locally yet fail every deploy. Vercel's `buildCommand` is also `npm run build`.
 
 **Required env vars** — split into client-visible (`VITE_*`) and server-only (no prefix). Set both in Vercel's Environment Variables UI; non-`VITE_` keys are NEVER bundled into the client:
 ```

@@ -1,0 +1,19 @@
+{
+  // API-only type-check. `npm run build` is `vite build`, which transpiles but
+  // does NOT type-check — and Vercel type-checks the serverless functions in
+  // api/ when it deploys. So an api/ type error passes `npm run build` locally
+  // yet fails every deploy (this bit us twice: the normalize-item TS2559 that
+  // silently broke prod for days). This config makes `tsc` check api/ — and
+  // only the files api/ actually imports — so the same error surfaces in
+  // seconds locally via `npm run typecheck:api` (wired into `npm run build`).
+  //
+  // `include` is api/ only: the program is the api files plus their transitive
+  // imports (domain/infrastructure/application). The presentation layer (which
+  // carries pre-existing, vite-tolerated type noise) is NOT imported by api/,
+  // so it stays out of this program and never false-fails the check.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["api/**/*.ts"]
+}

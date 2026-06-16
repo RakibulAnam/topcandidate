@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:full": "vercel dev",
-    "build": "vite build",
+    "typecheck:api": "tsc -p tsconfig.api.json",
+    "build": "npm run typecheck:api && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
