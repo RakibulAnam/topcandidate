@@ -4,16 +4,17 @@
 
 ## First-time setup
 
-1. Generate three random 32-byte hex secrets:
+1. Generate two random 32-byte hex secrets:
    ```bash
-   openssl rand -hex 32   # → ADMIN_API_KEY
+   openssl rand -hex 32   # → ADMIN_API_KEY  (now the session-token SIGNING secret — not pasted anywhere)
    openssl rand -hex 32   # → CRON_SECRET
    openssl rand -hex 32   # → BKASH_WEBHOOK_SECRET
    ```
-2. Add all three to Vercel's Environment Variables UI (Production + Preview + Development). Also confirm `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `OPENROUTER_API_KEY` (primary AI; or legacy `GROQ_API_KEY`/`GEMINI_API_KEY`), `VITE_BKASH_PAYMENT_NUMBER` are set.
-3. **Run migrations in the Supabase SQL editor in order.** At minimum, migrations 007 → 008 → 009 → 010 must be applied before `/admin` works. Each file in `supabase/migrations/` is idempotent. (Migration 010 backfills `profiles.created_at` / `updated_at` — required for the Users tab, since older DBs may have been provisioned before those columns landed in `schema.sql`.)
-4. **Enable `pg_cron` in Supabase** (required on Vercel Hobby) — Dashboard → Database → Extensions → enable `pg_cron`. Then paste `supabase/migrations/007_optional_pg_cron.sql` into the SQL editor and run it. This schedules the 24h-TTL pending-expiry every 15 minutes.
-5. Open `/admin` on the deployed site. Paste `ADMIN_API_KEY` into the gate. The key is stored in your browser's localStorage; lock the panel any time via the **Lock** button or the **Settings → Reset admin session** button.
+2. Set the owner login credentials: `ADMIN_USERNAME` (e.g. `owner`) and either `ADMIN_PASSWORD_HASH` (an scrypt `<saltHex>:<keyHex>` — preferred, see `.env.example` for the one-liner) or `ADMIN_PASSWORD` (plaintext fallback). `ADMIN_PASSWORD_HASH` takes precedence if both are set.
+3. Add all of the above to Vercel's Environment Variables UI (Production + Preview + Development). Also confirm `SUPABASE_SERVICE_ROLE_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `OPENROUTER_API_KEY` (primary AI; or legacy `GROQ_API_KEY`/`GEMINI_API_KEY`), `VITE_BKASH_PAYMENT_NUMBER` are set.
+4. **Run migrations in the Supabase SQL editor in order.** At minimum, migrations 007 → 008 → 009 → 010 must be applied before `/admin` works; apply the full set through 019 for current production (013 adds the analytics/BI surface the dashboard summary + Revenue/Product/System tabs read). Each file in `supabase/migrations/` is idempotent. (Migration 010 backfills `profiles.created_at` / `updated_at` — required for the Users tab, since older DBs may have been provisioned before those columns landed in `schema.sql`.)
+5. **Enable `pg_cron` in Supabase** (required on Vercel Hobby) — Dashboard → Database → Extensions → enable `pg_cron`. Then paste `supabase/migrations/007_optional_pg_cron.sql` into the SQL editor and run it. This schedules the 24h-TTL pending-expiry every 15 minutes.
+6. Open `/admin` on the deployed site. Log in with `ADMIN_USERNAME` + password. On success the server mints a short-lived signed session token that the SPA holds in **sessionStorage** (NOT localStorage) — closing the tab logs you out. Lock the panel any time via the **Lock** button or the **Settings → Reset session** button.
 
 ## Layout
 
@@ -112,12 +113,16 @@ Audit log tab. Filter by action ("confirm_purchase") or target kind ("purchase")
 
 Settings → "Run pending-expiry now". Fires `expire_stale_pending_purchases()` immediately, which flips any `pending` rows older than 24h to `expired`. Normally pg_cron handles this every 15 min; the manual button is for when you've changed the migration or want to verify the path.
 
-### Rotate the admin key
+### Rotate the admin signing secret / change the password
 
-1. Generate a new key: `openssl rand -hex 32`.
+`ADMIN_API_KEY` is the session-token signing secret (no longer pasted by hand). Rotating it invalidates every live session.
+
+1. Generate a new secret: `openssl rand -hex 32`.
 2. Update `ADMIN_API_KEY` in Vercel (Production + Preview + Development).
 3. Trigger a redeploy in Vercel (or push any commit).
-4. Open `/admin` — your stored key will be rejected at the next call. Paste the new one.
+4. Open `/admin` — your stored session token is now invalid; log in again.
+
+To change the password, regenerate `ADMIN_PASSWORD_HASH` (or update `ADMIN_PASSWORD`) and redeploy.
 
 ### Rotate the bKash webhook secret
 
@@ -127,7 +132,7 @@ See `docs/contracts/webhook-confirm-purchase.md` for the cross-app rotation proc
 
 Run this after any admin-related change:
 
-1. Paste admin key, land on Dashboard. Tiles render. Action queue is consistent.
+1. Log in with username + password, land on Dashboard. Tiles render. Action queue is consistent.
 2. Find a pending purchase via search. Click **Confirm now** with a reason. Status flips, credits land on the customer.
 3. Switch to Audit log. Single new entry with the right `confirm_purchase` action, your reason, the before/after diff.
 4. **Refund** the same purchase from PurchaseDetail. Status flips to `refunded`, credits decrement.
@@ -137,18 +142,21 @@ Run this after any admin-related change:
 8. Audit log shows all four entries with correct ordering and diffs.
 9. Open Parser failures (if any rows exist). Select a few, **Mark reviewed**, then **Export reviewed JSON**. Confirm the file downloads.
 10. Open Settings. Run pending-expiry now with reason. Verify the alert says how many rows were expired (0 is fine).
-11. Click **Lock** in the header. Confirm you land on the gate. Paste the key again. You're back.
+11. Click **Lock** in the header. Confirm you land on the login screen. Log in again. You're back.
 
 ## Endpoint reference
 
-All admin endpoints require `X-Admin-Key: <ADMIN_API_KEY>` (timing-safe compare). All write endpoints require a non-empty `reason` field — it lands in both `purchase_state_changes` (for purchase-row actions) and `admin_audit_log`.
+Every admin endpoint except `login` requires `Authorization: Bearer <session-token>` — the token minted by `POST /api/admin/login` (verified via signature + expiry by `requireAdmin`; the signing secret is `ADMIN_API_KEY`). All write endpoints require a non-empty `reason` field — it lands in both `purchase_state_changes` (for purchase-row actions) and `admin_audit_log`.
 
 All endpoints route through the single Vercel function `api/admin/[action].ts` (Hobby's 12-function cap), so URLs are flat verbs:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| POST | `/api/admin/login` | `{ username, password }` → `{ token, expiresInSec }` (the only unauthenticated action) |
 | GET  | `/api/admin/dashboard` | Stat tiles |
+| GET  | `/api/admin/summary?range=day\|week\|month\|all` | Business-overview metrics (users, earnings, failures, disputes) |
 | GET  | `/api/admin/action-queue` | Unified "needs attention" feed |
+| GET  | `/api/admin/pending?olderThanMin=` | Non-terminal rows (pending/underpaid/mismatch) older than N min |
 | GET  | `/api/admin/users?q=&page=` | Search users |
 | GET  | `/api/admin/user-detail?id=` | One user's full picture |
 | POST | `/api/admin/grant-credits` | `{ userId, amount, reason }` |
@@ -174,6 +182,13 @@ All endpoints route through the single Vercel function `api/admin/[action].ts` (
 | GET  | `/api/admin/audit-log?action=&targetKind=&from=&to=&page=` | Audit log feed |
 | GET  | `/api/admin/settings` | Env health + recent activity |
 | POST | `/api/admin/settings` | `{ op: 'run-expiry' }` |
+| GET  | `/api/admin/revenue-analytics` | Revenue/BI metrics (migration 013) |
+| GET  | `/api/admin/revenue-export` | Revenue data export |
+| GET  | `/api/admin/customer-intelligence` | Customer-intelligence metrics |
+| GET  | `/api/admin/product-analytics` | Product-usage metrics |
+| GET  | `/api/admin/marketing` | Marketing metrics |
+| POST | `/api/admin/marketing-spend` | Record/adjust marketing spend |
+| GET  | `/api/admin/system-health` | System-health metrics |
 
 ## Watcher contract
 
@@ -183,8 +198,8 @@ The Flutter watcher app is documented in `apps/mobile/AGENTS.md` and `apps/mobil
 
 Before exposing the purchase flow to real customers:
 
-- [ ] `ADMIN_API_KEY`, `CRON_SECRET`, `BKASH_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` all set in Vercel Production.
-- [ ] Apply migrations 001 through 011 in the Supabase SQL editor (010 backfills `profiles.created_at`/`updated_at` for the Users tab; 011 adds webhook replay protection).
+- [ ] `ADMIN_API_KEY` (token-signing secret), `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` (or `ADMIN_PASSWORD`), `CRON_SECRET`, `BKASH_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` all set in Vercel Production.
+- [ ] Apply migrations 001 through 019 in the Supabase SQL editor (010 backfills `profiles.created_at`/`updated_at` for the Users tab; 011 adds webhook replay protection; 013 adds the analytics/BI surface).
 - [ ] Apply `007_optional_pg_cron.sql` in Supabase (required for the pending-expiry cron — Vercel Hobby can't run it).
 - [ ] Send yourself a small bKash payment end-to-end and watch the customer-side VerifyingPurchasePill complete.
 - [ ] Walk through the verification checklist above. Confirm the audit log captures every action.

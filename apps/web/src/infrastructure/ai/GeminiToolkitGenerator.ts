@@ -1,9 +1,10 @@
 // Infrastructure — Gemini AI Combined Toolkit Generator
 //
 // Produces cover letter + outreach email + LinkedIn note + interview questions
-// in a single call with one unified response schema. This is the hot-path used
-// on initial resume generation; the per-artifact generators are still wired
-// individually for the single-item regenerate flow.
+// in a single call with one unified response schema. This is the FALLBACK
+// toolkit path — used only when OPENROUTER_API_KEY is unset (the live default
+// is OpenRouterToolkitGenerator; see aiFactory). On the initial generation it's
+// the hot path; the per-artifact generators serve the single-item regenerate flow.
 
 import { GoogleGenAI, Type } from '@google/genai';
 import {

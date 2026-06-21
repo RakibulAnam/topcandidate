@@ -35,7 +35,7 @@ full state machine in [`spec/04-state-machine.md`](spec/04-state-machine.md).
 
 ### Prerequisites
 
-- Android phone running Android 7.0 (API 24) or later with an active SIM
+- Android phone running Android 6.0 (API 23) or later with an active SIM
   that receives bKash SMS.
 - `flutter` 3.x in your PATH.
 - Java 17 + Android SDK installed (for `flutter build apk`).
@@ -95,7 +95,7 @@ Samsung froze the app; revisit step 4.
 | `SENDING`  | HTTP POST is in flight right now.                                       |
 | `DONE`     | Webhook returned 200. Credits granted. Terminal.                        |
 | `RETRYING` | Transient error (network or 5xx). Will retry with exponential backoff.  |
-| `WAITING`  | The web app says "I haven't seen this TrxID yet". Retry every 5 min.    |
+| `WAITING`  | The web app says "I haven't seen this TrxID yet". Retries on an escalating backoff (20s → 5 min) for 24 h. |
 | `REVERSING`| Reversal SMS being POSTed to `/api/reverse-purchase`. Settles to `REFUND`.|
 | `FAILED`   | Hard failure (bad signature, server misconfig, gave up after 24 h).     |
 | `MISMATCH` | Customer claimed a different sender phone than the SMS. Manual review. |

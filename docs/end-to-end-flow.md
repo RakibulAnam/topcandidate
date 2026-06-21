@@ -186,8 +186,8 @@ Webhook **v2**: generates a UTC ISO-8601 timestamp, computes `HMAC-SHA256(secret
 |---|---|---|
 | `LandingScreen` | Marketing | — |
 | `LoginScreen` / `AuthContext` | Sign in/up, password reset | Supabase Auth |
-| `ProfileSetupScreen` / `ProfileScreen` | Build profile | Supabase tables (RLS) + `extract-resume` |
-| `BuilderScreen` | Paste JD → generate tailored package | `optimize`, `toolkit-item`, `optimize-general` |
+| `ProfileSetupScreen` / `ProfileScreen` | Build profile | Supabase tables (RLS) + `extract-resume` (import) + `normalize-item` ("polished profile", fired on save) |
+| `BuilderScreen` | Paste JD → generate tailored package | `optimize` + `toolkit` (the two parallel hot-path calls), `toolkit-item` (per-item retry), `optimize-general` |
 | `DashboardScreen` | Saved resumes, credits, purchase history | `generated_resumes`, `purchases` (RLS) |
 | Purchase UI | Buy + track (live via Supabase Realtime, sub-second; 20s fallback poll, no time cap) | `PurchaseModal`, `VerifyingPurchasePill` (`subscribeToPurchase` in `purchaseStatusClient.ts`), `CreditsBadge` |
 
@@ -257,7 +257,8 @@ See [`contracts/api-endpoints.md`](contracts/api-endpoints.md) for the full inde
 | `GET /api/my-purchase-status` | User | Status for the pill | 400 missing txnId, 404 no row |
 | `POST /api/dispute-purchase` | User | File a dispute | 400 short notes, 429 >3/24h |
 | `POST /api/optimize` | User | Spend credit, run AI | 402 no credits, 429 daily cap, 413 JD too long, 503 no provider, 502 optimizer failed (credit refunded) |
-| `POST /api/optimize-general`, `/api/toolkit-item`, `/api/extract-resume` | User | Free AI helpers | 401, 429 |
+| `POST /api/toolkit` | User | Combined toolkit bundle (free; fired in parallel with `/api/optimize`) | 429 daily cap, 413 JD too long |
+| `POST /api/optimize-general`, `/api/toolkit-item`, `/api/extract-resume`, `/api/normalize-item` | User | Free AI helpers | 401, 429 (`normalize-item`: 413 > 4k chars, 503 on legacy AI path) |
 | `POST /api/confirm-purchase` | Watcher (HMAC) | Confirm payment → grant | 401 bad sig, 400 bad body, 404 no pending, 409 mismatch/underpaid, 200 idempotent, 503 misconfig |
 | `POST /api/orphan-inbound-sms` | Watcher (HMAC) | Dump unmatched SMS | 401, 400 |
 | `POST /api/reverse-purchase` | Watcher (HMAC) | Reversal → refund | 401, 404 no completed |
@@ -334,13 +335,13 @@ Operator → /admin (paste ADMIN_API_KEY) → X-Admin-Key header
 ## 11. Known Limitations
 
 - **Single operator / single phone.** By design. Multi-operator payment confirmation is out of scope.
-- **No Vercel cron configured.** `vercel.json` has no `crons` block, so 24h pending-expiry depends on Supabase `pg_cron` (migration 007) or the admin "run expiry" button. *(A stale comment in `api/cron/expire-pending.ts` and a note in `.env.example` previously implied a 15-min Vercel cron; the `.env.example` note is corrected, the code comment remains and should be fixed.)*
+- **No Vercel cron configured.** `vercel.json` has no `crons` block, so 24h pending-expiry depends on Supabase `pg_cron` (migration 007) or the admin "run expiry" button. The handler now lives at `api/purchase-ops/_handlers/expire-pending.ts` (public URL `/api/cron/expire-pending` is unchanged via a `vercel.json` rewrite); its header comment correctly documents the no-Vercel-cron cadence.
 - **Admin key is a single shared secret in `localStorage`** — no roles, no 2FA, no IP allowlist, no rate-limit on the gate. Accepted single-operator trade-off; it's the dominant security risk.
 - **Admin audit is best-effort, not transactional** — written after the action RPC; a crash between them leaves an un-audited mutation (cross-check `purchase_state_changes`).
 - **One package only** (`five-pack`). Multi-package pricing is not implemented.
 - **`flag-user` is cosmetic** — sets `flagged_at` and a UI chip but nothing auto-restricts a flagged user.
 - **Parseable-but-unclassified SMS** create silent local `failed` rows with no server signal.
-- **OpenRouter is not implemented** — `docs/OPENROUTER_MIGRATION.md` is a proposal; the live AI stack is Groq + Gemini (`aiFactory.ts`).
+- **AI provider is env-gated** — `api/_lib/aiFactory.ts` runs the entire AI surface through **OpenRouter** when `OPENROUTER_API_KEY` is set (single key → Gemini 2.5 Flash optimizer + toolkit, Gemini 2.5 Flash-Lite extractor, OpenRouter-only profile normalizer), and falls back to the legacy **Groq + Gemini** path when the key is absent. The normalizer (`/api/normalize-item`) has **no legacy sibling**, so on the Groq/Gemini path it returns 503 and the client treats normalization as unavailable.
 - **No automated test harness** on the web app (verification = `npm run build` + manual pass). The mobile app has Dart unit tests under `apps/mobile/test/`.
 - **No push / FCM / email** — "credits ready" reaches the browser via Supabase Realtime (live while the tab is open) and resolves on the next visit otherwise. There is no web-push, FCM, or email notification channel; for a user actively waiting on the purchase pill (the common case, now ~1–2 s) it isn't needed. Add web-push/FCM later only as a re-engagement channel for users who left the page.
 - **Carrier SMS delivery is outside our control.** Match-on-submit and immediate dispatch removed the app-side latency, but submit-first grants still wait on however long bKash takes to text the operator's phone.

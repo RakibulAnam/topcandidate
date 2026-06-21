@@ -6,9 +6,8 @@
 // prompt module and the SAME deterministic post-pipeline as the Groq/Gemini
 // optimizers (prompts/resumeOptimizerPrompts.ts) — only the transport changes.
 //
-// Not wired into aiFactory yet; the cutover (Phase 6) flips the live optimizer
-// once every generator is ported and validated. Until then the live path stays
-// Groq→Gemini.
+// LIVE via aiFactory whenever OPENROUTER_API_KEY is set (the default); the
+// legacy Groq→Gemini optimizer is the unset-key fallback.
 //
 // Structured output: `json_schema` (strict) — the provider enforces the shape,
 // same as the toolkit generator (2026-06-10 lesson: `json_object` truncates/
@@ -108,7 +107,8 @@ export class OpenRouterResumeOptimizer implements IResumeOptimizer {
 
   async optimize(data: ResumeData, usage?: UsageSink): Promise<OptimizedResumeData> {
     const systemInstruction = buildSystemInstruction();
-    // No schema enforcement on OpenRouter json_object → embed the shape spec.
+    // json_schema enforces the shape, but can't express "echo back exactly
+    // these input IDs" → embed the shape spec in the prompt too (see header).
     const userPrompt = buildUserPrompt(data, { embedSchemaSpec: true });
 
     try {

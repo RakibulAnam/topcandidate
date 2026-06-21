@@ -1,13 +1,14 @@
 // Server-side construction of all AI providers + generators.
 //
-// Cutover (OpenRouter migration Phase 6): if OPENROUTER_API_KEY is set, the
-// entire AI surface runs through OpenRouter (one key → DeepSeek optimizer +
-// Gemini-flash toolkit/single-artifact + Gemini-flash-lite extractor, each with
-// its own fallback chain). If the key is ABSENT, we fall back to the legacy
-// Groq→Gemini optimizer + the Gemini SDK generators — unchanged. This makes the
-// flip a single Vercel env var, and the rollback equally simple: remove
-// OPENROUTER_API_KEY (keep GROQ/GEMINI keys present one cycle as the panic
-// switch). @google/genai stays a dependency until OpenRouter is proven in prod.
+// OpenRouter is the LIVE default (cutover shipped). If OPENROUTER_API_KEY is
+// set, the entire AI surface runs through OpenRouter (one key → Gemini-2.5-flash
+// optimizer + Gemini-flash toolkit/single-artifact + Gemini-flash-lite
+// extractor, each with its own fallback chain; DeepSeek/Llama are fallbacks
+// only — DeepSeek was dropped as optimizer primary for unreliable strict JSON).
+// If the key is ABSENT, we fall back to the legacy Groq→Gemini optimizer + the
+// Gemini SDK generators — the "panic switch" rollback (remove OPENROUTER_API_KEY,
+// keep GROQ/GEMINI keys). @google/genai stays a dependency until the Phase-6b
+// cleanup removes the legacy path after a clean prod window.
 //
 // All keys are read from process.env (NOT VITE_-prefixed) so none reach the
 // client bundle. Singletons reused across warm Vercel invocations.

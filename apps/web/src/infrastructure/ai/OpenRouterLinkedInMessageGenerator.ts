@@ -2,8 +2,9 @@
 //
 // Single-artifact generator for the free per-item regenerate flow. On
 // OpenRouterClient, reusing the shared prompt + the same guards + 280-char
-// trim as GeminiLinkedInMessageGenerator. Plain text (no JSON). Not wired into
-// aiFactory yet (cutover = Phase 6).
+// trim as GeminiLinkedInMessageGenerator. Plain text (no JSON). LIVE via
+// aiFactory whenever OPENROUTER_API_KEY is set (the default); the Gemini sibling
+// is the unset-key fallback.
 
 import { ResumeData } from '../../domain/entities/Resume.js';
 import { ILinkedInMessageGenerator } from '../../domain/usecases/GenerateLinkedInMessageUseCase.js';

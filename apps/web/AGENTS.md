@@ -49,7 +49,7 @@ A future mock-interview marketplace is planned but **out of scope** until explic
 ## 2. Tech stack
 
 - **React 19** + **TypeScript 5.8** + **Vite 6**
-- **Tailwind CSS** (via CDN, not PostCSS — config lives in `index.html`)
+- **Tailwind CSS v4** (via `@tailwindcss/vite` — NOT the runtime CDN; migrated off `cdn.tailwindcss.com` on 2026-05-30, see the comment at the top of `src/index.css`). Brand tokens live in `src/index.css` under the `@theme` directive (no `tailwind.config.{js,ts}`); `index.html` only loads fonts.
 - **Internationalisation** — DIY typed dictionary at `src/presentation/i18n/` (no library). Two locales: `en` (default) and `bn` (বাংলা / Bengali). Switch via `<LanguageToggle />` in the navbar / landing / login. Locale persists in `localStorage` (`topcandidate.locale`) and is applied to `<html data-locale>` for font-stack swapping. See §10 for fonts and §11 for the convention.
 - **AI provider:** **OpenRouter** (single key, OpenAI-compatible `fetch` via `OpenRouterClient`) when `OPENROUTER_API_KEY` is set — optimizer → Gemini 2.5 Flash (→ Llama 3.3 70B); toolkit / single-artifact → Gemini 2.5 Flash (→ DeepSeek → Llama); extractor → Gemini 2.5 Flash-Lite (→ Flash). Every call is deadline-bounded so the parallel hot path fits Vercel's 60s cap. Falls back to the **legacy** Groq (`llama-3.3-70b-versatile`) → Gemini optimizer + Gemini-only toolkit/extractor (`@google/genai`) when the key is absent. Gate + rationale: `api/_lib/aiFactory.ts`, `docs/OPENROUTER_MIGRATION.md`. `@google/genai` is still a dependency (kept one cycle as the rollback path)
 - **Server-side API proxy** — all AI calls go through Vercel Functions in `/api/*` (deployed automatically alongside the Vite app). Client holds NO provider keys. Auth via Supabase JWT bearer; per-user daily-cap rate limiting via the `ai_call_log` table. The client fetch helper (`ProxyClients.postJson`) aborts any `/api/*` call still pending at 90s (Vercel hard-kills functions at 60s, so a longer wait is a hung connection) and throws `ApiCallError` with `code: 'client_timeout'` / `'network_error'`; the builder surfaces these as retryable toasts.
@@ -64,7 +64,7 @@ A future mock-interview marketplace is planned but **out of scope** until explic
   (`Requirements:` / `Tech stack:`), and repeated-capitalized-phrase
   frequency. Scores + dedupes + canonicalises against the dictionary. Pure
   client-side, no Gemini call (would burn the 2-call budget).
-- Import map in `index.html` for CDN-loaded modules (lucide-react, @google/genai, docx, etc.) — build also bundles locally
+- No import map / CDN module loading — everything (lucide-react, @google/genai, docx, etc.) is installed from npm and bundled by Vite. `index.html` carries only the font `<link>` and `<title>`.
 
 Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion). No npm workspaces, no Turborepo — each app is independently built. See [`../../docs/decisions/0001-adopt-polyglot-monorepo.md`](../../docs/decisions/0001-adopt-polyglot-monorepo.md).
 
@@ -80,7 +80,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | Auth (email + password, **Google OAuth**) | `src/presentation/LoginScreen.tsx`, `src/presentation/auth/ContinueWithGoogleButton.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth; Google via `signInWithGoogle` PKCE redirect — requires the Supabase Google provider configured) |
 | Profile setup (master profile) | `src/presentation/ProfileSetupScreen.tsx` | shipped — one-time profile capture used to seed future resumes |
 | Profile edit | `src/presentation/ProfileScreen.tsx` | shipped — view/edit saved master profile sections |
-| Dashboard (two-card action zone — Master vs. Tailor — + applications grid + slim consultant teaser) | `src/presentation/DashboardScreen.tsx` | shipped |
+| Dashboard (two-card action zone — Master vs. Tailor — + applications grid) | `src/presentation/DashboardScreen.tsx` | shipped |
 | Internationalisation (en + bn) | `src/presentation/i18n/` — `LocaleContext.tsx`, `LanguageToggle.tsx`, `locales/en.ts`, `locales/bn.ts` | shipped — full UI in English and Bengali; AI output stays English |
 | Resume builder (multi-step form) | `src/presentation/BuilderScreen.tsx` | shipped |
 | Resume preview + templates | `src/presentation/components/Preview.tsx`, `src/presentation/templates/TemplateRegistry.ts` | shipped (4 ATS-safe templates). **Navigation:** a single artifact nav (Resume · Cover Letter · Outreach · LinkedIn · Interview) — desktop = left sidebar, mobile = a horizontal pill rail under a slim app bar. The **template picker is a quiet, collapsible control** (desktop = a disclosure nested under the active Resume tab; mobile = a bottom sheet opened from the action dock) — NOT the front-and-center grid it used to be. **Mobile chrome:** slim app bar (back · title · `⋮` overflow for Edit/Regenerate/Word) + a bottom action dock (Template · Fit/100% · Download PDF) in the thumb zone; the dock shows only on the Resume/Cover-Letter tabs. The Fit/100% zoom is mobile-only (on desktop `fit` already renders at 100%). **Document:** the fixed-width pt sheet is wrapped in `ScaledDocument` — a `transform: scale()` fit-to-width view driven by `ResizeObserver`; the pt sheet itself is untouched (rule 7 — still PDF-identical). Contact line + project/publication/reference links render as real hyperlinks via the shared `templates/contactLinks.ts` (also used by both exporters); visible text stays the full URL for ATS. |
@@ -296,6 +296,9 @@ InterviewQuestion {
                 | 'Values & Culture' | 'Situational'
   whyAsked:       string
   answerStrategy: string
+  questionBn?:       string             // bilingual prep — Bangla mirror fields
+  whyAskedBn?:       string             //   (optional for back-compat with
+  answerStrategyBn?: string             //   pre-2026-05-14 saved resumes; see §4)
 }
 
 OptimizedResumeData {                    // what GeminiResumeOptimizer returns
@@ -367,7 +370,8 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
 ## 7. Key files (annotated)
 
 ```
-index.html                              Tailwind config (brand/accent/charcoal palettes), fonts, <title>
+index.html                              Brand fonts (Google Fonts link) + <title>. Tailwind v4 + brand tokens (@theme) now live in src/index.css
+src/index.css                           Tailwind v4 entry (@import "tailwindcss") + @theme brand tokens + global/mobile rules
 metadata.json                           App name + description (used by platform)
 package.json                            Name: "top-candidate"
 
@@ -424,9 +428,13 @@ api/                                    Vercel Functions — server-side AI prox
   ├── confirm-purchase.ts               POST — HMAC webhook from Flutter; amount + msisdn checks (migration 007)
   ├── orphan-inbound-sms.ts             POST — HMAC; Flutter dumps unmatched SMS after 24h retry window
   ├── reverse-purchase.ts               POST — HMAC; bKash reversal SMS path
-  ├── dispute-purchase.ts               POST — customer-filed disputes (auth required)
-  ├── my-purchase-status.ts             GET  — customer pill polls this (auth required)
-  ├── cron/expire-pending.ts            GET  — Bearer CRON_SECRET; 15-min Vercel Cron
+  ├── purchase-ops/                     Dispatcher consolidating 3 endpoints into 1 Vercel function (Hobby 12-fn cap)
+  │   ├── [action].ts                   Routes status/dispute/expire-pending to _handlers
+  │   └── _handlers/                    status.ts (GET, auth — customer pill polls), dispute.ts (POST, auth — customer disputes), expire-pending.ts (GET, Bearer CRON_SECRET — flips pending>24h to expired)
+  │   # Public URLs preserved via vercel.json rewrites:
+  │   #   /api/my-purchase-status → /api/purchase-ops/status
+  │   #   /api/dispute-purchase   → /api/purchase-ops/dispute
+  │   #   /api/cron/expire-pending → /api/purchase-ops/expire-pending  (NOT a Vercel Cron — see §13)
   ├── admin/                            All gated by owner-login session token (Authorization: Bearer); login is the only open action
   │   ├── [action].ts                   Dynamic-route dispatcher — single Vercel function. Migration 009 added ~18 actions; all live here, not as separate files (Hobby's 12-function cap).
   │   ├── _lib/adminAuth.ts             requireAdmin (verifies bearer token) + requireReason + adminSupabase + recordAuditAction
@@ -538,6 +546,13 @@ All tables have RLS enabled; policies restrict rows to `auth.uid() = user_id`.
 - `supabase/migrations/010_align_profiles_columns.sql` — schema-drift catch-up. `schema.sql` declared `profiles.created_at` and `profiles.updated_at` from day one but no prior migration ever added them, so databases provisioned from an early `schema.sql` revision were missing both. The admin Users tab orders by `created_at`, which is where the drift surfaced. Adds both columns idempotently and backfills `created_at` from `auth.users.created_at` so existing rows have a meaningful signup timestamp.
 - `supabase/migrations/011_webhook_nonces.sql` — webhook replay protection (protocol v2). Adds the `webhook_nonces` table; combined with a timestamp ±5min window enforced in `api/_lib/webhookAuth.ts`, this stops a captured HMAC-signed webhook body from being replayed. Enforced when `BKASH_WEBHOOK_REQUIRE_TIMESTAMP=true`; the legacy (no-timestamp) signature path still works until the watcher is upgraded.
 - `supabase/migrations/012_realtime_and_match_on_submit.sql` — near-real-time credit assignment. Adds the `inbound_payments` table + `record_inbound_payment` RPC; rebuilds `initiate_purchase` as v3 (table return + match-on-submit for the pay-first ordering); extends `expire_stale_pending_purchases()` to prune `inbound_payments`; adds `purchases` to the `supabase_realtime` publication and sets `REPLICA IDENTITY FULL` so the customer browser can subscribe to its own purchase row (RLS still gates delivery). **Requires Supabase Realtime enabled for the project.**
+- `supabase/migrations/013_analytics_and_bi.sql` — first-party analytics + BI foundation (all additive/idempotent): `analytics_events` (insert-only RLS), `credit_ledger` (trigger-fed journal of every `toolkit_credits` change), `marketing_spend`, acquisition/activity columns on `profiles` (`utm_*`, `signup_referrer`, `last_active_at`), AI cost/telemetry columns on `ai_call_log` (`provider`/`model`/`prompt_tokens`/`completion_tokens`/`cost_usd`/`status`/`latency_ms`), `generation_type` on `generated_resumes`, and read views `v_daily_revenue` / `v_daily_signups` / `v_daily_ai_usage` / `v_credit_liability`. Backs the admin analytics tabs.
+- `supabase/migrations/014_add_toolkit_call_kind.sql` — the combined toolkit bundle moved off `/api/optimize` onto its own `/api/toolkit` endpoint; this adds the `'toolkit'` `ai_call_log` kind (distinct from `'toolkit_item'`) so the free bundle request is tracked separately.
+- `supabase/migrations/015_profile_normalization.sql` — "polished profile": adds the `normalized` column (+ a source-hash) to `experiences`, storing one cheap AI normalization (canonical English bullets + evidenced skills + coaching gaps) beside the raw description, reused as pre-cleaned evidence by later generation. Run on SAVE, not per generation.
+- `supabase/migrations/016_normalize_projects_extracurriculars.sql` — extends the polished-profile pipeline from experiences to `projects` and `extracurriculars` (same `normalized` + hash contract).
+- `supabase/migrations/017_delete_user_complete.sql` — fixes `delete_user()`: three child tables that reference `profiles(id)` with `ON DELETE NO ACTION` were added in later migrations and never added to the RPC's delete list, blocking account deletion. Adds them.
+- `supabase/migrations/018_guided_mode.sql` — Guided Mode: adds `guided` (JSONB), `input_mode` (default `'guided'`), and `guided_version` to every description-bearing profile item (experiences, projects, extracurriculars, **awards** — which also gain `normalized` columns here for the first time). Structured answers store in `guided` AND assemble into the existing `description` column so the AI path is unchanged.
+- `supabase/migrations/019_guided_free_for_existing_text.sql` — corrective backfill. Migration 018's blanket `default 'guided'` wrongly flipped legacy rows (and resume-imported rows) that already had free-text `description` and no guided answers — opening them showed an empty guided form and saving overwrote the text. Flips ONLY those rows back to `'free'` (scope-guarded: rows with description text AND no guided answers; genuine guided items untouched). Idempotent.
 
 **Running migrations**: open the Supabase SQL editor and paste the migration file contents. All migrations are idempotent (`add column if not exists`, `create index if not exists`, `create or replace function`).
 
@@ -585,7 +600,7 @@ Guard failures throw, which the service-layer `withRetry` (1 retry) handles auto
 
 **Name:** TOP CANDIDATE (two-word wordmark: ink + saffron). No "R" badge, no square mark.
 
-**Palette** (defined in `index.html` Tailwind config):
+**Palette** (defined in `src/index.css` under the Tailwind v4 `@theme` directive — `--color-<group>-<shade>` tokens; no `tailwind.config`):
 - `brand-*` — Editorial Ink (warm near-black, 700 = `#1A1812`). Primary text, buttons, ink.
 - `accent-*` — Saffron Gold (400 = `#E59321`). Single accent — CTAs, highlights, active-state hints. Use sparingly (≤ 10% of pixels).
 - `charcoal-*` — Stone (warm neutrals, 50 = `#FAFAF7`). Backgrounds, borders, muted text.
@@ -720,7 +735,7 @@ CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pendin
 
 Agents: **do not build these unless the user asks.**
 
-- **Mock-interview marketplace** — consultant profiles, booking, payments. The landing page **no longer references mock interviews at all** (the Coming Soon section, the announcement bar, and the mock-interview toolkit item were all removed in the BD-localized redesign) so we don't promise something we haven't built. Separate product scope.
+- **Mock-interview marketplace** — consultant profiles, booking, payments. **No UI references it anywhere** — the landing page never did (BD-localized redesign), and the dashboard "Coming soon" teaser + its `dashboard.mockTeaser*` i18n keys + the `metadata.json` claim were all removed (2026-06-21) so we don't promise something we haven't built. Do NOT re-add a mock-interview teaser/section/claim to landing, dashboard, or metadata. Separate product scope.
 - **OAuth providers** — Google is shipped (email/password + Google). Apple / LinkedIn and the in-Profile "Connect Google" (account-linking from settings) are still out of scope — see `pending-work/oauth-google-signin.md` §12.
 - **Unit / integration tests** — no test harness exists. Don't invent one without asking.
 - **Code-splitting** — the bundle is ~1.7MB. Vite warns about it; acceptable for now.
@@ -728,7 +743,7 @@ Agents: **do not build these unless the user asks.**
 - **Languages / References in ProfileSetupScreen and ProfileScreen** — currently only wired into the BuilderScreen flow (and loaded from the profile sub-tables when prefilling). To capture in the master profile too, add: state vars + step entries in `ProfileSetupScreen.tsx`, save cases in its switch, and tab + section component in `ProfileScreen.tsx` (mirror `PublicationSection`).
 - **AI output in Bengali** — the UI translates (en/bn), but the AI-generated resume bullets, cover letter, outreach email, LinkedIn note, and interview Q&A still come back in English. Most BD recruiters expect English CVs, so this is intentional. Adding a per-document "Generate in: English / বাংলা" toggle would mean: branching prompts in `prompts/resumeOptimizerPrompts.ts` and each toolkit generator + a UI affordance + a prompt-language pass-through in the optimize flow. Don't ship without an explicit ask.
 - **Locale persistence to Supabase** — locale is currently `localStorage`-only. Cross-device sync would need a `preferred_locale` column on `profiles` + a fetch on sign-in. Skipped for v1 because device-local is enough for a Bangladesh-first launch.
-- **Flutter SMS-watcher app for the new webhooks.** The watcher ships and confirms `/api/confirm-purchase` end-to-end. Migration 007 adds three more endpoints it should also call but doesn't yet: `/api/orphan-inbound-sms` (post unmatched SMS after the 24h retry window), `/api/reverse-purchase` (bKash reversal SMS), `/api/admin/parser-failures` POST (unclassifiable SMS). All three reuse the same `BKASH_WEBHOOK_SECRET` HMAC. Until the watcher gets these branches, orphan/reversal/parser-failure data has to be entered manually via SQL — the customer-facing dispute flow + operator `/admin` panel still recover the cases correctly, it's just less proactive.
+- ~~**Flutter SMS-watcher app for the new webhooks.**~~ — **WIRED.** The watcher confirms `/api/confirm-purchase` end-to-end AND calls all three migration-007 endpoints: `/api/orphan-inbound-sms` (unmatched SMS after the 24h retry window), `/api/reverse-purchase` (bKash reversal SMS), and `/api/admin/parser-failures` POST (unclassifiable SMS) — see `apps/mobile/lib/dispatch/webhook_client.dart` (`orphan`/`reversal`/parser-failure sends) + `dispatcher.dart`. All reuse the same `BKASH_WEBHOOK_SECRET` HMAC. No manual SQL fallback needed.
 
 - ~~**Dev mock-confirm scaffolding**~~ — **REMOVED 2026-05-24**. `api/dev-mock-confirm.ts` deleted, `mockConfirm()` block and `MOCK_AUTOCONFIRM` flag removed from `PurchaseModal.tsx`, `VITE_BKASH_MOCK_AUTOCONFIRM` / `BKASH_MOCK_AUTOCONFIRM` removed from `.env.example`. The shipped Flutter watcher confirms purchases for real; the mock scaffolding is no longer needed. A few orphan locale strings remain (`purchaseModal.mockBadge`, `verifying`, `confirmedToast`, `confirmedHeading`, `confirmedSub`, `confirmedShort`) — they're unused dead text and can be cleaned up in a future PR; not load-bearing.
 

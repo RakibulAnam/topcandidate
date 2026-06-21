@@ -4,8 +4,9 @@
 // (/api/toolkit-item). On OpenRouterClient, reusing the shared prompt
 // (toolkitPrompts.ts) and the same fabrication guard + response cleaning as
 // GeminiCoverLetterGenerator. Gemini 2.5 Flash primary (see model rationale in
-// OpenRouterToolkitGenerator / docs/OPENROUTER_MIGRATION.md). Not wired into
-// aiFactory yet (cutover = Phase 6).
+// OpenRouterToolkitGenerator / docs/OPENROUTER_MIGRATION.md). LIVE via aiFactory
+// whenever OPENROUTER_API_KEY is set (the default); the Gemini sibling is the
+// unset-key fallback.
 
 import { ResumeData } from '../../domain/entities/Resume.js';
 import { ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase.js';

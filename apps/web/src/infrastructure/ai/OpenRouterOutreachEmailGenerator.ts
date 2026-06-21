@@ -3,7 +3,8 @@
 // Single-artifact generator for the free per-item regenerate flow. On
 // OpenRouterClient, reusing the shared prompt + the same fabrication +
 // specificity guards as GeminiOutreachEmailGenerator. JSON mode (subject/body).
-// Not wired into aiFactory yet (cutover = Phase 6).
+// LIVE via aiFactory whenever OPENROUTER_API_KEY is set (the default); the
+// Gemini sibling is the unset-key fallback.
 
 import { ResumeData, OutreachEmail } from '../../domain/entities/Resume.js';
 import { IOutreachEmailGenerator } from '../../domain/usecases/GenerateOutreachEmailUseCase.js';

@@ -314,3 +314,12 @@ moved from a fixed 5 min to the escalating `waitingUserBackoff` (20s → 5min).
 Pairs with web match-on-submit (migration 012) — the `waiting_user` retry is now
 a backstop, not the path the customer waits on. The webhook wire protocol is
 **unchanged** (still v2 timestamp + nonce).
+
+App version **1.3.1+5** (current pinned version): a 15s `Timer.periodic`
+`dispatcher.tick()` runs in the foreground-service isolate so scheduled retries
+(transient-5xx backoff, `waiting_user` 404 backoff) self-fire within ~15s while
+the service is alive — previously a due row waited for a new SMS, app reopen,
+"Retry now", or the 15-min WorkManager backstop (WorkManager remains the backstop
+when the service is dead). `tick()` is idempotent, serialized, and a no-op when
+nothing is due. Operator-facing only; customer credit timing was already
+near-instant via match-on-submit. Wire protocol **unchanged**.

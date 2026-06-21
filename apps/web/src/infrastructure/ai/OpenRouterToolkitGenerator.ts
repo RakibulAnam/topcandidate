@@ -15,11 +15,13 @@
 // $2.50/M, so the toolkit costs more than the DeepSeek projection; acceptable —
 // it's the revenue-generating paid path and latency/reliability win here.
 //
-// JSON mode caveat: OpenRouter `json_object` doesn't enforce a schema, so the
-// shape lives in the prompt and we parse defensively (tolerate missing Bn
-// fields, strip code fences). Reasoning disabled; data_collection denied.
+// Structured output: strict `json_schema` (TOOLKIT_SCHEMA) so the provider
+// enforces the shape — the largest field (the bilingual interview array) can't
+// truncate or malform. We STILL parse defensively (tolerate missing Bn fields,
+// strip code fences). Reasoning disabled; data_collection denied.
 //
-// Not wired into aiFactory yet (cutover = Phase 6); the live path stays Gemini.
+// LIVE via aiFactory whenever OPENROUTER_API_KEY is set (the default); the
+// Gemini toolkit is the unset-key fallback.
 
 import {
   ResumeData,
@@ -129,8 +131,9 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
     const fit = classifyFitMode(data);
     console.info(`[or-toolkit-gen] start jdLen=${data.targetJob.description.length} fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
 
-    // Retry the AI call + parse on transient malformed JSON (json_object has no
-    // schema enforcement). The per-artifact validation below is NOT retried — a
+    // Retry the AI call + parse on transient malformed JSON (json_schema
+    // enforces shape but the round trip can still fail transiently). The
+    // per-artifact validation below is NOT retried — a
     // weak single artifact is expected and lands in the errors map, not a regen.
     const parsed: RawToolkitResponse = await withRetry(async (remainingMs) => {
       const result = await this.client.chat(

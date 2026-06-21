@@ -8,7 +8,6 @@ import {
     Loader2,
     Trash,
     ArrowRight,
-    Lock,
     LogOut,
     CheckCircle2,
     Sparkles,
@@ -606,31 +605,6 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                             </div>
                         )}
                     </section>
-
-                    {/* Mock interviews — slim teaser */}
-                    <aside className="mt-12 lg:mt-16 bg-white border border-charcoal-200 rounded-2xl px-5 sm:px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="flex items-start sm:items-center gap-3">
-                            <span className="w-9 h-9 rounded-full bg-charcoal-50 border border-charcoal-200 flex items-center justify-center text-brand-600 shrink-0">
-                                <Lock size={15} />
-                            </span>
-                            <div>
-                                <p className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold">
-                                    {t('dashboard.mockTeaserEyebrow')}
-                                </p>
-                                <p className="text-sm text-brand-700 font-medium mt-0.5">
-                                    {t('dashboard.mockTeaserBody')}
-                                </p>
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            disabled
-                            className="text-sm font-semibold text-charcoal-500 bg-charcoal-50 border border-charcoal-200 rounded-full px-4 py-2 cursor-not-allowed shrink-0"
-                            title={t('dashboard.mockTeaserTooltip')}
-                        >
-                            {t('dashboard.mockTeaserCta')}
-                        </button>
-                    </aside>
 
                     {/* Legacy applications (only shown if real legacy data exists) */}
                     {applications.length > 0 && (
