@@ -23,7 +23,7 @@ import { isGibberish } from '../application/validation/gibberishDetector';
 import { isValidEmail } from './components/ui/EmailInput';
 import { isValidPhone } from './components/ui/PhoneInput';
 import { useAuth } from '../infrastructure/auth/AuthContext';
-import { ChevronRight, ChevronLeft, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Sparkles, AlertTriangle } from 'lucide-react';
 import { Navbar } from './components/Layout/Navbar';
 import { BuilderStepper } from './components/Builder/BuilderStepper';
 import { PurchaseModal } from './components/PurchaseModal';
@@ -1001,6 +1001,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     }
   };
   const showSkip = !isLastStep && sectionItemCount(step) === 0;
+  // A resume + toolkit can only be generated with at least one education or
+  // experience entry (enforced in handleGenerate + OptimizeResumeUseCase).
+  const canGenerateContent = resumeData.education.length > 0 || resumeData.experience.length > 0;
 
   return (
     <div className="min-h-screen bg-paper flex flex-col">
@@ -1028,6 +1031,16 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       />
 
       <main className="flex-1 max-w-3xl mx-auto w-full p-4 md:p-8">
+        {/* No-content gate banner — until there's an education or experience
+            entry, neither the tailored resume nor its toolkit can be generated
+            (the gate in handleGenerate blocks it). Shown on every step so the
+            user knows before reaching Generate, including the from-scratch path. */}
+        {resumeData.education.length === 0 && resumeData.experience.length === 0 && (
+          <div className="mb-4 bg-accent-50 border border-accent-200 rounded-xl px-4 py-3 flex items-start gap-3">
+            <AlertTriangle size={18} className="text-accent-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-charcoal-700">{t('builder.noResumeWarn')}</p>
+          </div>
+        )}
         <div className="bg-white rounded-xl shadow-sm border border-charcoal-100 p-6 md:p-10 min-h-[500px] relative">
           {step === AppStep.SECTIONS && (
             <SectionSelectionStep
@@ -1190,7 +1203,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => { void handleGenerate(); }}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !canGenerateContent}
+                  title={!canGenerateContent ? t('builder.noResumeWarn') : undefined}
                   className="flex items-center gap-2 px-8 min-h-11 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
                 >
                   {isGenerating
