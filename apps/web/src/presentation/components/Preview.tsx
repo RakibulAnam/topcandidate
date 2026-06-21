@@ -691,7 +691,9 @@ export const Preview: React.FC<PreviewProps> = ({
               <div style={itemTitleRowStyle}>
                 <h4 style={itemTitleStyle}>{edu.school}</h4>
                 <span style={itemMetaStyle}>
-                  {formatDate(edu.startDate)} – {formatDate(edu.endDate)}
+                  {edu.startDate
+                    ? `${formatDate(edu.startDate)} – ${formatDate(edu.endDate)}`
+                    : formatDate(edu.endDate)}
                 </span>
               </div>
               <div style={bodyTextStyle}>

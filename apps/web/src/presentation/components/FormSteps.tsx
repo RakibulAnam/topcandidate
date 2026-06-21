@@ -1216,7 +1216,7 @@ export const EducationStep: React.FC<{
               edu.school
                 ? `${edu.school}${
                     edu.startDate || edu.endDate
-                      ? ` · ${edu.startDate}–${edu.endDate || '…'}`
+                      ? ` · ${dateRange(edu.startDate, edu.endDate)}`
                       : ''
                   }`
                 : ''
@@ -1263,26 +1263,59 @@ export const EducationStep: React.FC<{
               <div className="grid grid-cols-2 gap-3">
                 <InputGroup
                   label={t('formSteps.educationStartYearLabel')}
-                  required
-                  error={errors?.[`education.${index}.startDate`]}
+                  optional
                 >
                   <MonthPicker
-                    isError={!!errors?.[`education.${index}.startDate`]}
-                    value={edu.startDate}
+                    value={edu.startDate || ''}
                     onChange={val => updateEdu(edu.id, 'startDate', val)}
                   />
                 </InputGroup>
-                <InputGroup
-                  label={t('formSteps.educationEndYearLabel')}
-                  required
-                  error={errors?.[`education.${index}.endDate`]}
-                >
-                  <MonthPicker
-                    isError={!!errors?.[`education.${index}.endDate`]}
-                    value={edu.endDate}
-                    onChange={val => updateEdu(edu.id, 'endDate', val)}
-                  />
-                </InputGroup>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-baseline justify-between">
+                    <label className="text-sm font-semibold text-brand-700">
+                      {t('formSteps.educationEndYearLabel')}
+                      {edu.endDate !== 'Present' && (
+                        <span className="text-accent-500 ml-0.5">*</span>
+                      )}
+                    </label>
+                  </div>
+                  {edu.endDate === 'Present' ? (
+                    <div className="w-full rounded-lg border border-charcoal-200 bg-charcoal-100 px-3.5 py-2.5 text-sm text-brand-600 font-medium">
+                      {t('formSteps.monthPresent')}
+                    </div>
+                  ) : (
+                    <>
+                      <MonthPicker
+                        isError={!!errors?.[`education.${index}.endDate`]}
+                        value={edu.endDate}
+                        onChange={val => updateEdu(edu.id, 'endDate', val)}
+                      />
+                      {errors?.[`education.${index}.endDate`] && (
+                        <span className="text-xs text-red-600 font-medium">
+                          {errors[`education.${index}.endDate`]}
+                        </span>
+                      )}
+                    </>
+                  )}
+
+                  <label className="flex items-center gap-2 mt-1 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 accent-accent-500 rounded border-charcoal-300"
+                      checked={edu.endDate === 'Present'}
+                      onChange={e =>
+                        updateEdu(edu.id, 'endDate', e.target.checked ? 'Present' : '')
+                      }
+                    />
+                    <span
+                      className={`text-sm font-medium ${
+                        edu.endDate === 'Present' ? 'text-accent-700' : 'text-charcoal-600'
+                      }`}
+                    >
+                      {t('formSteps.educationCurrentLabel')}
+                    </span>
+                  </label>
+                </div>
               </div>
               <InputGroup
                 label={t('formSteps.educationGpaLabel')}

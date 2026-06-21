@@ -128,7 +128,9 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Education', t, cursor);
       for (const edu of data.education) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 3, t.margin);
-        const dateStr = `${edu.startDate} \u2013 ${edu.endDate}`;
+        const dateStr = edu.startDate
+          ? `${edu.startDate} \u2013 ${edu.endDate}`
+          : edu.endDate;
         this.renderItemTitleRow(doc, edu.school, dateStr, t, cursor, contentWidth);
         const degreeText = `${edu.degree}${edu.field ? ` in ${edu.field}` : ''}${edu.gpa ? ` \u2022 GPA: ${edu.gpa}` : ''}`;
         this.renderBodyLine(doc, degreeText, t, cursor, contentWidth);
