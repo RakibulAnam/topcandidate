@@ -907,13 +907,13 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             {/* Sticky bottom navigation — hidden on the import step, where
                 ResumeUploadStep has its own primary/secondary actions. */}
             {!isFirstStep && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-charcoal-200 z-30">
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-charcoal-200 z-30 pb-[env(safe-area-inset-bottom)]">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
                         <button
                             type="button"
                             onClick={handleBack}
                             disabled={currentStepIndex === 0 || saving}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:bg-charcoal-100 rounded-full disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:bg-charcoal-100 rounded-full disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
                         >
                             <ChevronLeft size={16} />
                             {t('profileSetup.back')}

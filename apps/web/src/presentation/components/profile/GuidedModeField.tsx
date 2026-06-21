@@ -77,7 +77,7 @@ export const GuidedModeField: React.FC<Props> = ({
       type="button"
       onClick={() => switchMode(m)}
       aria-pressed={mode === m}
-      className={`text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
+      className={`text-xs font-semibold px-3 py-2 rounded-full transition-colors ${
         mode === m ? 'bg-brand-700 text-charcoal-50' : 'text-brand-600 hover:text-brand-800'
       }`}
     >

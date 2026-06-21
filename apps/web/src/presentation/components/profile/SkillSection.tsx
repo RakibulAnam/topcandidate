@@ -56,7 +56,7 @@ export const SkillSection = ({ skills, onRefresh }: Props) => {
                     <Code size={20} /> Skills
                 </h3>
                 {hasChanges && (
-                    <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 text-sm bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium transition-colors shadow-sm">
+                    <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 text-sm bg-brand-600 text-white px-4 py-2 min-h-11 rounded-lg hover:bg-brand-700 font-medium transition-colors shadow-sm">
                         <Save size={16} /> Save Changes
                     </button>
                 )}
@@ -79,7 +79,7 @@ export const SkillSection = ({ skills, onRefresh }: Props) => {
                 {localSkills.map((skill, idx) => (
                     <span key={idx} className="inline-flex items-center gap-1 bg-white border border-charcoal-200 px-3 py-1.5 rounded-full text-sm text-charcoal-700 shadow-sm">
                         {skill}
-                        <button onClick={() => removeSkill(idx)} className="text-charcoal-400 hover:text-red-500 rounded-full p-0.5 hover:bg-red-50 transition-colors">
+                        <button onClick={() => removeSkill(idx)} aria-label={`Remove ${skill}`} className="text-charcoal-400 hover:text-red-500 rounded-full p-2 -my-1 -mr-1.5 hover:bg-red-50 transition-colors">
                             <X size={14} />
                         </button>
                     </span>

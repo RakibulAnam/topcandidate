@@ -66,7 +66,7 @@ export function EmailInput({
                 }}
                 aria-invalid={hasError}
                 className={cn(
-                    'w-full rounded-lg border px-3.5 py-2.5 text-sm bg-white text-brand-800 placeholder:text-charcoal-400 focus:outline-none focus-visible:ring-2 transition-colors disabled:bg-charcoal-100 disabled:text-charcoal-400',
+                    'w-full rounded-lg border px-3.5 py-2.5 min-h-11 text-sm bg-white text-brand-800 placeholder:text-charcoal-400 focus:outline-none focus-visible:ring-2 transition-colors disabled:bg-charcoal-100 disabled:text-charcoal-400',
                     hasError
                         ? 'border-red-400 focus-visible:ring-red-400'
                         : 'border-charcoal-300 hover:border-charcoal-400 focus-visible:ring-accent-400 focus-visible:border-accent-400',

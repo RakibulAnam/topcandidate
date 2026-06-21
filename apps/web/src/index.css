@@ -93,6 +93,30 @@ body {
   }
 }
 
+/* ── iOS zoom-on-focus fix (mobile only) ────────────────────────────────────
+ * Safari/iOS auto-zooms the page when a focused form control has a font-size
+ * below 16px — which happens on nearly every input/textarea/select in the app
+ * (they're `text-sm` = 14px). One unlayered rule fixes it everywhere: unlayered
+ * CSS beats Tailwind's `.text-sm` utility (layered), so controls render at 16px
+ * on phones, while desktop keeps the `text-sm` density (rule is ≤640px only).
+ *
+ * The resume preview's inline-edit fields (EditableElement) set their pt
+ * font-size via an INLINE `style` attribute, which beats this rule — so the
+ * WYSIWYG resume sizing (CLAUDE.md rule 7) is untouched. The explicit
+ * exclusion below is belt-and-braces for any edit field that inherits its size.
+ */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+  #resume-source input, #resume-source textarea,
+  #cover-letter-source input, #cover-letter-source textarea {
+    font-size: inherit;
+  }
+}
+
 /* ── scrollbar-hide — referenced across mobile horizontal scrollers (Preview
  * sidebar/action row, ProfileScreen tabs). Tailwind v4 has no built-in for
  * this, so define it as a real utility. */
@@ -134,6 +158,15 @@ body {
   &:hover {
     background-color: #FEECEC;
     color: #C0392B;
+  }
+}
+
+/* On touch devices, grow the icon-button hit area to the 44px a11y minimum
+ * (desktop/mouse keeps the compact 2rem so dense rows don't look chunky). */
+@media (hover: none) and (pointer: coarse) {
+  .icon-btn, .icon-btn-danger {
+    width: 2.75rem;
+    height: 2.75rem;
   }
 }
 

@@ -219,7 +219,7 @@ export function PhoneInput({
         <div className="flex flex-col gap-1">
             <div
                 className={cn(
-                    'flex items-stretch rounded-lg border bg-white transition-colors',
+                    'flex items-stretch min-h-11 rounded-lg border bg-white transition-colors',
                     hasError
                         ? 'border-red-400 focus-within:ring-2 focus-within:ring-red-400'
                         : 'border-charcoal-300 hover:border-charcoal-400 focus-within:ring-2 focus-within:ring-accent-400 focus-within:border-accent-400',

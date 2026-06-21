@@ -19,7 +19,8 @@ export const LanguageToggle: React.FC<LanguageToggleProps> = ({
 }) => {
   const { locale, setLocale, t } = useLocale();
 
-  const padding = variant === 'compact' ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs';
+  // Comfortable touch targets on phones; stays compact on desktop.
+  const padding = variant === 'compact' ? 'px-2.5 py-1.5 text-xs' : 'px-3 py-2 text-xs sm:py-1.5';
   const radius = 'rounded-full';
 
   return (

@@ -52,7 +52,7 @@ export function MonthPicker({ value, onChange, isError }: MonthPickerProps) {
                     variant="outline"
                     aria-invalid={!!isError}
                     className={cn(
-                        "w-full justify-start text-left font-normal bg-white",
+                        "w-full min-h-11 justify-start text-left font-normal bg-white",
                         !parsedDate && "text-charcoal-500",
                         isError && "border-red-500 ring-1 ring-red-500 text-red-900 focus-visible:ring-red-500"
                     )}
@@ -61,7 +61,7 @@ export function MonthPicker({ value, onChange, isError }: MonthPickerProps) {
                     {parsedDate ? format(parsedDate, "MMMM yyyy") : <span>Pick a date</span>}
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-64 p-3" align="start">
+            <PopoverContent className="w-[min(16rem,calc(100vw-2rem))] p-3" align="start">
                 <div className="flex items-center justify-between pb-3">
                     <Button variant="outline" size="icon" className="h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100" onClick={handlePrevYear}>
                         <ChevronLeft className="h-4 w-4" />

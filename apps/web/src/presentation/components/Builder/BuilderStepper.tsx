@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check } from 'lucide-react';
+import { Check, ChevronLeft } from 'lucide-react';
 import { AppStep } from '../../../domain/entities';
 import { useT } from '../../i18n/LocaleContext';
 
@@ -87,6 +87,17 @@ export const BuilderStepper = ({ steps, currentStep, onJumpToStep }: BuilderStep
 
                 {/* Mobile */}
                 <div className="md:hidden">
+                    {currentStepIndex > 0 && onJumpToStep && (
+                        <button
+                            type="button"
+                            onClick={() => onJumpToStep(steps[currentStepIndex - 1].id)}
+                            className="inline-flex items-center gap-1 min-h-11 -ml-1 pr-2 text-xs font-semibold text-brand-600 hover:text-brand-800"
+                            aria-label={`${t('builder.jumpBackTo')} ${steps[currentStepIndex - 1].title}`}
+                        >
+                            <ChevronLeft size={15} />
+                            <span className="truncate max-w-[60vw]">{steps[currentStepIndex - 1].title}</span>
+                        </button>
+                    )}
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-semibold text-charcoal-500 uppercase tracking-[0.2em]">
                             {t('profileSetup.stepCount', { n: currentStepIndex + 1, total: steps.length })}

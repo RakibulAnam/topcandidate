@@ -200,8 +200,8 @@ export const ProjectSection = ({ projects, onRefresh }: Props) => {
                         <div className="flex justify-between">
                             <h4 className="font-bold">{p.name}</h4>
                             <div className="flex gap-1 shrink-0">
-                                <button type="button" onClick={() => handleEdit(p)} aria-label="Edit project" className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
-                                <button type="button" onClick={() => handleDelete(p.id)} aria-label="Delete project" className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                                <button type="button" onClick={() => handleEdit(p)} aria-label="Edit project" className="icon-btn"><Edit2 size={16} /></button>
+                                <button type="button" onClick={() => handleDelete(p.id)} aria-label="Delete project" className="icon-btn-danger"><Trash2 size={16} /></button>
                             </div>
                         </div>
                         <p className="text-sm text-charcoal-600 mt-1 line-clamp-2">{p.rawDescription}</p>

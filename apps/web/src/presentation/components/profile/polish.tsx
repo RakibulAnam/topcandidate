@@ -32,7 +32,7 @@ export function needsPolish(
 // "small guard" the product wants; the real backstop is the server-side
 // per-user `normalize` daily cap. Initial onboarding polish does NOT go
 // through here, so first-time profile creation is never limited.
-export type PolishSection = 'experience' | 'project' | 'extracurricular';
+export type PolishSection = 'experience' | 'project' | 'extracurricular' | 'award';
 export const RENORM_DAILY_LIMIT = 5;
 
 function renormKey(section: PolishSection): string {

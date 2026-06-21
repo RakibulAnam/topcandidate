@@ -190,7 +190,7 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date</label>
-                            <div className="flex gap-2 items-center">
+                            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                                 {formData.isCurrent ? (
                                     <div className="w-full rounded-md border border-charcoal-200 bg-charcoal-50 px-3 py-2 text-sm text-charcoal-500 font-medium h-10 flex items-center">
                                         Present
@@ -282,7 +282,7 @@ Examples from different fields:
                                     type="button"
                                     onClick={() => handleEdit(exp)}
                                     aria-label="Edit experience"
-                                    className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"
+                                    className="icon-btn"
                                 >
                                     <Edit2 size={16} />
                                 </button>
@@ -290,7 +290,7 @@ Examples from different fields:
                                     type="button"
                                     onClick={() => handleDelete(exp.id)}
                                     aria-label="Delete experience"
-                                    className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                                    className="icon-btn-danger"
                                 >
                                     <Trash2 size={16} />
                                 </button>

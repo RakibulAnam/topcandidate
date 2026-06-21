@@ -184,17 +184,19 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-[#0E0D09]/65 backdrop-blur-md"
         onClick={busy ? undefined : onClose}
       />
 
-      {/* Sheet — split layout: receipt (left) + action (right) */}
-      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col md:flex-row bg-white rounded-[28px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      {/* Sheet — split layout: receipt (left) + action (right). Top-aligned on
+          phones (with dvh height) so the auto-focused TrxID input and the
+          footer CTA stay reachable when the keyboard opens. */}
+      <div className="relative w-full max-w-4xl max-h-[100dvh] sm:max-h-[92vh] flex flex-col md:flex-row bg-white rounded-3xl sm:rounded-[28px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* ─── LEFT: receipt / value panel ─── */}
-        <aside className="md:w-[42%] bg-[#FAF7F0] flex flex-col px-6 py-6 md:px-9 md:py-10 shrink-0 md:border-r border-b md:border-b-0 border-[#E5E1D8]">
+        <aside className="md:w-[42%] bg-[#FAF7F0] flex flex-col px-6 py-5 md:px-9 md:py-10 shrink-0 md:border-r border-b md:border-b-0 border-[#E5E1D8]">
           {/* bKash trust chip */}
           <div className="flex items-center gap-2">
             <span
@@ -209,14 +211,14 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           </div>
 
           {/* Hero — price + what */}
-          <div className="mt-6 md:mt-10">
+          <div className="mt-4 md:mt-10">
             <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
               {t('purchaseModal.packEyebrow')}
             </div>
-            <div className="mt-2 font-display text-5xl md:text-6xl font-semibold text-[#1A1812] leading-none tracking-tight">
+            <div className="mt-1.5 md:mt-2 font-display text-4xl sm:text-5xl md:text-6xl font-semibold text-[#1A1812] leading-none tracking-tight">
               {t('purchaseModal.packPrice')}
             </div>
-            <div className="mt-3 text-base md:text-lg font-semibold text-[#1A1812] leading-tight">
+            <div className="mt-2 md:mt-3 text-base md:text-lg font-semibold text-[#1A1812] leading-tight">
               {t('purchaseModal.packName')}
             </div>
             <div className="text-[13px] text-[#6B6759] mt-0.5">
@@ -224,10 +226,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             </div>
           </div>
 
-          {/* Features — hidden on mobile so the action panel gets more room */}
-          <ul className="mt-6 md:mt-8 space-y-2.5 hidden md:block">
+          {/* Features — condensed on mobile, full on desktop. */}
+          <ul className="mt-4 md:mt-8 space-y-1.5 md:space-y-2.5">
             {features.map((f, i) => (
-              <li key={i} className="flex items-center gap-2.5 text-[13.5px] text-[#1A1812]">
+              <li key={i} className="flex items-center gap-2.5 text-[13px] md:text-[13.5px] text-[#1A1812]">
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 shrink-0">
                   <Check size={12} strokeWidth={3.5} />
                 </span>
@@ -287,7 +289,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             <section className="pt-2">
               <StepLabel n={1} label={t('purchaseModal.step1Label')} />
               <div
-                className="mt-2.5 rounded-2xl bg-white border-2 px-4 py-3.5 flex items-center gap-3"
+                className="mt-2.5 rounded-2xl bg-white border-2 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3"
                 style={{ borderColor: '#EAE6DA' }}
               >
                 <div className="flex-1 min-w-0">
@@ -301,7 +303,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                 <button
                   type="button"
                   onClick={handleCopyNumber}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[13px] font-bold transition-colors shrink-0"
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full text-[13px] font-bold transition-colors shrink-0 w-full sm:w-auto"
                   style={{
                     backgroundColor: copied ? '#10B981' : BKASH,
                     color: '#fff',

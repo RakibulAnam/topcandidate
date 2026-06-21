@@ -104,9 +104,9 @@ export const SetNewPasswordScreen: React.FC<Props> = ({ onDone, onRequestNewLink
 
   if (linkError) {
     return (
-      <div className="min-h-screen bg-charcoal-100 flex items-center justify-center p-4">
-        <div className="bg-charcoal-50 w-full max-w-md rounded-2xl border border-charcoal-200 shadow-2xl shadow-brand-900/5 overflow-hidden">
-          <div className="p-8">
+      <div className="min-h-dvh bg-charcoal-100 flex items-center justify-center p-4 overflow-y-auto">
+        <div className="bg-charcoal-50 w-full max-w-md rounded-2xl border border-charcoal-200 shadow-2xl shadow-brand-900/5 overflow-hidden my-auto">
+          <div className="p-6 sm:p-8">
             <div className="flex items-start justify-between mb-6">
               <div className="inline-flex items-baseline gap-1.5">
                 <span className="font-display text-2xl font-semibold tracking-tight text-brand-700">TOP</span>

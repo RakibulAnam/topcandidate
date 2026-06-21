@@ -226,14 +226,16 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
             <header className="bg-paper/90 backdrop-blur-md border-b border-charcoal-200 sticky top-0 z-30">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
                     <Wordmark />
-                    <div className="relative flex items-center gap-2">
+                    <div className="relative flex items-center gap-1.5 sm:gap-2 min-w-0">
                         <VerifyingPurchasePill onResubmit={() => setPurchaseModalOpen(true)} onCredited={() => { void refreshCredits(); }} />
                         <CreditsBadge credits={credits} onBuy={() => setPurchaseModalOpen(true)} />
-                        <LanguageToggle />
+                        {/* Language toggle lives in the bar on desktop; on phones it
+                            moves into the account menu to keep the row from overflowing. */}
+                        <div className="hidden sm:block"><LanguageToggle /></div>
                         <button
                             type="button"
                             onClick={() => setProfileMenuOpen(v => !v)}
-                            className="inline-flex items-center gap-2 pl-1 pr-3 py-1 rounded-full bg-white border border-charcoal-200 hover:border-charcoal-300 transition-colors"
+                            className="inline-flex items-center gap-2 pl-1 pr-2 sm:pr-3 py-1 min-h-11 sm:min-h-0 rounded-full bg-white border border-charcoal-200 hover:border-charcoal-300 transition-colors shrink-0"
                             aria-label={t('dashboard.accountMenuLabel')}
                         >
                             <span className="w-7 h-7 rounded-full bg-brand-700 text-charcoal-50 text-xs font-semibold flex items-center justify-center">
@@ -251,10 +253,14 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                                     onClick={() => setProfileMenuOpen(false)}
                                     aria-hidden
                                 />
-                                <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-charcoal-200 py-1 z-40">
+                                <div className="absolute right-0 top-full mt-2 w-56 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl shadow-xl border border-charcoal-200 py-1 z-40">
                                     <div className="px-4 py-3 border-b border-charcoal-100">
                                         <p className="text-xs text-charcoal-500">{t('dashboard.signedInAs')}</p>
                                         <p className="text-sm font-medium text-brand-700 truncate">{user?.email}</p>
+                                    </div>
+                                    {/* Language toggle for phones (hidden in the bar at this width). */}
+                                    <div className="sm:hidden px-4 py-2.5 border-b border-charcoal-100">
+                                        <LanguageToggle />
                                     </div>
                                     <button
                                         type="button"
@@ -501,7 +507,7 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                                                             <button
                                                                 type="button"
                                                                 aria-label={t('dashboard.appActionsLabel')}
-                                                                className="text-charcoal-400 hover:text-brand-700 p-1.5 -mr-1.5 rounded-full hover:bg-charcoal-50 transition-colors"
+                                                                className="inline-flex items-center justify-center min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 text-charcoal-400 hover:text-brand-700 p-1.5 -mr-1.5 -mt-1.5 rounded-full hover:bg-charcoal-50 transition-colors"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
                                                                     setActiveMenuId(activeMenuId === resume.id ? null : resume.id);
@@ -557,14 +563,14 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                                                 onClick={() => setPage(p => Math.max(1, p - 1))}
                                                 disabled={page <= 1 || tailoredLoading}
                                                 aria-label={t('dashboard.appsPrevPage')}
-                                                className="w-8 h-8 flex items-center justify-center rounded-lg border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                             >
                                                 <ChevronLeft size={16} />
                                             </button>
 
                                             {pageNumbers.map((n, i) =>
                                                 n === null ? (
-                                                    <span key={`ellipsis-${i}`} className="w-8 h-8 flex items-center justify-center text-xs text-charcoal-400 select-none">
+                                                    <span key={`ellipsis-${i}`} className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-xs text-charcoal-400 select-none">
                                                         …
                                                     </span>
                                                 ) : (
@@ -574,7 +580,7 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                                                         onClick={() => setPage(n)}
                                                         disabled={tailoredLoading}
                                                         aria-current={n === page ? 'page' : undefined}
-                                                        className={`w-8 h-8 flex items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed ${
+                                                        className={`w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed ${
                                                             n === page
                                                                 ? 'bg-brand-700 text-charcoal-50 border border-brand-700'
                                                                 : 'border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700'
@@ -590,7 +596,7 @@ export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication,
                                                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                                                 disabled={page >= totalPages || tailoredLoading}
                                                 aria-label={t('dashboard.appsNextPage')}
-                                                className="w-8 h-8 flex items-center justify-center rounded-lg border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                             >
                                                 <ChevronRight size={16} />
                                             </button>

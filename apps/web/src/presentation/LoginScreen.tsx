@@ -146,9 +146,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
     };
 
     return (
-        <div className="min-h-screen bg-charcoal-100 flex items-center justify-center p-4">
-            <div className="bg-charcoal-50 w-full max-w-md rounded-2xl border border-charcoal-200 shadow-2xl shadow-brand-900/5 overflow-hidden">
-                <div className="p-8">
+        <div className="min-h-dvh bg-charcoal-100 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-charcoal-50 w-full max-w-md rounded-2xl border border-charcoal-200 shadow-2xl shadow-brand-900/5 overflow-hidden my-auto">
+                <div className="p-6 sm:p-8">
                     {/* Branding + language toggle */}
                     <div className="flex items-start justify-between mb-6">
                         <div className="inline-flex items-baseline gap-1.5 select-none">
@@ -271,7 +271,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
                                         <button
                                             type="button"
                                             onClick={() => switchMode('forgot')}
-                                            className="text-xs font-semibold text-brand-600 hover:text-brand-500 hover:underline"
+                                            className="text-xs font-semibold text-brand-600 hover:text-brand-500 hover:underline py-1.5 -my-1.5"
                                         >
                                             {t('login.forgotPasswordLink')}
                                         </button>
@@ -340,7 +340,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
                                     <button
                                         type="button"
                                         onClick={() => switchMode(isLogin ? 'signup' : 'login')}
-                                        className="font-semibold text-brand-600 hover:text-brand-500 hover:underline"
+                                        className="font-semibold text-brand-600 hover:text-brand-500 hover:underline inline-block py-1.5 -my-1.5"
                                     >
                                         {isLogin ? t('login.switchToSignUp') : t('login.switchToSignIn')}
                                     </button>
@@ -349,12 +349,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
                         </div>
 
                         {isSignup && (
-                            <p className="text-[11px] text-charcoal-500 leading-relaxed">
+                            <p className="text-xs text-charcoal-500 leading-relaxed">
                                 {t('login.tosBlurb')}{' '}
                                 <button
                                     type="button"
                                     onClick={onOpenTerms}
-                                    className="font-semibold text-brand-700 hover:text-accent-600 underline underline-offset-2"
+                                    className="font-semibold text-brand-700 hover:text-accent-600 underline underline-offset-2 inline-block py-1 -my-1"
                                 >
                                     {t('login.tosLink')}
                                 </button>
@@ -366,7 +366,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
                             <button
                                 type="button"
                                 onClick={onOpenTerms}
-                                className="text-[11px] text-charcoal-500 hover:text-brand-700 underline underline-offset-2"
+                                className="text-xs text-charcoal-500 hover:text-brand-700 underline underline-offset-2 inline-block py-1.5 -my-1.5"
                             >
                                 {t('login.tosLink')}
                             </button>

@@ -136,9 +136,9 @@ export const ReferenceSection = ({ items, onRefresh }: Props) => {
                                 <div className="text-charcoal-400 text-xs mt-1">{item.email} · {item.phone}</div>
                                 {item.relationship && <div className="text-charcoal-400 text-xs mt-0.5">{item.relationship}</div>}
                             </div>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => handleEdit(item)} className="p-1.5 text-charcoal-400 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
-                                <button onClick={() => handleDelete(item.id)} className="p-1.5 text-charcoal-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                            <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => handleEdit(item)} className="icon-btn"><Edit2 size={16} /></button>
+                                <button onClick={() => handleDelete(item.id)} className="icon-btn-danger"><Trash2 size={16} /></button>
                             </div>
                         </div>
                     </div>
