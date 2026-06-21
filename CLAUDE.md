@@ -4,7 +4,7 @@
 
 ## Hard rules
 
-1. **Open in the right working directory.** When working on web, `cd apps/web`. When working on mobile, `cd apps/mobile`. Each app's per-directory `CLAUDE.md` and `AGENTS.md` only loads automatically from inside that directory. Running everything from the repo root means you'll miss the per-app rules.
+1. **Open in the right working directory.** When working on web, `cd apps/web`. When working on mobile, `cd apps/mobile`. Each app's per-directory agent rules (`AGENTS.md` in both apps, plus `apps/web/CLAUDE.md` — mobile has no CLAUDE.md) only load automatically from inside that directory. Running everything from the repo root means you'll miss the per-app rules.
 2. **Per-app rules supersede this file** when you're inside an app. The root `CLAUDE.md` is for cross-cutting concerns only.
 3. **Don't auto-create new docs at root.** The `docs/` skeleton is already laid out. Fill in stubs when the corresponding work happens; don't write speculative docs.
 4. **One ADR per architectural decision.** New `docs/decisions/NNNN-*.md` whenever a structural choice is made. Keep them under one page.

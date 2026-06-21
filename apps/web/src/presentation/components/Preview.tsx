@@ -5,7 +5,7 @@
 // All variants are single-column, real-text, no icons / no tables — i.e.
 // structurally ATS-safe regardless of which template the user picks.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { toast } from 'sonner';
 import { ResumeData, ToolkitItem, awardDetailText } from '../../domain/entities/Resume';
 import {
@@ -13,6 +13,14 @@ import {
   resolveTemplate,
   TemplateDefinition,
 } from '../templates/TemplateRegistry';
+import {
+  buildContactSegments,
+  normalizeWebUrl,
+  toMailto,
+  toTel,
+  CONTACT_SEPARATOR,
+  type ContactSegment,
+} from '../templates/contactLinks';
 import {
   Download,
   FileText,
@@ -29,6 +37,10 @@ import {
   Pencil,
   PencilOff,
   X,
+  ChevronDown,
+  MoreVertical,
+  Check,
+  LayoutTemplate,
 } from 'lucide-react';
 import { EditableElement } from './EditableElement';
 import {
@@ -89,6 +101,127 @@ const StatusDot: React.FC<{ status: ToolkitItemStatus }> = ({ status }) => {
 const PAGE_WIDTH_PT = 595.28;
 const PAGE_HEIGHT_PT = 841.89;
 
+// The fixed resume sheet is sized in pt and must stay pixel-identical to the
+// PDF (CLAUDE.md rule 7) — so on narrow screens we do NOT reflow it; we SCALE
+// the whole pt sheet to fit the viewport width via a CSS transform.
+// 1pt = 1/72in, 1 CSS px = 1/96in → pt × 96/72 = CSS px.
+const SHEET_PX_WIDTH = PAGE_WIDTH_PT * (96 / 72); // ≈ 793.7
+
+type ZoomMode = 'fit' | 'actual';
+
+/**
+ * Wraps a fixed-width pt "sheet" and scales it to fit the available width.
+ *  - zoom 'fit'    → scale = min(1, containerWidth / sheetWidth). On desktop
+ *    (container ≥ ~794px) scale clamps to 1, so desktop is visually unchanged.
+ *  - zoom 'actual' → scale = 1 (the pane scrolls horizontally; an explicit
+ *    user choice to view at full size and pan).
+ * The transform is compositor-only (no reflow). An outer box reserves the
+ * SCALED footprint so there's no spurious horizontal scroll and vertical space
+ * is correct even as the document grows multi-page (ResizeObserver re-measures).
+ */
+const ScaledDocument: React.FC<{ zoom: ZoomMode; children: React.ReactNode }> = ({
+  zoom,
+  children,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [scaledHeight, setScaledHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const sheet = sheetRef.current;
+    if (!container || !sheet) return;
+
+    const recompute = () => {
+      const avail = container.clientWidth;
+      const s = zoom === 'actual' ? 1 : Math.min(1, avail / SHEET_PX_WIDTH);
+      setScale(s);
+      // offsetHeight is the UNSCALED layout height (transform doesn't change it).
+      setScaledHeight(sheet.offsetHeight * s);
+    };
+
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(container); // width changes (viewport/orientation)
+    ro.observe(sheet); // height changes (template switch, edits, page growth)
+    return () => ro.disconnect();
+  }, [zoom]);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`w-full flex ${zoom === 'actual' ? 'justify-start' : 'justify-center'}`}
+    >
+      <div
+        style={{
+          width: SHEET_PX_WIDTH * scale,
+          height: scaledHeight || undefined,
+          // Don't let the flex parent shrink this below its explicit width —
+          // otherwise at 100% (scale 1, box = 794px) it collapses to the pane
+          // width and `overflow: hidden` clips the sheet's right edge instead
+          // of letting the scroll pane pan. In 'fit' mode the box already
+          // equals the container width, so this is a no-op there.
+          flexShrink: 0,
+          // Clip the unscaled layout box so it never leaks into the pane's
+          // horizontal scroll width. The visible scaled sheet fills this box
+          // exactly (transformOrigin top-left + matching scale), so nothing
+          // visible is clipped. At 100% the box matches the sheet 1:1, so the
+          // ancestor pane (overflow-x: auto) provides the horizontal pan.
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          ref={sheetRef}
+          style={{
+            width: SHEET_PX_WIDTH,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Renders text as an external link when an href is present, else plain text.
+ *  `color: inherit` keeps the resume's #000 ink (brand forbids blue/purple);
+ *  affordance is a hover underline. ATS reads the visible URL regardless. */
+const LinkableText: React.FC<{ href?: string; children: React.ReactNode }> = ({
+  href,
+  children,
+}) =>
+  href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="hover:underline focus-visible:underline"
+      style={{ color: 'inherit' }}
+    >
+      {children}
+    </a>
+  ) : (
+    <>{children}</>
+  );
+
+/** The pipe-separated contact line, with linkable segments wrapped in <a>. */
+const ContactSegmentsLine: React.FC<{
+  segments: ContactSegment[];
+  style: React.CSSProperties;
+}> = ({ segments, style }) => (
+  <div style={style}>
+    {segments.map((seg, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <span>{CONTACT_SEPARATOR}</span>}
+        <LinkableText href={seg.href}>{seg.text}</LinkableText>
+      </React.Fragment>
+    ))}
+  </div>
+);
+
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return '';
   const s = dateString.toLowerCase();
@@ -147,6 +280,16 @@ export const Preview: React.FC<PreviewProps> = ({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [cooldownText, setCooldownText] = useState<string | null>(null);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
+  // Document zoom for the resume / cover-letter sheet. 'fit' scales the pt
+  // sheet to the viewport width (default — the right call on phones; clamps to
+  // 100% on desktop). 'actual' shows it at full size and lets the pane pan.
+  const [zoom, setZoom] = useState<ZoomMode>('fit');
+  // Template picker is a quiet, opt-in control — never the start of the show.
+  // `templatesOpen` drives the desktop sidebar disclosure (collapsed by
+  // default) and the mobile bottom sheet. `showMenu` is the mobile app-bar
+  // overflow (edit / regenerate / Word).
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   // Editing starts ON for a fresh generation (readOnly=false) and OFF for a
   // reopened/saved resume (readOnly=true) — but it's no longer permanent: the
   // user can toggle editing back on at any time, and edits autosave to the
@@ -183,17 +326,12 @@ export const Preview: React.FC<PreviewProps> = ({
 
   const template: TemplateDefinition = resolveTemplate(data.template);
 
-  // Build a plain pipe-separated contact line. Mirrors the PDF exporter
-  // exactly. Avoids Unicode icons (✉ ☎ ⌂ ⌘ ⊕) which can confuse some ATS
-  // parsers and which the PDF deliberately does not include.
-  const contactParts = [
-    data.personalInfo.email,
-    data.personalInfo.phone,
-    data.personalInfo.location,
-    data.personalInfo.linkedin,
-    data.personalInfo.github,
-    data.personalInfo.website,
-  ].filter(Boolean) as string[];
+  // Pipe-separated contact line as ordered segments (email · phone · location
+  // · linkedin · github · website). Mirrors the PDF/Word exporters exactly via
+  // the shared helper. Linkable segments render as <a>; the VISIBLE text stays
+  // the full URL/address so ATS parsers still read it. Avoids Unicode icons
+  // (✉ ☎ ⌂) which can confuse some ATS parsers.
+  const contactSegments = buildContactSegments(data.personalInfo);
 
   // Wrapper sheet — A4 in pt. Padding = template.margin pt on all sides.
   const sheetStyle: React.CSSProperties = {
@@ -379,8 +517,8 @@ export const Preview: React.FC<PreviewProps> = ({
           placeholder="YOUR NAME"
           readOnly={isReadOnly}
         />
-        {contactParts.length > 0 && (
-          <div style={contactLineStyle}>{contactParts.join('  |  ')}</div>
+        {contactSegments.length > 0 && (
+          <ContactSegmentsLine segments={contactSegments} style={contactLineStyle} />
         )}
       </header>
 
@@ -494,7 +632,9 @@ export const Preview: React.FC<PreviewProps> = ({
               </div>
               {project.link && (
                 <div style={{ ...italicLineStyle, fontStyle: 'normal' }}>
-                  {project.link}
+                  <LinkableText href={normalizeWebUrl(project.link)}>
+                    {project.link}
+                  </LinkableText>
                 </div>
               )}
               {project.refinedBullets && project.refinedBullets.length > 0 ? (
@@ -640,7 +780,13 @@ export const Preview: React.FC<PreviewProps> = ({
               <div key={pub.id} style={bodyTextStyle}>
                 {pub.title}
                 {pub.publisher ? `, ${pub.publisher}` : ''}, {pub.date}
-                {pub.link ? ` [${pub.link}]` : ''}
+                {pub.link ? (
+                  <>
+                    {' ['}
+                    <LinkableText href={normalizeWebUrl(pub.link)}>{pub.link}</LinkableText>
+                    {']'}
+                  </>
+                ) : ''}
               </div>
             ))}
           </section>
@@ -704,7 +850,13 @@ export const Preview: React.FC<PreviewProps> = ({
                   {[ref.position, ref.organization].filter(Boolean).join(', ')}
                 </div>
                 <div>
-                  {[ref.email, ref.phone].filter(Boolean).join(' · ')}
+                  {ref.email && (
+                    <LinkableText href={toMailto(ref.email)}>{ref.email}</LinkableText>
+                  )}
+                  {ref.email && ref.phone && ' · '}
+                  {ref.phone && (
+                    <LinkableText href={toTel(ref.phone)}>{ref.phone}</LinkableText>
+                  )}
                 </div>
                 {ref.relationship && <div>{ref.relationship}</div>}
               </div>
@@ -734,10 +886,28 @@ export const Preview: React.FC<PreviewProps> = ({
           {data.personalInfo.fullName}
         </div>
         <div style={{ fontSize: `${template.sizeBody}pt`, marginTop: '2pt' }}>
-          {data.personalInfo.email && <div>{data.personalInfo.email}</div>}
-          {data.personalInfo.phone && <div>{data.personalInfo.phone}</div>}
+          {data.personalInfo.email && (
+            <div>
+              <LinkableText href={toMailto(data.personalInfo.email)}>
+                {data.personalInfo.email}
+              </LinkableText>
+            </div>
+          )}
+          {data.personalInfo.phone && (
+            <div>
+              <LinkableText href={toTel(data.personalInfo.phone)}>
+                {data.personalInfo.phone}
+              </LinkableText>
+            </div>
+          )}
           {data.personalInfo.location && <div>{data.personalInfo.location}</div>}
-          {data.personalInfo.linkedin && <div>{data.personalInfo.linkedin}</div>}
+          {data.personalInfo.linkedin && (
+            <div>
+              <LinkableText href={normalizeWebUrl(data.personalInfo.linkedin)}>
+                {data.personalInfo.linkedin}
+              </LinkableText>
+            </div>
+          )}
         </div>
       </div>
 
@@ -812,11 +982,130 @@ export const Preview: React.FC<PreviewProps> = ({
   // SHELL
   // ────────────────────────────────────────────────────────────
 
+  // Unified artifact navigation. "Resume" is now ONE destination (the template
+  // is a separate, opt-in control) — so the document, not the template grid, is
+  // the start of the show. Used by both the mobile tab rail and desktop sidebar.
+  const statusOf = (item: ToolkitItem) => getItemStatus(data, item, regeneratingItem, toolkitPending);
+  const TABS: { id: PreviewTab; label: string; icon: typeof FileText; status?: ToolkitItem }[] = [
+    { id: 'resume', label: t('preview.tabResume'), icon: FileText },
+    { id: 'coverLetter', label: t('preview.tabCoverLetter'), icon: FileCheck, status: 'coverLetter' },
+    { id: 'outreachEmail', label: t('preview.tabOutreachEmail'), icon: Mail, status: 'outreachEmail' },
+    { id: 'linkedInMessage', label: t('preview.tabLinkedIn'), icon: Linkedin, status: 'linkedInMessage' },
+    { id: 'interviewPrep', label: t('preview.tabQuestionPrep'), icon: MessageSquare, status: 'interviewQuestions' },
+  ];
+  const isDocTab = activeTab === 'resume' || activeTab === 'coverLetter';
+
+  // Template option rows — reused by the desktop sidebar disclosure and the
+  // mobile bottom sheet. Picking one selects the Resume tab and closes the sheet.
+  const renderTemplateOptions = (onPick?: () => void) => (
+    <div className="flex flex-col gap-1.5">
+      {Object.values(templateRegistry).map((tpl) => {
+        const active = template.id === tpl.id;
+        return (
+          <button
+            type="button"
+            key={tpl.id}
+            onClick={() => {
+              setActiveTab('resume');
+              onUpdate({ ...data, template: tpl.id });
+              onPick?.();
+            }}
+            className={`flex items-start gap-3 text-left px-3 py-2.5 rounded-lg border transition-colors ${
+              active ? 'bg-accent-50 border-accent-200' : 'bg-white border-charcoal-200 hover:bg-charcoal-50'
+            }`}
+          >
+            <Check size={16} className={`mt-0.5 shrink-0 ${active ? 'text-accent-600' : 'text-transparent'}`} />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-brand-700">{tpl.displayName}</span>
+              <span className="block text-[11px] text-brand-500 leading-snug mt-0.5">{tpl.description}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div className="flex flex-col h-screen bg-charcoal-50 overflow-hidden">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-10 flex flex-col md:flex-row items-start md:items-center justify-between px-4 md:px-6 py-4 bg-white border-b border-charcoal-200 shadow-sm shrink-0 gap-4">
-        <div className="flex items-center justify-between w-full md:w-auto md:justify-start gap-4 md:gap-6">
+    <div className="flex flex-col h-dvh bg-charcoal-50 overflow-hidden">
+      {/* ── Mobile app bar — slim identity + overflow menu. The document is the
+          hero; chrome stays out of its way. ───────────────────────────────── */}
+      <header className="md:hidden sticky top-0 z-20 flex items-center gap-1 px-3 h-14 bg-white border-b border-charcoal-200 shrink-0">
+        <button
+          type="button"
+          onClick={onGoHome}
+          aria-label={t('preview.backToDashboard')}
+          className="p-2 -ml-1 text-charcoal-600 hover:text-charcoal-900 rounded-lg shrink-0"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <h1 className="flex-1 min-w-0 truncate text-[15px] font-semibold text-charcoal-800">
+          {data.targetJob?.title
+            ? `${data.targetJob.title} ${t('preview.resumeTitleSuffix')}`
+            : t('preview.resumeTitleFallback')}
+        </h1>
+        {(!isGeneralResume || isDocTab) && (
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowMenu(v => !v)}
+              aria-label={t('preview.moreActions')}
+              aria-expanded={showMenu}
+              className="p-2 -mr-1 text-charcoal-600 hover:text-charcoal-900 rounded-lg"
+            >
+              <MoreVertical size={20} />
+            </button>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} aria-hidden />
+                <div className="absolute right-0 top-full mt-1 z-30 w-56 bg-white border border-charcoal-200 rounded-xl shadow-lg py-1.5">
+                  {!isGeneralResume && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditModeActive(v => !v); setShowMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-charcoal-700 hover:bg-charcoal-50 text-left"
+                    >
+                      {editModeActive ? <Pencil size={16} /> : <PencilOff size={16} />}
+                      {editModeActive ? t('preview.editModeOn') : t('preview.editModeOff')}
+                    </button>
+                  )}
+                  {isGeneralResume && (
+                    <button
+                      type="button"
+                      disabled={!canRegenerate || isRegenerating}
+                      onClick={async () => {
+                        setShowMenu(false);
+                        if (onRegenerate) {
+                          setIsRegenerating(true);
+                          try { await onRegenerate(); } finally { setIsRegenerating(false); }
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-charcoal-700 hover:bg-charcoal-50 text-left disabled:opacity-50"
+                    >
+                      {isRegenerating ? <Loader2 size={16} className="animate-spin" /> : !canRegenerate ? <Lock size={16} /> : <RefreshCw size={16} />}
+                      {!canRegenerate ? t('preview.regenerateLocked') : t('preview.regenerate')}
+                    </button>
+                  )}
+                  {isDocTab && (
+                    <button
+                      type="button"
+                      disabled={isExporting || (activeTab === 'coverLetter' && (!onExportCoverLetter || statusOf('coverLetter') !== 'success'))}
+                      onClick={() => { setShowMenu(false); (activeTab === 'resume' ? handleWordExport : handleCoverLetterExport)(); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-charcoal-700 hover:bg-charcoal-50 text-left disabled:opacity-50"
+                    >
+                      <FileText size={16} /> {t('preview.downloadWord')}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </header>
+
+      {/* ── Desktop header (unchanged identity + actions; zoom lives only on
+          phones, where it earns its place) ────────────────────────────────── */}
+      <header className="hidden md:flex sticky top-0 z-10 items-center justify-between px-6 py-4 bg-white border-b border-charcoal-200 shadow-sm shrink-0 gap-4">
+        <div className="flex items-center justify-start gap-6">
           <button
             type="button"
             onClick={onGoHome}
@@ -842,7 +1131,7 @@ export const Preview: React.FC<PreviewProps> = ({
             <button
               type="button"
               onClick={() => setEditModeActive(v => !v)}
-              className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-md border shadow-sm transition-colors ${
+              className={`flex items-center gap-2 px-3.5 min-h-11 text-sm font-semibold rounded-md border shadow-sm transition-colors ${
                 editModeActive
                   ? 'bg-accent-400 border-accent-500 text-brand-900 hover:bg-accent-500'
                   : 'bg-white border-charcoal-300 text-charcoal-600 hover:bg-charcoal-50'
@@ -869,7 +1158,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 }
               }}
               disabled={!canRegenerate || isRegenerating}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-md border shadow-sm transition-colors disabled:opacity-50 bg-white border-brand-200 text-brand-700 hover:bg-brand-50"
+              className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold rounded-md border shadow-sm transition-colors disabled:opacity-50 bg-white border-brand-200 text-brand-700 hover:bg-brand-50"
               title={cooldownText || t('preview.regenerateLockedTitle')}
             >
               {isRegenerating ? (
@@ -895,7 +1184,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   (activeTab === 'coverLetter' && (!onExportCoverLetter || getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')) ||
                   (activeTab !== 'resume' && activeTab !== 'coverLetter')
                 }
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-md hover:border-brand-700 shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-md hover:border-brand-700 shadow-sm transition-colors disabled:opacity-50"
               >
                 <FileText size={16} />
                 {t('preview.downloadWord')}
@@ -905,7 +1194,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 type="button"
                 onClick={handlePDFExport}
                 disabled={isPdfGenerating || (activeTab === 'coverLetter' && getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-md hover:bg-brand-800 shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-md hover:bg-brand-800 shadow-sm transition-colors disabled:opacity-50"
               >
                 {isPdfGenerating ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -940,177 +1229,111 @@ export const Preview: React.FC<PreviewProps> = ({
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-        {/* Left Sidebar — template picker + toolkit navigation */}
-        <aside className="w-full md:w-[280px] bg-white border-b md:border-b-0 md:border-r border-charcoal-200 overflow-x-auto md:overflow-y-auto flex-shrink-0 scrollbar-hide">
-          <div className="p-4 md:p-6 flex flex-row md:flex-col gap-6">
-            {/* Documents group — Resume (template picker) + Cover Letter */}
-            <div>
-              <h2 className="text-[10px] font-bold text-brand-500 uppercase tracking-[0.18em] mb-3">
-                {t('preview.sidebarDocs')}
-              </h2>
-
-              <div className="flex flex-row md:flex-col gap-2 min-w-max md:min-w-0">
-                {Object.values(templateRegistry).map((t) => {
-                  const isActive =
-                    template.id === t.id && activeTab === 'resume';
-                  return (
-                    <button
-                      type="button"
-                      key={t.id}
-                      onClick={() => {
-                        setActiveTab('resume');
-                        onUpdate({ ...data, template: t.id });
-                      }}
-                      className={`relative flex flex-col text-left px-4 py-3 rounded-md transition-colors ${
-                        isActive
-                          ? 'bg-accent-50 text-brand-700 border border-accent-200'
-                          : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
-                      }`}
-                    >
-                      <span
-                        className={`text-sm font-semibold ${isActive ? 'text-brand-700' : ''}`}
-                      >
-                        {t.displayName}
-                      </span>
-                      <span className="hidden md:block text-[11px] text-brand-500 leading-snug mt-1">
-                        {t.description}
-                      </span>
-                    </button>
-                  );
-                })}
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('coverLetter')}
-                  className={`relative flex items-center justify-between text-left px-4 py-3 rounded-md transition-colors ${
-                    activeTab === 'coverLetter'
-                      ? 'bg-accent-50 text-brand-700 border border-accent-200'
-                      : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <FileCheck
-                      size={18}
-                      className={
-                        activeTab === 'coverLetter'
-                          ? 'text-accent-600'
-                          : 'text-brand-400'
-                      }
-                    />
-                    <span className="text-sm font-semibold">{t('preview.tabCoverLetter')}</span>
-                  </div>
-                  <StatusDot status={getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending)} />
-                </button>
-              </div>
-            </div>
-
-            {/* Outreach group */}
-            <div>
-              <h2 className="text-[10px] font-bold text-brand-500 uppercase tracking-[0.18em] mb-3">
-                {t('preview.sidebarOutreach')}
-              </h2>
-              <div className="flex flex-row md:flex-col gap-2 min-w-max md:min-w-0">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('outreachEmail')}
-                  className={`relative flex items-center justify-between text-left px-4 py-3 rounded-md transition-colors ${
-                    activeTab === 'outreachEmail'
-                      ? 'bg-accent-50 text-brand-700 border border-accent-200'
-                      : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Mail
-                      size={18}
-                      className={
-                        activeTab === 'outreachEmail'
-                          ? 'text-accent-600'
-                          : 'text-brand-400'
-                      }
-                    />
-                    <span className="text-sm font-semibold">{t('preview.tabOutreachEmail')}</span>
-                  </div>
-                  <StatusDot status={getItemStatus(data, 'outreachEmail', regeneratingItem, toolkitPending)} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('linkedInMessage')}
-                  className={`relative flex items-center justify-between text-left px-4 py-3 rounded-md transition-colors ${
-                    activeTab === 'linkedInMessage'
-                      ? 'bg-accent-50 text-brand-700 border border-accent-200'
-                      : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Linkedin
-                      size={18}
-                      className={
-                        activeTab === 'linkedInMessage'
-                          ? 'text-accent-600'
-                          : 'text-brand-400'
-                      }
-                    />
-                    <span className="text-sm font-semibold">{t('preview.tabLinkedIn')}</span>
-                  </div>
-                  <StatusDot status={getItemStatus(data, 'linkedInMessage', regeneratingItem, toolkitPending)} />
-                </button>
-              </div>
-            </div>
-
-            {/* Interview prep */}
-            <div>
-              <h2 className="text-[10px] font-bold text-brand-500 uppercase tracking-[0.18em] mb-3">
-                {t('preview.sidebarInterview')}
-              </h2>
+      {/* ── Mobile artifact rail — the single piece of persistent navigation:
+          Resume · Cover Letter · Outreach · LinkedIn · Interview. ─────────── */}
+      <nav
+        className="md:hidden shrink-0 bg-white border-b border-charcoal-200 overflow-x-auto scrollbar-hide"
+        aria-label={t('preview.sidebarDocs')}
+      >
+        <div className="flex items-center gap-1.5 px-3 py-2 min-w-max">
+          {TABS.map((tab) => {
+            const active = activeTab === tab.id;
+            const Icon = tab.icon;
+            return (
               <button
+                key={tab.id}
                 type="button"
-                onClick={() => setActiveTab('interviewPrep')}
-                className={`w-full relative flex items-center justify-between text-left px-4 py-3 rounded-md transition-colors ${
-                  activeTab === 'interviewPrep'
-                    ? 'bg-accent-50 text-brand-700 border border-accent-200'
-                    : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
+                onClick={() => setActiveTab(tab.id)}
+                aria-pressed={active}
+                className={`flex items-center gap-1.5 pl-3 pr-3.5 min-h-9 rounded-full text-[13px] font-semibold whitespace-nowrap transition-colors ${
+                  active ? 'bg-brand-700 text-charcoal-50' : 'bg-charcoal-100 text-brand-600'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <MessageSquare
-                    size={18}
-                    className={
-                      activeTab === 'interviewPrep'
-                        ? 'text-accent-600'
-                        : 'text-brand-400'
-                    }
-                  />
-                  <span className="text-sm font-semibold">
-                    {t('preview.tabQuestionPrep')}
-                    {data.toolkit?.interviewQuestions && data.toolkit.interviewQuestions.length > 0 && (
-                      <span className="ml-1.5 text-[11px] font-normal text-brand-500">
-                        · {data.toolkit.interviewQuestions.length}
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <StatusDot status={getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending)} />
+                <Icon size={14} className={active ? 'text-accent-300' : 'text-brand-400'} />
+                {tab.label}
+                {tab.status && <StatusDot status={statusOf(tab.status)} />}
               </button>
-            </div>
+            );
+          })}
+        </div>
+      </nav>
 
-            <p className="hidden md:block text-[11px] text-brand-500 leading-snug mt-auto pt-4 border-t border-charcoal-200">
-              {t('preview.sidebarFootnote')}
-            </p>
-          </div>
+      <div className="flex flex-1 overflow-hidden">
+        {/* ── Desktop sidebar — artifact nav first; the template is a quiet,
+            collapsible control nested under the active Resume tab. ───────── */}
+        <aside className="hidden md:flex md:w-[260px] bg-white border-r border-charcoal-200 overflow-y-auto flex-shrink-0 flex-col">
+          <nav className="p-4 flex flex-col gap-1">
+            {TABS.map((tab) => {
+              const active = activeTab === tab.id;
+              const Icon = tab.icon;
+              return (
+                <div key={tab.id}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`w-full relative flex items-center justify-between text-left px-3 py-2.5 rounded-lg transition-colors ${
+                      active
+                        ? 'bg-accent-50 text-brand-700 border border-accent-200'
+                        : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
+                    }`}
+                  >
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Icon size={18} className={active ? 'text-accent-600' : 'text-brand-400'} />
+                      <span className="text-sm font-semibold truncate">
+                        {tab.label}
+                        {tab.id === 'interviewPrep' && data.toolkit?.interviewQuestions?.length ? (
+                          <span className="ml-1.5 text-[11px] font-normal text-brand-500">
+                            · {data.toolkit.interviewQuestions.length}
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                    {tab.status && <StatusDot status={statusOf(tab.status)} />}
+                  </button>
+
+                  {tab.id === 'resume' && active && (
+                    <div className="mt-1 ml-3 pl-3 border-l border-charcoal-200">
+                      <button
+                        type="button"
+                        onClick={() => setTemplatesOpen((v) => !v)}
+                        aria-expanded={templatesOpen}
+                        className="w-full flex items-center justify-between gap-2 px-2 py-2 rounded-md text-left hover:bg-charcoal-50"
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <LayoutTemplate size={15} className="text-brand-400 shrink-0" />
+                          <span className="text-[13px] text-brand-600 truncate">
+                            <span className="text-brand-400">{t('preview.templateLabel')}: </span>
+                            {template.displayName}
+                          </span>
+                        </span>
+                        <ChevronDown
+                          size={15}
+                          className={`text-brand-400 shrink-0 transition-transform ${templatesOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
+                      {templatesOpen && <div className="mt-1.5 pb-1">{renderTemplateOptions()}</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </nav>
+          <p className="text-[11px] text-brand-500 leading-snug mt-auto p-4 border-t border-charcoal-200">
+            {t('preview.sidebarFootnote')}
+          </p>
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 bg-charcoal-50 overflow-auto relative">
           {activeTab === 'resume' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0">
-              {resumeContent}
+            <div className="p-4 md:py-12">
+              <ScaledDocument zoom={zoom}>{resumeContent}</ScaledDocument>
             </div>
           )}
           {activeTab === 'coverLetter' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0">
+            <div className="p-4 md:py-12">
               {getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) === 'success' ? (
-                coverLetterContent
+                <ScaledDocument zoom={zoom}>{coverLetterContent}</ScaledDocument>
               ) : (
                 <ToolkitStatusCard
                   icon={FileCheck}
@@ -1126,7 +1349,7 @@ export const Preview: React.FC<PreviewProps> = ({
             </div>
           )}
           {activeTab === 'outreachEmail' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
+            <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'outreachEmail', regeneratingItem, toolkitPending) === 'success' ? (
                 <OutreachEmailViewer email={data.toolkit!.outreachEmail!} />
               ) : (
@@ -1144,7 +1367,7 @@ export const Preview: React.FC<PreviewProps> = ({
             </div>
           )}
           {activeTab === 'linkedInMessage' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
+            <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'linkedInMessage', regeneratingItem, toolkitPending) === 'success' ? (
                 <LinkedInMessageViewer message={data.toolkit!.linkedInMessage!} />
               ) : (
@@ -1162,7 +1385,7 @@ export const Preview: React.FC<PreviewProps> = ({
             </div>
           )}
           {activeTab === 'interviewPrep' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
+            <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending) === 'success' ? (
                 <InterviewPrepViewer questions={data.toolkit!.interviewQuestions!} />
               ) : (
@@ -1181,6 +1404,84 @@ export const Preview: React.FC<PreviewProps> = ({
           )}
         </main>
       </div>
+
+      {/* ── Mobile action dock — primary actions in the thumb zone. Shown only
+          for the document tabs (toolkit viewers carry their own Copy actions). */}
+      {isDocTab && (
+        <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2.5 bg-white border-t border-charcoal-200">
+          {activeTab === 'resume' && (
+            <button
+              type="button"
+              onClick={() => setTemplatesOpen(true)}
+              className="flex items-center gap-1.5 px-3 min-h-11 rounded-lg border border-charcoal-300 text-sm font-semibold text-brand-700 bg-white max-w-[42%]"
+            >
+              <LayoutTemplate size={16} className="text-brand-400 shrink-0" />
+              <span className="truncate">{template.displayName}</span>
+            </button>
+          )}
+
+          {/* Fit / 100% — genuinely useful here, where the page can't show at
+              full size on a phone. */}
+          <div
+            role="group"
+            aria-label={t('preview.zoomLabel')}
+            className="flex items-center rounded-lg border border-charcoal-300 overflow-hidden shrink-0"
+          >
+            <button
+              type="button"
+              onClick={() => setZoom('fit')}
+              aria-pressed={zoom === 'fit'}
+              className={`px-3 min-h-11 text-sm font-semibold ${zoom === 'fit' ? 'bg-brand-700 text-charcoal-50' : 'bg-white text-charcoal-600'}`}
+            >
+              {t('preview.zoomFit')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom('actual')}
+              aria-pressed={zoom === 'actual'}
+              className={`px-3 min-h-11 text-sm font-semibold border-l border-charcoal-300 ${zoom === 'actual' ? 'bg-brand-700 text-charcoal-50' : 'bg-white text-charcoal-600'}`}
+            >
+              {t('preview.zoomActual')}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={handlePDFExport}
+            disabled={isPdfGenerating || (activeTab === 'coverLetter' && statusOf('coverLetter') !== 'success')}
+            className="flex-1 flex items-center justify-center gap-2 px-4 min-h-11 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-lg shadow-sm disabled:opacity-50"
+          >
+            {isPdfGenerating ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {isPdfGenerating ? t('preview.generatingPDF') : t('preview.downloadPDF')}
+          </button>
+        </div>
+      )}
+
+      {/* ── Mobile template bottom sheet — the opt-in way to change template. */}
+      {templatesOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-40 flex flex-col justify-end"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('preview.templatePick')}
+        >
+          <div className="absolute inset-0 bg-brand-900/40" onClick={() => setTemplatesOpen(false)} aria-hidden />
+          <div className="relative bg-white rounded-t-2xl shadow-xl max-h-[75vh] overflow-y-auto p-4 pb-6 animate-in slide-in-from-bottom-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold text-brand-700">{t('preview.templatePick')}</h2>
+              <button
+                type="button"
+                onClick={() => setTemplatesOpen(false)}
+                aria-label={t('preview.editBannerDismiss')}
+                className="p-1.5 -mr-1 text-brand-500 hover:text-brand-800 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {renderTemplateOptions(() => setTemplatesOpen(false))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

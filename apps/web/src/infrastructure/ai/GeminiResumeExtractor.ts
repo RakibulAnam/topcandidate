@@ -115,6 +115,48 @@ export class GeminiResumeExtractor implements IResumeExtractor {
                         },
                         required: ['id', 'title', 'issuer']
                     }
+                },
+                certifications: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.STRING, description: "Generate a unique ID." },
+                            name: { type: Type.STRING },
+                            issuer: { type: Type.STRING },
+                            date: { type: Type.STRING },
+                            link: { type: Type.STRING }
+                        },
+                        required: ['id', 'name', 'issuer']
+                    }
+                },
+                affiliations: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.STRING, description: "Generate a unique ID." },
+                            organization: { type: Type.STRING },
+                            role: { type: Type.STRING },
+                            startDate: { type: Type.STRING },
+                            endDate: { type: Type.STRING }
+                        },
+                        required: ['id', 'organization']
+                    }
+                },
+                publications: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.STRING, description: "Generate a unique ID." },
+                            title: { type: Type.STRING },
+                            publisher: { type: Type.STRING },
+                            date: { type: Type.STRING },
+                            link: { type: Type.STRING }
+                        },
+                        required: ['id', 'title']
+                    }
                 }
             },
             required: ['personalInfo', 'userType']
@@ -122,13 +164,20 @@ export class GeminiResumeExtractor implements IResumeExtractor {
 
         const prompt = EXTRACTOR_PROMPT;
 
+        // 'text/plain' → `fileData` is already-extracted resume text (client-side
+        // pdf.js); send it inline as text. Otherwise `fileData` is base64 of the
+        // raw file (scanned-PDF fallback) → send as inlineData for native read.
+        const contents = mimeType === 'text/plain'
+            ? [{ text: `${prompt}\n\nThe resume text follows:\n\n${fileData}` }]
+            : [
+                { inlineData: { data: fileData, mimeType } },
+                { text: prompt },
+            ];
+
         try {
             const result = await this.genAI.models.generateContent({
                 model: EXTRACTOR_MODEL,
-                contents: [
-                    { inlineData: { data: fileData, mimeType } },
-                    { text: prompt }
-                ],
+                contents,
                 config: {
                     responseMimeType: 'application/json',
                     responseSchema: extractionSchema,

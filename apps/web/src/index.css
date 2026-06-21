@@ -75,6 +75,101 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ── Interactive cursor (Tailwind v4 regression fix) ─────────────────────────
+ * Tailwind v4 dropped v3's preflight `button { cursor: pointer }`, and the
+ * browser UA default for <button> is the arrow — so every native button in the
+ * app lost its pointer cursor. Restore it for all genuinely-interactive
+ * elements. Scoped to exclude disabled controls (they keep not-allowed/default)
+ * and placed in @layer base so explicit `cursor-*` utilities still win.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  label[for],
+  summary,
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* ── iOS zoom-on-focus fix (mobile only) ────────────────────────────────────
+ * Safari/iOS auto-zooms the page when a focused form control has a font-size
+ * below 16px — which happens on nearly every input/textarea/select in the app
+ * (they're `text-sm` = 14px). One unlayered rule fixes it everywhere: unlayered
+ * CSS beats Tailwind's `.text-sm` utility (layered), so controls render at 16px
+ * on phones, while desktop keeps the `text-sm` density (rule is ≤640px only).
+ *
+ * The resume preview's inline-edit fields (EditableElement) set their pt
+ * font-size via an INLINE `style` attribute, which beats this rule — so the
+ * WYSIWYG resume sizing (CLAUDE.md rule 7) is untouched. The explicit
+ * exclusion below is belt-and-braces for any edit field that inherits its size.
+ */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+  #resume-source input, #resume-source textarea,
+  #cover-letter-source input, #cover-letter-source textarea {
+    font-size: inherit;
+  }
+}
+
+/* ── scrollbar-hide — referenced across mobile horizontal scrollers (Preview
+ * sidebar/action row, ProfileScreen tabs). Tailwind v4 has no built-in for
+ * this, so define it as a real utility. */
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Icon buttons — small square ghost buttons used for row edit/delete
+ * actions in profile sections (EducationSection, etc.). The class names were
+ * referenced but never defined; define them once here. */
+@utility icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  color: var(--color-charcoal-500);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  &:hover {
+    background-color: var(--color-charcoal-100);
+    color: var(--color-charcoal-700);
+  }
+}
+
+@utility icon-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  color: var(--color-charcoal-500);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  &:hover {
+    background-color: #FEECEC;
+    color: #C0392B;
+  }
+}
+
+/* On touch devices, grow the icon-button hit area to the 44px a11y minimum
+ * (desktop/mouse keeps the compact 2rem so dense rows don't look chunky). */
+@media (hover: none) and (pointer: coarse) {
+  .icon-btn, .icon-btn-danger {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
+
 .font-display {
   font-family: var(--font-display);
   font-optical-sizing: auto;
@@ -118,8 +213,8 @@ html[data-locale="bn"] .font-display {
   }
   .no-print { display: none !important; }
   .print-only { display: block !important; }
-  #resume-preview,
-  #cover-letter-preview {
+  #resume-source,
+  #cover-letter-source {
     width: 100% !important;
     min-height: auto !important;
     margin: 0 !important;

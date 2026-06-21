@@ -15,7 +15,8 @@ npm install
 cp .env.example .env     # then fill in the values per the comments
 npm run dev              # Vite dev server (frontend only; API routes will 404)
 npm run dev:full         # `vercel dev` — frontend + serverless functions
-npm run build            # tsc + Vite production build
+npm run typecheck:api    # type-check the api/ serverless functions only (tsconfig.api.json)
+npm run build            # = `npm run typecheck:api && vite build` — type-checks api/, then bundles the client
 ```
 
 ## Required environment variables
@@ -26,7 +27,7 @@ See [`.env.example`](./.env.example) for the full annotated list. In short:
 
 | Variable | What it does |
 |---|---|
-| `OPENROUTER_API_KEY` | **Primary AI provider** (single key). When set, all AI runs through OpenRouter: DeepSeek V3.2 optimizer → Gemini 2.5 Flash toolkit/single-artifact → Gemini 2.5 Flash-Lite extractor (each with a fallback chain). `api/_lib/aiFactory.ts` gates on it. Set a hard monthly spend cap + enable ZDR in the OpenRouter dashboard. https://openrouter.ai/keys — see [`docs/OPENROUTER_MIGRATION.md`](./docs/OPENROUTER_MIGRATION.md). |
+| `OPENROUTER_API_KEY` | **Primary AI provider** (single key). When set, all AI runs through OpenRouter: Gemini 2.5 Flash optimizer (Llama 3.3 70B fallback) → Gemini 2.5 Flash toolkit/single-artifact (DeepSeek V3.2 / Llama fallbacks) → Gemini 2.5 Flash-Lite extractor. `api/_lib/aiFactory.ts` gates on it. Set a hard monthly spend cap + enable ZDR in the OpenRouter dashboard. https://openrouter.ai/keys — see [`docs/OPENROUTER_MIGRATION.md`](./docs/OPENROUTER_MIGRATION.md). |
 | `GROQ_API_KEY` | **Legacy fallback** (used only when `OPENROUTER_API_KEY` is absent). Groq optimizer, free at https://console.groq.com/keys (1,000 RPD). Kept one cycle as the rollback path. |
 | `GEMINI_API_KEY` | **Legacy fallback** optimizer + all legacy toolkit/extractor generators. Free at https://aistudio.google.com/app/apikey (20 RPD). Kept one cycle as the rollback path. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Bypasses RLS. Used server-side by the HMAC webhooks (`/api/confirm-purchase`, `/api/orphan-inbound-sms`, `/api/reverse-purchase`), `/api/cron/expire-pending`, `/api/optimize` (the service-role-only credit RPCs from migration 008), and the admin dispatcher. |
@@ -62,13 +63,24 @@ At time of writing, the full set is:
 - `009_admin_panel.sql`
 - `010_align_profiles_columns.sql`
 - `011_webhook_nonces.sql` *(replay protection for the HMAC webhooks — nonce table + timestamp window)*
+- `012_realtime_and_match_on_submit.sql` *(near-real-time credits — `inbound_payments` + match-on-submit + adds `purchases` to the realtime publication)*
+- `013_analytics_and_bi.sql` *(first-party analytics events, credit ledger, AI cost columns, BI views, admin login emails)*
+- `014_add_toolkit_call_kind.sql` *(toolkit moved to its own `/api/toolkit` endpoint — logs its own call kind)*
+- `015_profile_normalization.sql` *("polished profile" — one cheap AI normalization per item on save)*
+- `016_normalize_projects_extracurriculars.sql` *(extend normalization to projects + extracurriculars)*
+- `017_delete_user_complete.sql` *(fix account deletion — cascade the remaining child tables)*
+- `018_guided_mode.sql` *(Guided Mode questionnaire — `guided` JSONB + `input_mode`)*
+- `019_guided_free_for_existing_text.sql` *(Guided Mode data-loss fix for existing text)*
 
 See [`DEPLOYING.md`](./DEPLOYING.md) for the full first-deploy walk-through.
 
 ## Verification
 
 ```bash
-npm run build          # tsc (part of Vite) + production bundle — must pass clean
+npm run build          # = `npm run typecheck:api && vite build`. Type-checks the
+                       # api/ serverless functions (the same thing Vercel checks on
+                       # deploy), then bundles the client. `vite build` transpiles but
+                       # does NOT type-check the client. Must pass clean.
 
 # Server-only smoke for /api/admin/* and the AI factory. `vite build` tree-shakes
 # server-only files, so a syntax error in those files passes `npm run build`
@@ -81,7 +93,7 @@ There is no automated test suite. Verification = the two commands above + a manu
 ## What's in the box
 
 - Multi-step Builder (Personal info → Sections → Experience → Projects → Education → Skills → Extras → Languages → References → Generate → Preview)
-- AI via OpenRouter (single key) when `OPENROUTER_API_KEY` is set — DeepSeek optimizer + Gemini-Flash toolkit/extractor, each with a `models[]` fallback chain; falls back to legacy Groq→Gemini otherwise. Gated in `api/_lib/aiFactory.ts`
+- AI via OpenRouter (single key) when `OPENROUTER_API_KEY` is set — Gemini 2.5 Flash optimizer + Gemini-Flash toolkit + Gemini-Flash-Lite extractor, each with a `models[]` fallback chain; falls back to legacy Groq→Gemini otherwise. Gated in `api/_lib/aiFactory.ts`
 - One combined toolkit generator (cover letter + outreach email + LinkedIn note + interview prep) — the "2-call hot path"
 - bKash purchase flow with HMAC-signed Flutter watcher confirmation (see `apps/mobile/`)
 - Operator admin SPA at `/admin` (Dashboard / Users / Purchases / Disputes / Orphans / Parser failures / Audit log / Settings)
@@ -94,7 +106,8 @@ apps/web/
 ├── api/                    Vercel Functions (server)
 │   ├── admin/[action].ts   Admin dispatcher — single function, ~26 sub-handlers
 │   ├── confirm-purchase.ts bKash webhook (HMAC-gated)
-│   ├── optimize.ts         Paid hot-path (optimizer + combined toolkit)
+│   ├── optimize.ts         Paid hot-path (optimizer only; charges the credit)
+│   ├── toolkit.ts          Combined toolkit bundle (free; own invocation since 2026-06-11)
 │   ├── optimize-general.ts Free path (optimizer only)
 │   ├── toolkit-item.ts     Per-item retry (free)
 │   └── ...

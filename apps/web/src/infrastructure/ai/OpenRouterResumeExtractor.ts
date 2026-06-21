@@ -4,16 +4,17 @@
 // universal `file` content part (base64 data URL). Gemini 2.5 Flash-Lite primary
 // (native PDF, cheapest) → Gemini 2.5 Flash fallback. Shares EXTRACTOR_PROMPT
 // and applies the SAME post-parse sanitization (regenerate ids, normalize dates
-// to YYYY-MM) as the Gemini extractor. OpenRouter json_object doesn't enforce a
-// schema, so the field shape is embedded in the prompt (EXTRACTOR_JSON_SHAPE).
+// to YYYY-MM) as the Gemini extractor. Uses strict `json_schema`
+// (EXTRACTOR_SCHEMA) so the provider enforces the full shape — the prompt's
+// EXTRACTOR_JSON_SHAPE is kept as redundant guidance.
 //
-// Not wired into aiFactory yet (cutover = Phase 6). KEEP the Gemini extractor as
-// the live path until this is proven on real PDFs + DOCX.
+// This is the LIVE extractor whenever OPENROUTER_API_KEY is set (aiFactory). The
+// GeminiResumeExtractor is the unset-key fallback path.
 
 import { ExtractedProfileData, IResumeExtractor } from '../../domain/usecases/ExtractResumeUseCase.js';
 import type { UsageSink } from './usage.js';
 import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
-import { EXTRACTOR_PROMPT, EXTRACTOR_JSON_SHAPE } from './prompts/extractorPrompts.js';
+import { EXTRACTOR_PROMPT, EXTRACTOR_JSON_SHAPE, EXTRACTOR_SCHEMA } from './prompts/extractorPrompts.js';
 
 const EXTRACTOR_MODELS = ['google/gemini-2.5-flash-lite', 'google/gemini-2.5-flash'];
 
@@ -25,6 +26,14 @@ export class OpenRouterResumeExtractor implements IResumeExtractor {
   }
 
   async extract(fileData: string, mimeType: string, usage?: UsageSink): Promise<ExtractedProfileData> {
+    // Two input modes:
+    //  • 'text/plain' → `fileData` is already-extracted resume text (the client
+    //    pulled it out with pdf.js). Send it as a plain text message — tiny
+    //    body, no body-size limit, no parser plugin needed.
+    //  • anything else → `fileData` is base64 of the raw file; send it as a
+    //    `file` part and let natively-multimodal Gemini read it (scanned-PDF
+    //    fallback path).
+    const isText = mimeType === 'text/plain';
     const parsed = await withRetry(async (remainingMs) => {
       const result = await this.client.chat(
         {
@@ -32,28 +41,41 @@ export class OpenRouterResumeExtractor implements IResumeExtractor {
           models: EXTRACTOR_MODELS,
           messages: [
             { role: 'system', content: `${EXTRACTOR_PROMPT}\n${EXTRACTOR_JSON_SHAPE}` },
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: 'Extract this resume into the schema.' },
-                {
-                  type: 'file',
-                  file: {
-                    filename: mimeType === 'application/pdf' ? 'resume.pdf' : 'resume',
-                    file_data: `data:${mimeType};base64,${fileData}`,
-                  },
+            isText
+              ? {
+                  role: 'user',
+                  content: `Extract this resume into the schema. The resume text follows:\n\n${fileData}`,
+                }
+              : {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: 'Extract this resume into the schema.' },
+                    {
+                      type: 'file',
+                      file: {
+                        filename: mimeType === 'application/pdf' ? 'resume.pdf' : 'resume',
+                        file_data: `data:${mimeType};base64,${fileData}`,
+                      },
+                    },
+                  ],
                 },
-              ],
-            },
           ],
-          response_format: { type: 'json_object' },
+          // Strict structured outputs — the provider enforces the full schema,
+          // so the large multi-section resume JSON can't truncate mid-output
+          // (the old `json_object` mode silently dropped trailing sections like
+          // education / certifications / awards). See extractorPrompts.ts.
+          response_format: { type: 'json_schema', json_schema: { name: 'resume_extraction', strict: true, schema: EXTRACTOR_SCHEMA } },
           temperature: 0,
-          max_tokens: 4000,
+          // Raised 4000 → 8000: a full multi-page resume's JSON (verbatim
+          // rawDescription text + every section) exceeds 4000 tokens and used to
+          // get cut off. Fits the 45s deadline below.
+          max_tokens: 8000,
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
-          // Let natively-multimodal Gemini read the PDF directly (no extra OCR
-          // pass / cost) rather than OpenRouter's default parser.
-          plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }],
+          // Only needed for the file path: let natively-multimodal Gemini read
+          // the PDF directly (no extra OCR pass / cost) rather than OpenRouter's
+          // default parser. The text path sends no file, so no plugin.
+          ...(isText ? {} : { plugins: [{ id: 'file-parser' as const, pdf: { engine: 'native' as const } }] }),
         },
         remainingMs,
       );

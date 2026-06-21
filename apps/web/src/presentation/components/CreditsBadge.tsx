@@ -29,7 +29,7 @@ export const CreditsBadge: React.FC<Props> = ({ credits, onBuy }) => {
         type="button"
         onClick={onBuy}
         title={t('navbar.creditsExhaustedTooltip')}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent-400 border border-accent-500 text-brand-800 text-xs font-semibold hover:bg-accent-300 transition-colors"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-full bg-accent-400 border border-accent-500 text-brand-800 text-xs font-semibold hover:bg-accent-300 transition-colors"
       >
         <Sparkles size={13} />
         <span>{t('navbar.creditsExhaustedShort')}</span>
@@ -47,7 +47,7 @@ export const CreditsBadge: React.FC<Props> = ({ credits, onBuy }) => {
       onClick={onBuy}
       title={tooltip}
       aria-label={tooltip}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-charcoal-50 border border-charcoal-200 text-brand-700 text-xs font-semibold hover:border-accent-400 hover:bg-accent-50 transition-colors"
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-full bg-charcoal-50 border border-charcoal-200 text-brand-700 text-xs font-semibold hover:border-accent-400 hover:bg-accent-50 transition-colors"
     >
       <Sparkles size={13} className="text-accent-500" />
       <span className="tabular-nums">{credits}</span>

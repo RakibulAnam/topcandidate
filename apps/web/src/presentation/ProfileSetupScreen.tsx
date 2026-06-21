@@ -508,11 +508,21 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                 website: data.personalInfo?.website || prev.website,
             }));
         }
-        if (data.experience?.length) setExperiences(data.experience);
-        if (data.projects?.length) setProjects(data.projects);
+        // Extracted items are free-form resume prose (in rawDescription /
+        // description) with NO guided answers. Mark them 'free' so the edit
+        // view shows that text instead of an empty guided form — and so a later
+        // switch to Guided goes through the safe Free→Guided carry-over (which
+        // seeds the required question) instead of overwriting the text on save.
+        if (data.experience?.length)
+            setExperiences(data.experience.map(e => e.rawDescription?.trim() ? { ...e, inputMode: 'free' as const } : e));
+        if (data.projects?.length)
+            setProjects(data.projects.map(p => p.rawDescription?.trim() ? { ...p, inputMode: 'free' as const } : p));
+        if (data.education?.length) setEducation(data.education);
         if (data.skills?.length) setSkills(data.skills);
-        if (data.extracurriculars?.length) setExtracurriculars(data.extracurriculars);
-        if (data.awards?.length) setAwards(data.awards);
+        if (data.extracurriculars?.length)
+            setExtracurriculars(data.extracurriculars.map(x => x.description?.trim() ? { ...x, inputMode: 'free' as const } : x));
+        if (data.awards?.length)
+            setAwards(data.awards.map(a => a.description?.trim() ? { ...a, inputMode: 'free' as const } : a));
         if (data.certifications?.length) setCertifications(data.certifications);
         if (data.affiliations?.length) setAffiliations(data.affiliations);
         if (data.publications?.length) setPublications(data.publications);
@@ -897,13 +907,13 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             {/* Sticky bottom navigation — hidden on the import step, where
                 ResumeUploadStep has its own primary/secondary actions. */}
             {!isFirstStep && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-charcoal-200 z-30">
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-charcoal-200 z-30 pb-[env(safe-area-inset-bottom)]">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
                         <button
                             type="button"
                             onClick={handleBack}
                             disabled={currentStepIndex === 0 || saving}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:bg-charcoal-100 rounded-full disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 min-h-11 text-sm font-semibold text-brand-600 hover:text-brand-700 hover:bg-charcoal-100 rounded-full disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
                         >
                             <ChevronLeft size={16} />
                             {t('profileSetup.back')}

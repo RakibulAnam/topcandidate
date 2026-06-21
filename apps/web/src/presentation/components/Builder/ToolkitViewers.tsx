@@ -109,7 +109,7 @@ export const ToolkitStatusCard: React.FC<ToolkitStatusCardProps> = ({
             type="button"
             onClick={onRetry}
             disabled={busy}
-            className="inline-flex items-center gap-2 text-sm font-semibold bg-brand-700 text-charcoal-50 rounded-md px-4 py-2 hover:bg-brand-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center gap-2 text-sm font-semibold bg-brand-700 text-charcoal-50 rounded-md px-4 min-h-11 hover:bg-brand-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             {busy ? t('toolkit.busy') : t('toolkit.tryAgain')}
@@ -128,7 +128,7 @@ export const ToolkitStatusCard: React.FC<ToolkitStatusCardProps> = ({
             type="button"
             onClick={onRetry}
             disabled={busy}
-            className="inline-flex items-center gap-2 text-sm font-semibold bg-brand-700 text-charcoal-50 rounded-md px-4 py-2 hover:bg-brand-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center gap-2 text-sm font-semibold bg-brand-700 text-charcoal-50 rounded-md px-4 min-h-11 hover:bg-brand-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} className="text-accent-400" />}
             {busy ? t('toolkit.busy') : t('toolkit.generateNow')}
@@ -177,7 +177,7 @@ const CopyButton = ({
   };
 
   const base =
-    'inline-flex items-center gap-1.5 text-sm font-semibold rounded-md px-3 py-1.5 transition-colors disabled:opacity-50';
+    'inline-flex items-center justify-center gap-1.5 text-sm font-semibold rounded-md px-3 min-h-11 transition-colors disabled:opacity-50';
   const styles =
     variant === 'primary'
       ? 'bg-brand-700 text-charcoal-50 hover:bg-brand-800'
@@ -250,7 +250,7 @@ export const OutreachEmailViewer = ({ email }: { email: OutreachEmail }) => {
         </div>
 
         <div className="px-5 py-5">
-          <pre className="whitespace-pre-wrap font-sans text-[15px] leading-relaxed text-brand-700 mb-5">
+          <pre className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] font-sans text-[15px] leading-relaxed text-brand-700 mb-5">
             {email.body}
           </pre>
           <div className="flex flex-wrap gap-2">
@@ -370,7 +370,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
       </button>
 
       {expanded && (
-        <div className="px-5 pb-5 pl-[4.25rem] space-y-4 text-sm leading-relaxed">
+        <div className="px-5 pb-5 pl-4 sm:pl-[4.25rem] space-y-4 text-sm leading-relaxed">
           <div>
             <p className="text-[10px] uppercase tracking-[0.18em] text-brand-500 font-semibold mb-1.5">
               {t('toolkit.interviewWhy')}
@@ -497,7 +497,7 @@ export const InterviewPrepViewer = ({
                 type="button"
                 onClick={() => setLangPersist('en')}
                 aria-pressed={effectiveLang === 'en'}
-                className={`text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
+                className={`text-xs font-semibold px-3 py-2 rounded-full transition-colors ${
                   effectiveLang === 'en'
                     ? 'bg-brand-700 text-charcoal-50'
                     : 'text-brand-500 hover:text-brand-700'
@@ -509,7 +509,7 @@ export const InterviewPrepViewer = ({
                 type="button"
                 onClick={() => setLangPersist('bn')}
                 aria-pressed={effectiveLang === 'bn'}
-                className={`text-xs font-semibold px-3 py-1 rounded-full transition-colors ${
+                className={`text-xs font-semibold px-3 py-2 rounded-full transition-colors ${
                   effectiveLang === 'bn'
                     ? 'bg-brand-700 text-charcoal-50'
                     : 'text-brand-500 hover:text-brand-700'
@@ -524,7 +524,7 @@ export const InterviewPrepViewer = ({
           <button
             type="button"
             onClick={setAll}
-            className="text-sm font-semibold text-brand-700 hover:text-accent-600 px-2 py-1.5"
+            className="inline-flex items-center text-sm font-semibold text-brand-700 hover:text-accent-600 px-2 min-h-11"
           >
             {allExpanded ? t('toolkit.interviewCollapseAll') : t('toolkit.interviewExpandAll')}
           </button>

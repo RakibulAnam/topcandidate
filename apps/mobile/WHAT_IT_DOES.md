@@ -199,8 +199,9 @@ If you need a new condition, talk to the watcher maintainer first.
 | 200    | `{ success: true, alreadyConfirmed: true, userId, creditsGranted }` | Replay of a row already confirmed earlier (idempotent). | Marks row `done`. **Notification suppressed** so the operator isn't told a fresh grant happened when it didn't. |
 | 400    | `{ error: 'transactionId is required' }` or similar     | Body malformed.                                    | Marks row `failed`. **Will not retry.**                                  |
 | 401    | `{ error: 'bad signature' }`                            | HMAC missing or wrong.                             | Marks row `failed`. Operator alerted "Webhook auth failed".              |
-| 404    | `{ code: 'no_pending_purchase' }`                       | No matching pending row for this TrxID **yet**.   | Marks row `waiting_user`. Retries every 5 min for 24 h.                  |
+| 404    | `{ code: 'no_pending_purchase' }`                       | No matching pending row for this TrxID **yet**.   | Marks row `waiting_user`. Retries on an escalating backoff (20s → 5 min) for 24 h. |
 | 409    | `{ code: 'msisdn_mismatch' }`                           | Customer claimed sender phone X, SMS says Y.       | Marks row `mismatch`. Surfaces to operator for manual review.            |
+| 409    | `{ code: 'underpaid', expected, observed }`             | SMS amount < the pending row's required amount (migration 007). | Marks row `mismatch` (terminal). Operator recovers via the admin panel. |
 | 503    | `{ error: 'webhook misconfigured' }`                    | Server-side misconfig.                             | Marks row `failed`. Operator alerted "Server misconfigured".             |
 | 5xx    | (any)                                                   | Transient.                                         | Retries with exponential backoff: 5s → 15s → 45s → 2m → 6m → 18m → 1h, for 24 h. |
 
@@ -209,16 +210,26 @@ If you need a new condition, talk to the watcher maintainer first.
 404 is the **load-bearing soft failure**. The flow is async: the customer
 might paste the TrxID into the web app **before** the bKash SMS reaches
 the operator's phone, OR **after**. If the SMS arrives first, the watcher
-POSTs, the web app has no `pending_purchase` row matching that TrxID, and
+POSTs, the web app has no pending purchase row matching that TrxID, and
 should return 404. The watcher then holds the SMS in a "waiting for user
-submission" queue and retries every 5 min for up to 24 h. So:
+submission" queue and retries on an escalating backoff (20s → 5 min) for up
+to 24 h, as a **backstop**. So:
 
 - The web app **does not** need to wait for the SMS — it can show
   "pending" to the customer immediately on TrxID submission.
-- The web app **must** keep `pending_purchase` rows around for at least
+- The web app **must** keep the pending purchase rows around for at least
   24 h after creation so a late-arriving SMS can still match.
-- Stale `pending_purchase` rows older than 24 h can be cleaned up by a
-  cron — the watcher will give up after 24 h regardless.
+- Stale pending rows older than 24 h can be cleaned up by a cron — the
+  watcher will give up after 24 h regardless.
+
+Since web migration 012, the 404 path is no longer the path the customer
+waits on. When the SMS arrives first, the server records the HMAC-verified
+payment into `inbound_payments` and returns 404; the customer's later TrxID
+submit then matches that stored payment and grants credits synchronously
+(match-on-submit). A subsequent `waiting_user` retry simply lands on the
+already-completed row and gets the 200-idempotent response. The fast early
+retries (20s/40s) still matter for the submit-first ordering. See the
+canonical contract for details.
 
 ### Idempotency
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { profileRepository, createResumeService } from '../infrastructure/config/dependencies';
 import {
@@ -52,6 +52,11 @@ export const ProfileScreen = () => {
     const { user, signOut } = useAuth();
     const t = useT();
     const [activeTab, setActiveTab] = useState<TabId>('Personal');
+    // Keep the selected tab scrolled into view on the mobile tab rail.
+    const activeTabRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        activeTabRef.current?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    }, [activeTab]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -211,7 +216,7 @@ export const ProfileScreen = () => {
 
             {/* General Resume Banner */}
             {!hasGeneralResume && (
-                <div className="mb-6 bg-gradient-to-r from-brand-50 to-brand-100/60 border border-brand-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
                         <div className="w-10 h-10 bg-brand-600 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">
                             <Sparkles size={20} />
@@ -246,15 +251,16 @@ export const ProfileScreen = () => {
 
             {/* Tab rail with right-edge fade hint so users can tell on mobile there's more (audit). */}
             <div className="relative mb-8 border-b border-charcoal-200">
-                <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide" role="tablist">
+                <div className="flex gap-2 overflow-x-auto pb-1 pr-8 md:pr-0 scrollbar-hide" role="tablist">
                     {TAB_IDS.map(tab => (
                         <button
                             key={tab}
+                            ref={activeTab === tab ? activeTabRef : undefined}
                             type="button"
                             role="tab"
                             aria-selected={activeTab === tab}
                             onClick={() => setActiveTab(tab)}
-                            className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 rounded-sm ${activeTab === tab
+                            className={`inline-flex items-center px-4 py-3 min-h-11 font-medium text-sm transition-colors whitespace-nowrap flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 rounded-sm ${activeTab === tab
                                 ? 'text-brand-600 border-b-2 border-brand-600'
                                 : 'text-charcoal-500 hover:text-charcoal-700'
                                 }`}
@@ -279,7 +285,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.fullName}
                                     onChange={e => setPersonalInfo({ ...personalInfo, fullName: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500"
+                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
                                 />
                             </div>
                             <div>
@@ -305,7 +311,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.location}
                                     onChange={e => setPersonalInfo({ ...personalInfo, location: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500"
+                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
                                 />
                             </div>
                             <div>
@@ -314,7 +320,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.linkedin || ''}
                                     onChange={e => setPersonalInfo({ ...personalInfo, linkedin: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500"
+                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
                                     placeholder={t('profile.placeholderLinkedin')}
                                 />
                             </div>
@@ -324,7 +330,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.github || ''}
                                     onChange={e => setPersonalInfo({ ...personalInfo, github: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500"
+                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
                                     placeholder={t('profile.placeholderGithub')}
                                 />
                             </div>
@@ -334,7 +340,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.website || ''}
                                     onChange={e => setPersonalInfo({ ...personalInfo, website: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500"
+                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
                                     placeholder={t('profile.placeholderWebsite')}
                                 />
                             </div>
@@ -343,7 +349,7 @@ export const ProfileScreen = () => {
                             <button
                                 type="submit"
                                 disabled={saving || deleting}
-                                className="flex items-center gap-2 bg-brand-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50"
+                                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-brand-600 text-white px-6 py-3 min-h-11 rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50"
                             >
                                 {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                                 {t('profile.saveCta')}

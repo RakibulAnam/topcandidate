@@ -3,7 +3,8 @@
 // A single, dependency-free `fetch` adapter for all OpenRouter calls. It is
 // deliberately provider-agnostic and business-logic-free: the resume optimizer
 // and toolkit generators wrap THIS to talk to DeepSeek / Gemini / Llama through
-// one API key. Nothing imports it yet — landing it changes no behavior.
+// one API key. Every OpenRouter* generator imports it, and those are the live
+// default whenever OPENROUTER_API_KEY is set (see aiFactory).
 //
 // Design notes (see docs/OPENROUTER_MIGRATION.md):
 //   • OpenAI-compatible chat/completions shape.

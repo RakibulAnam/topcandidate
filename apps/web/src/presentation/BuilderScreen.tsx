@@ -170,6 +170,28 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // per-item "generating" spinners until the bundle lands.
   const [toolkitPending, setToolkitPending] = useState(false);
 
+  // Keyboard-aware footer: on mobile the soft keyboard covers the sticky
+  // Back/Next bar. Track how far the visual viewport bottom sits above the
+  // layout viewport bottom (≈ keyboard height) and lift the footer by it.
+  // Desktop never fires a meaningful inset, so it's a no-op there.
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  useEffect(() => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!vv) return;
+    const update = () => {
+      const inset = window.innerHeight - vv.height - vv.offsetTop;
+      // Ignore small URL-bar deltas; a keyboard is always > ~120px.
+      setKeyboardInset(inset > 120 ? Math.round(inset) : 0);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+
   // Always-fresh mirror of resumeData for async continuations (the toolkit
   // bundle resolves long after the user may have started editing the preview;
   // merging against a stale closure would wipe those edits).
@@ -1140,13 +1162,16 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         </div>
       </main>
 
-      <footer className="bg-white border-t border-charcoal-200 p-4 sticky bottom-0 z-10 w-full">
+      <footer
+        className="bg-white border-t border-charcoal-200 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sticky bottom-0 z-10 w-full transition-transform duration-150"
+        style={keyboardInset ? { transform: `translateY(-${keyboardInset}px)` } : undefined}
+      >
         <div className="max-w-3xl mx-auto flex justify-between items-center px-4 md:px-0">
           <button
             type="button"
             onClick={handleBack}
             disabled={step === AppStep.USER_TYPE || isGenerating}
-            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold transition-colors ${step === AppStep.USER_TYPE
+            className={`flex items-center gap-2 px-6 min-h-11 rounded-lg text-sm font-bold transition-colors ${step === AppStep.USER_TYPE
               ? 'opacity-0 cursor-default'
               : 'text-charcoal-600 hover:bg-charcoal-100'
               }`}
@@ -1165,7 +1190,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                 type="button"
                 onClick={handleNext}
                 disabled={!resumeData.userType}
-                className="flex items-center gap-2 px-8 py-3 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-8 min-h-11 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t('builder.nextCta')} <ChevronRight size={18} />
               </button>
@@ -1186,7 +1211,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                   type="button"
                   onClick={() => { void handleGenerate(); }}
                   disabled={isGenerating}
-                  className="flex items-center gap-2 px-8 py-3 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
+                  className="flex items-center gap-2 px-8 min-h-11 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
                 >
                   {isGenerating
                     ? t('builder.generating')
@@ -1200,7 +1225,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               <button
                 type="button"
                 onClick={handleNext}
-                className="flex items-center gap-2 px-8 py-3 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-2 px-8 min-h-11 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {t('builder.nextCta')} <ChevronRight size={18} />
               </button>

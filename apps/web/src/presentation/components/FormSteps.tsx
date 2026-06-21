@@ -136,7 +136,7 @@ const Input = ({ error, className, ...props }: InputProps) => (
   <input
     {...props}
     aria-invalid={!!error}
-    className={`w-full rounded-lg border px-3.5 py-2.5 text-sm bg-white text-brand-800 placeholder:text-charcoal-400 focus:outline-none focus-visible:ring-2 transition-colors disabled:bg-charcoal-100 disabled:text-charcoal-400 ${
+    className={`w-full rounded-lg border px-3.5 py-2.5 min-h-11 text-sm bg-white text-brand-800 placeholder:text-charcoal-400 focus:outline-none focus-visible:ring-2 transition-colors disabled:bg-charcoal-100 disabled:text-charcoal-400 ${
       error
         ? 'border-red-400 focus-visible:ring-red-400'
         : 'border-charcoal-300 hover:border-charcoal-400 focus-visible:ring-accent-400 focus-visible:border-accent-400'
@@ -619,11 +619,12 @@ export const TargetJobStep: React.FC<{
         error={errors?.['targetJob.description']}
       >
         <TextArea
-          rows={10}
+          rows={6}
           placeholder={t('formSteps.targetJobDescPlaceholder')}
           value={data.description}
           error={errors?.['targetJob.description']}
           onChange={e => update({ ...data, description: e.target.value })}
+          className="md:min-h-[15rem]"
         />
       </InputGroup>
 
@@ -1479,7 +1480,7 @@ export const SkillsStep: React.FC<{
                 key={chip}
                 type="button"
                 onClick={() => addSuggested(chip)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-accent-400 border border-accent-500 text-brand-800 text-sm font-semibold hover:bg-accent-300 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-full bg-accent-400 border border-accent-500 text-brand-800 text-sm font-semibold hover:bg-accent-300 transition-colors"
               >
                 <Plus size={12} className="text-brand-700" />
                 {chip}
@@ -1508,7 +1509,7 @@ export const SkillsStep: React.FC<{
                 key={chip}
                 type="button"
                 onClick={() => addSuggested(chip)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-charcoal-200 bg-white text-charcoal-700 text-sm font-medium hover:border-accent-300 hover:bg-accent-50 hover:text-brand-700 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-full border border-charcoal-200 bg-white text-charcoal-700 text-sm font-medium hover:border-accent-300 hover:bg-accent-50 hover:text-brand-700 transition-colors"
               >
                 <Plus size={12} />
                 {chip}
@@ -1552,7 +1553,7 @@ export const SkillsStep: React.FC<{
                 <button
                   type="button"
                   onClick={() => removeSkill(skill)}
-                  className="ml-0.5 w-[18px] h-[18px] inline-flex items-center justify-center rounded text-charcoal-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  className="ml-0.5 w-7 h-7 sm:w-[18px] sm:h-[18px] inline-flex items-center justify-center rounded text-charcoal-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                   aria-label={t('formSteps.skillsRemoveAria', { skill })}
                 >
                   <X size={12} strokeWidth={2.5} />
@@ -2207,7 +2208,7 @@ export const LanguagesStep: React.FC<{
               <select
                 value={item.proficiency}
                 onChange={e => updateItem(item.id, 'proficiency', e.target.value)}
-                className="w-full rounded-lg border border-charcoal-300 hover:border-charcoal-400 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:border-accent-400 px-3.5 py-2.5 text-sm bg-white text-brand-800 focus:outline-none transition-colors"
+                className="w-full rounded-lg border border-charcoal-300 hover:border-charcoal-400 focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:border-accent-400 px-3.5 py-2.5 min-h-11 text-sm bg-white text-brand-800 focus:outline-none transition-colors"
               >
                 {LANGUAGE_PROFICIENCIES.map(p => (
                   <option key={p} value={p}>{proficiencyLabel[p]}</option>
@@ -2217,7 +2218,7 @@ export const LanguagesStep: React.FC<{
             <button
               type="button"
               onClick={() => removeItem(item.id)}
-              className="p-2 text-charcoal-500 hover:text-red-600 transition-colors"
+              className="justify-self-end inline-flex items-center justify-center w-11 h-11 rounded-lg text-charcoal-500 hover:text-red-600 hover:bg-red-50 transition-colors"
               aria-label={t('formSteps.languagesRemoveAria')}
             >
               <Trash2 size={18} />

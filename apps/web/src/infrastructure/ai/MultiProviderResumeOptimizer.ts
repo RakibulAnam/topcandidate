@@ -9,7 +9,8 @@
 // daily window — long cooldown. Treating them the same wastes capacity (a
 // 10-min cooldown for a TPM dip burns 9 minutes of perfectly good free quota).
 //
-// Used for the resume optimizer hot path. Keeps the existing
+// The FALLBACK optimizer — used only when OPENROUTER_API_KEY is unset (the live
+// optimizer is OpenRouterResumeOptimizer; see aiFactory). Keeps the existing
 // `IResumeOptimizer` interface — callers don't change.
 
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';

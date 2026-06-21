@@ -142,7 +142,7 @@ export const EducationSection = ({ educations, onRefresh }: Props) => {
                         </div>
                         <div>
                             <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">End Date</label>
-                            <div className="flex gap-2 items-center">
+                            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                                 {formData.endDate === 'Present' ? (
                                     <div className="w-full rounded-md border border-charcoal-200 bg-charcoal-50 px-3 py-2 text-sm text-charcoal-500 font-medium h-10 flex items-center">
                                         Present
@@ -194,7 +194,7 @@ export const EducationSection = ({ educations, onRefresh }: Props) => {
                                 <div className="text-charcoal-700 text-sm">{edu.degree} in {edu.field}</div>
                                 <div className="text-charcoal-400 text-xs mt-1">{edu.startDate} - {edu.endDate} {edu.gpa ? `• GPA: ${edu.gpa}` : ''}</div>
                             </div>
-                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => handleEdit(edu)} className="icon-btn"><Edit2 size={16} /></button>
                                 <button onClick={() => handleDelete(edu.id)} className="icon-btn-danger"><Trash2 size={16} /></button>
                             </div>

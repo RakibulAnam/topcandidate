@@ -51,6 +51,12 @@ End-to-end guide to ship the web app on Vercel + Supabase. Assumes you've read [
    011_webhook_nonces.sql         (webhook replay protection — nonce table + timestamp window)
    012_realtime_and_match_on_submit.sql  (near-real-time credits — inbound_payments + match-on-submit + adds `purchases` to the realtime publication)
    013_analytics_and_bi.sql       (first-party analytics events, credit ledger, marketing spend, AI cost columns, BI views, admin_auth_emails)
+   014_add_toolkit_call_kind.sql  (toolkit moved to its own /api/toolkit endpoint — logs its own call kind)
+   015_profile_normalization.sql  ("polished profile" — one cheap AI normalization per item on save)
+   016_normalize_projects_extracurriculars.sql  (extend normalization to projects + extracurriculars)
+   017_delete_user_complete.sql   (fix account deletion — cascade remaining child tables)
+   018_guided_mode.sql            (Guided Mode questionnaire — `guided` JSONB + `input_mode`)
+   019_guided_free_for_existing_text.sql  (Guided Mode data-loss fix for existing text)
    ```
 
    Google OAuth (Step 2b) needs **no** migration — it reuses `auth.users` + the existing `handle_new_user` trigger.
@@ -92,7 +98,9 @@ Save these. The bKash secret must be set as the matching value in the Flutter wa
 | `GEMINI_API_KEY` | **server** (legacy fallback) | Google AI Studio (free) — used only if `OPENROUTER_API_KEY` is absent |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server** | Supabase API → service_role |
 | `BKASH_WEBHOOK_SECRET` | **server** | The hex string from Step 2 |
-| `ADMIN_API_KEY` | **server** | The hex string from Step 2 |
+| `ADMIN_API_KEY` | **server** | The hex string from Step 2 — now the **session-token signing secret** (not pasted by the operator). Rotating it invalidates all live admin sessions |
+| `ADMIN_USERNAME` | **server** | Owner login username for `/admin` (e.g. `owner`) |
+| `ADMIN_PASSWORD_HASH` | **server** | scrypt `<saltHex>:<keyHex>` (preferred — see `.env.example` for the generator one-liner). Falls back to `ADMIN_PASSWORD` (plaintext) if unset |
 | `CRON_SECRET` | **server** | The hex string from Step 2 |
 | `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` | **server** (optional) | Set to `'true'` to enforce webhook v2 (timestamp + nonce replay protection). Leave unset to keep accepting the legacy signature path until the Flutter watcher is upgraded. |
 
@@ -139,7 +147,7 @@ The query-string secret fallback (`?secret=...`) was removed in the 2026-05-30 a
    - The resume renders and exports (PDF + Word)
    - The cover letter, outreach email, LinkedIn note, and interview prep sections appear
    - The `generated_resumes` row has both `data` (resume payload) and `toolkit` (sibling artifacts)
-3. Open `/admin`. Paste `ADMIN_API_KEY`. You should see the Dashboard tiles. Bake a manual bKash purchase end-to-end (use a small amount to test).
+3. Open `/admin`. Log in with `ADMIN_USERNAME` + password. You should see the Dashboard tiles. Bake a manual bKash purchase end-to-end (use a small amount to test).
 4. Optional but recommended: hit the `/api/cron/expire-pending` endpoint with the bearer to confirm it returns 200.
 
 ---
@@ -153,7 +161,7 @@ The query-string secret fallback (`?secret=...`) was removed in the 2026-05-30 a
 | **AI not responding (502/503 from `/api/optimize`)** | If `OPENROUTER_API_KEY` is set: check the OpenRouter dashboard (activity / credits — a depleted balance or a hit spend cap returns errors). If unset (legacy path): `GROQ_API_KEY`/`GEMINI_API_KEY` missing or free quota exhausted. A 503 `no AI provider configured` means no key at all is set. |
 | **"relation generated_resumes.toolkit does not exist"** | Migration 001 not applied. Run it in the SQL editor. |
 | **"Supabase: column profiles.created_at does not exist"** | Migration 010 not applied. Run it. |
-| **Admin gate rejects a valid-looking key** | `ADMIN_API_KEY` differs between local and Vercel — rotate by changing the env var and reloading the page. |
+| **Admin login fails / session rejected** | Wrong `ADMIN_USERNAME`/password, or `ADMIN_API_KEY` (the signing secret) changed since the token was minted (rotating it invalidates all sessions) — log in again. A 503 from `/api/admin/login` means `ADMIN_USERNAME`/`ADMIN_PASSWORD(_HASH)`/`ADMIN_API_KEY` aren't all configured. |
 | **Webhook 401 from Flutter watcher** | `BKASH_WEBHOOK_SECRET` doesn't match between web and mobile. Re-set both sides to the same hex string. |
 | **Cron 401** | `CRON_SECRET` not set or sent as a query string instead of a `Bearer` header. |
 
@@ -162,9 +170,9 @@ The query-string secret fallback (`?secret=...`) was removed in the 2026-05-30 a
 ## Post-deploy hardening checklist
 
 - [ ] Decide on email confirmation. The app ships with it OFF (immediate session on sign-up); only turn it on if you've tested that the UI handles the unconfirmed state.
-- [ ] All migrations applied in order (especially 008, 009, 010, 011)
-- [ ] `ADMIN_API_KEY` set in Production only (not Preview, so accidental URL shares don't leak admin access)
+- [ ] All migrations applied in order through 019 (especially 008, 009, 010, 011, 013)
+- [ ] `ADMIN_API_KEY` (signing secret), `ADMIN_USERNAME`, and `ADMIN_PASSWORD_HASH`/`ADMIN_PASSWORD` all set as server env. Use a strong password — `/api/admin/login` is internet-reachable and stateless (no lockout beyond a small fixed delay)
 - [ ] Vercel security headers in place (already in `vercel.json` since 2026-05-30: HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
-- [ ] You can reach `/admin/dashboard` with the key and see live tiles
+- [ ] You can log in at `/admin` and reach the Dashboard tiles
 - [ ] You can hit `/api/cron/expire-pending` with the bearer and get `{ "expired": <n> }`
 - [ ] Flutter watcher pointed at the production webhook URL and confirms a small real-money purchase end-to-end

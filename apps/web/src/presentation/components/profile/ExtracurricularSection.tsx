@@ -200,8 +200,8 @@ export const ExtracurricularSection = ({ items, onRefresh }: Props) => {
                                 <div className="text-brand-600 font-medium text-sm">{item.organization}</div>
                             </div>
                             <div className="flex gap-1 shrink-0">
-                                <button type="button" onClick={() => handleEdit(item)} aria-label="Edit activity" className="p-1.5 text-charcoal-500 hover:text-brand-600 hover:bg-brand-50 rounded-lg"><Edit2 size={16} /></button>
-                                <button type="button" onClick={() => handleDelete(item.id)} aria-label="Delete activity" className="p-1.5 text-charcoal-500 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                                <button type="button" onClick={() => handleEdit(item)} aria-label="Edit activity" className="icon-btn"><Edit2 size={16} /></button>
+                                <button type="button" onClick={() => handleDelete(item.id)} aria-label="Delete activity" className="icon-btn-danger"><Trash2 size={16} /></button>
                             </div>
                         </div>
                         {item.description && <p className="mt-2 text-sm text-charcoal-600 whitespace-pre-line">{item.description}</p>}

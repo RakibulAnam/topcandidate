@@ -74,17 +74,17 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
                         </button>
                     </div>
 
-                    {/* Mobile: credits pill + language toggle stay visible, then hamburger */}
-                    <div className="flex items-center gap-2 md:hidden relative">
+                    {/* Mobile: credits pill stays visible; language moves into the
+                        menu so the row never overflows. */}
+                    <div className="flex items-center gap-1.5 md:hidden relative">
                         <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}
-                        <LanguageToggle variant="compact" />
                         <button
                             type="button"
                             onClick={() => setIsMenuOpen(!isMenuOpen)}
-                            className="inline-flex items-center justify-center p-2 rounded-md text-charcoal-400 hover:text-charcoal-500 hover:bg-charcoal-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                            className="inline-flex items-center justify-center min-h-11 min-w-11 p-2 rounded-md text-charcoal-400 hover:text-charcoal-500 hover:bg-charcoal-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
                         >
                             <Menu size={24} />
                         </button>
@@ -106,6 +106,9 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
                             </button>
                         )}
                         <div className="px-3 py-3 border-t border-charcoal-100 mt-2">
+                            <LanguageToggle />
+                        </div>
+                        <div className="px-3 pb-3 border-b border-charcoal-100">
                             <p className="text-sm font-medium text-charcoal-500">{t('navbar.signedInAs')}</p>
                             <p className="text-sm font-bold text-charcoal-900 truncate">{user?.email}</p>
                         </div>

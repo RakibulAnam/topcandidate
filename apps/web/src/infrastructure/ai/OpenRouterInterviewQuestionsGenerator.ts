@@ -3,8 +3,9 @@
 // Single-artifact generator for the free per-item regenerate flow. On
 // OpenRouterClient, reusing the shared prompt + the same guards as
 // GeminiInterviewQuestionsGenerator. Bilingual EN/BN JSON output → Gemini 2.5
-// Flash primary (heavy bilingual generation, like the toolkit). Not wired into
-// aiFactory yet (cutover = Phase 6).
+// Flash primary (heavy bilingual generation, like the toolkit). LIVE via
+// aiFactory whenever OPENROUTER_API_KEY is set (the default); the Gemini sibling
+// is the unset-key fallback.
 
 import {
   ResumeData,
@@ -65,8 +66,9 @@ export class OpenRouterInterviewQuestionsGenerator implements IInterviewQuestion
   async generate(data: ResumeData, usage?: UsageSink): Promise<InterviewQuestion[]> {
     const fit = classifyFitMode(data);
     console.info(`[or-interview-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
-    // Retry once on transient malformed JSON / guard failure (json_object has
-    // no schema enforcement). Free per-item path; a retry is cheap.
+    // Retry once on transient malformed JSON / guard failure (json_schema
+    // enforces shape but the round trip can still fail transiently). Free
+    // per-item path; a retry is cheap.
     return withRetry(async (remainingMs) => {
       const result = await this.client.chat(
         {

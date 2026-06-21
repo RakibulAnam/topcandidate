@@ -148,7 +148,7 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className={[
-          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12.5px] font-semibold border transition-colors',
+          'inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-full text-[12.5px] font-semibold border transition-colors',
           visual.chipClass,
         ].join(' ')}
         title={statusResp?.message ?? t('verifyPill.pending')}
@@ -156,7 +156,9 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
         aria-expanded={expanded}
       >
         {visual.icon}
-        <span className="truncate max-w-[160px]">{visual.label(t, statusResp)}</span>
+        {/* Label hidden on the narrowest phones (icon-only) so the navbar row
+            never overflows; full label returns at `sm`. */}
+        <span className="hidden sm:inline truncate max-w-[160px]">{visual.label(t, statusResp)}</span>
       </button>
 
       {expanded && (
@@ -164,7 +166,7 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
           // top-full anchors the popover BELOW the full height of the relative
           // parent (the navbar's flex row). Without it, mt-2 alone leaves the
           // popover overlapping the navbar row — hiding sibling buttons.
-          className="absolute right-0 top-full mt-2 w-[340px] z-50 rounded-2xl bg-white border border-charcoal-200 shadow-xl p-4 text-sm"
+          className="absolute right-0 top-full mt-2 w-[min(340px,calc(100vw-1.5rem))] z-50 rounded-2xl bg-white border border-charcoal-200 shadow-xl p-4 text-sm"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
         >
@@ -211,14 +213,14 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
                 <button
                   type="button"
                   onClick={() => setConfirmDismiss(false)}
-                  className="px-3 py-1 rounded-full text-[12px] font-semibold text-charcoal-500 hover:text-brand-700"
+                  className="px-3 py-2 rounded-full text-[12px] font-semibold text-charcoal-500 hover:text-brand-700"
                 >
                   {t('common.cancel')}
                 </button>
                 <button
                   type="button"
                   onClick={onDismissConfirmed}
-                  className="px-3 py-1 rounded-full text-[12px] font-semibold bg-brand-700 hover:bg-brand-800 text-white transition-colors"
+                  className="px-3 py-2 rounded-full text-[12px] font-semibold bg-brand-700 hover:bg-brand-800 text-white transition-colors"
                 >
                   {t('verifyPill.dismissConfirm')}
                 </button>
@@ -377,7 +379,7 @@ const ActionCard: React.FC<ActionCardProps> = ({ status, response, onResubmit, o
         <button
           type="button"
           onClick={onFileDispute}
-          className="mt-2 inline-flex items-center justify-center px-3 py-1.5 rounded-full bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold transition-colors"
+          className="mt-2 inline-flex items-center justify-center px-3 py-2.5 rounded-full bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold transition-colors"
         >
           {t('verifyPill.contactSupport')}
         </button>
@@ -393,7 +395,7 @@ const ActionCard: React.FC<ActionCardProps> = ({ status, response, onResubmit, o
         <button
           type="button"
           onClick={onContactSupport}
-          className="mt-2 inline-flex items-center justify-center px-3 py-1.5 rounded-full bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold transition-colors"
+          className="mt-2 inline-flex items-center justify-center px-3 py-2.5 rounded-full bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold transition-colors"
         >
           {t('verifyPill.contactSupport')}
         </button>
@@ -409,12 +411,12 @@ const ActionCard: React.FC<ActionCardProps> = ({ status, response, onResubmit, o
         <div className="mt-1 text-[12px] text-charcoal-600 leading-snug">
           {t('verifyPill.expiredActionBody')}
         </div>
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {onResubmit && (
             <button
               type="button"
               onClick={onResubmit}
-              className="inline-flex items-center justify-center px-3 py-1.5 rounded-full bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold transition-colors"
+              className="inline-flex items-center justify-center px-3 py-2.5 rounded-full bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold transition-colors"
             >
               {t('verifyPill.resubmit')}
             </button>
@@ -422,7 +424,7 @@ const ActionCard: React.FC<ActionCardProps> = ({ status, response, onResubmit, o
           <button
             type="button"
             onClick={onFileDispute}
-            className="inline-flex items-center justify-center px-3 py-1.5 rounded-full bg-white border border-charcoal-300 text-brand-700 text-[12px] font-semibold hover:bg-charcoal-50 transition-colors"
+            className="inline-flex items-center justify-center px-3 py-2.5 rounded-full bg-white border border-charcoal-300 text-brand-700 text-[12px] font-semibold hover:bg-charcoal-50 transition-colors"
           >
             {t('verifyPill.fileDispute')}
           </button>
@@ -497,7 +499,7 @@ const DisputeDialog: React.FC<DisputeDialogProps> = ({ txnId, onClose }) => {
             type="button"
             onClick={() => onClose(false)}
             disabled={submitting}
-            className="px-4 py-2 rounded-full text-[13px] font-semibold text-charcoal-500 hover:text-brand-700 disabled:opacity-40"
+            className="px-4 py-2.5 rounded-full text-[13px] font-semibold text-charcoal-500 hover:text-brand-700 disabled:opacity-40"
           >
             {t('common.cancel')}
           </button>
@@ -505,7 +507,7 @@ const DisputeDialog: React.FC<DisputeDialogProps> = ({ txnId, onClose }) => {
             type="button"
             onClick={submit}
             disabled={!canSubmit}
-            className="px-4 py-2 rounded-full text-[13px] font-semibold bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2.5 rounded-full text-[13px] font-semibold bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? t('verifyPill.disputeSubmitting') : t('verifyPill.disputeSubmit')}
           </button>

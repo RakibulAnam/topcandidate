@@ -70,7 +70,50 @@ export const PurchaseHistorySection: React.FC = () => {
       <h2 className="font-display text-xl font-semibold text-brand-700 mb-3">
         {t('purchaseHistory.title')}
       </h2>
-      <div className="bg-white rounded-2xl border border-charcoal-200 overflow-hidden">
+      {/* Mobile: stacked label-value cards (a 5-col table can't fit a phone). */}
+      <div className="md:hidden space-y-3">
+        {rows.map((r) => (
+          <div key={r.id} className="bg-white rounded-2xl border border-charcoal-200 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-charcoal-600">
+                {new Date(r.createdAt).toLocaleDateString()}
+              </span>
+              <span className={[
+                'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border',
+                STATUS_BADGE[r.status] ?? 'bg-charcoal-100 text-brand-700 border-charcoal-300',
+              ].join(' ')}>
+                {statusLabel(t, r.status)}
+              </span>
+            </div>
+            <dl className="mt-3 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <dt className="text-charcoal-500 shrink-0">{t('purchaseHistory.colTxn')}</dt>
+                <dd className="font-mono text-[12px] text-brand-700 text-right break-all">{r.paymentReference ?? '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-charcoal-500 shrink-0">{t('purchaseHistory.colAmount')}</dt>
+                <dd className="text-brand-700 tabular-nums text-right">
+                  ৳{r.amountTaka}
+                  {r.observedAmountTaka != null && r.observedAmountTaka !== r.amountTaka && (
+                    <span className="ml-1 text-[11px] text-charcoal-500">
+                      {t('purchaseHistory.observedAmount', { observed: r.observedAmountTaka })}
+                    </span>
+                  )}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt className="text-charcoal-500 shrink-0">{t('purchaseHistory.colCredits')}</dt>
+                <dd className="text-brand-700 tabular-nums text-right">
+                  {r.status === 'completed' ? `+${r.creditsGranted}` : '—'}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop: full table */}
+      <div className="hidden md:block bg-white rounded-2xl border border-charcoal-200 overflow-hidden">
         <table className="min-w-full text-sm">
           <thead className="bg-charcoal-50 text-[11px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">
             <tr>
