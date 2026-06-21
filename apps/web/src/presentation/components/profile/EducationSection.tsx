@@ -56,6 +56,12 @@ export const EducationSection = ({ educations, onRefresh }: Props) => {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
+        // End date is mandatory (start date is optional). "Present" satisfies it.
+        // The MonthPicker isn't a native required input, so guard explicitly.
+        if (!(formData.endDate || '').trim()) {
+            toast.error('Add an end date (or mark it Current).');
+            return;
+        }
         setSaving(true);
         try {
             await profileRepository.saveEducation(user.id, {
@@ -133,9 +139,8 @@ export const EducationSection = ({ educations, onRefresh }: Props) => {
                             />
                         </div>
                         <div>
-                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Start Date</label>
+                            <label className="block text-xs font-semibold text-charcoal-500 uppercase mb-1">Start Date (Optional)</label>
                             <MonthPicker
-                                isError={!formData.startDate}
                                 value={formData.startDate || ''}
                                 onChange={val => setFormData({ ...formData, startDate: val })}
                             />
@@ -192,7 +197,7 @@ export const EducationSection = ({ educations, onRefresh }: Props) => {
                             <div>
                                 <h4 className="font-bold text-charcoal-900">{edu.school}</h4>
                                 <div className="text-charcoal-700 text-sm">{edu.degree} in {edu.field}</div>
-                                <div className="text-charcoal-400 text-xs mt-1">{edu.startDate} - {edu.endDate} {edu.gpa ? `• GPA: ${edu.gpa}` : ''}</div>
+                                <div className="text-charcoal-400 text-xs mt-1">{edu.startDate ? `${edu.startDate} - ${edu.endDate}` : edu.endDate} {edu.gpa ? `• GPA: ${edu.gpa}` : ''}</div>
                             </div>
                             <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => handleEdit(edu)} className="icon-btn"><Edit2 size={16} /></button>

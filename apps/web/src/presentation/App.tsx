@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Toaster, toast } from 'sonner';
-import { ResumeData, AppStep } from '../domain/entities';
+import { ResumeData, AppStep, inferUserType } from '../domain/entities';
 import { BuilderScreen } from './BuilderScreen';
 import { ResumeService } from '../application/services/ResumeService';
 import { createResumeService, profileRepository } from '../infrastructure/config/dependencies';
@@ -73,7 +73,7 @@ const AppContent = () => {
 
   // Builder Hand-off State
   const [builderData, setBuilderData] = useState<ResumeData>(INITIAL_DATA);
-  const [builderStep, setBuilderStep] = useState<AppStep>(AppStep.USER_TYPE);
+  const [builderStep, setBuilderStep] = useState<AppStep>(AppStep.SECTIONS);
   const [currentResumeId, setCurrentResumeId] = useState<string | null>(null);
 
   const { navState, navigate } = useBrowserNav({ screen: 'LANDING' });
@@ -125,11 +125,13 @@ const AppContent = () => {
 
       const savedDraft = service.loadDraft();
       if (savedDraft) {
-        let dataToSet = { ...savedDraft };
-        if (savedDraft.userType && (!savedDraft.visibleSections || savedDraft.visibleSections.length === 0)) {
+        const dataToSet = { ...savedDraft };
+        if (!savedDraft.visibleSections || savedDraft.visibleSections.length === 0) {
+          // No saved section selection — default to the core set plus any
+          // sections the draft already has content for. userType is derived.
           const defaults = ['skills', 'education', 'projects'];
-          if (savedDraft.userType === 'experienced') defaults.push('experience');
-          if (savedDraft.userType === 'student') defaults.push('extracurriculars');
+          if (inferUserType(savedDraft.experience) === 'experienced') defaults.push('experience');
+          else defaults.push('extracurriculars');
 
           if (savedDraft.extracurriculars?.length) defaults.push('extracurriculars');
           if (savedDraft.awards?.length) defaults.push('awards');
@@ -141,10 +143,7 @@ const AppContent = () => {
         }
 
         setBuilderData(dataToSet);
-
-        if (savedDraft.userType) {
-          setBuilderStep(AppStep.SECTIONS);
-        }
+        setBuilderStep(AppStep.SECTIONS);
       }
     } catch (error) {
       console.error('Failed to initialize resume service:', error);
@@ -258,12 +257,11 @@ const AppContent = () => {
   const prefillFromProfile = async () => {
     if (!user) return;
     try {
-      const [profile, exps, projs, skls, uType, edus, extras, awds, certs, affils, pubs, langs, refs] = await Promise.all([
+      const [profile, exps, projs, skls, edus, extras, awds, certs, affils, pubs, langs, refs] = await Promise.all([
         profileRepository.getProfile(user.id),
         profileRepository.getExperiences(user.id),
         profileRepository.getProjects(user.id),
         profileRepository.getSkills(user.id),
-        profileRepository.getUserType(user.id),
         profileRepository.getEducations(user.id),
         profileRepository.getExtracurriculars(user.id),
         profileRepository.getAwards(user.id),
@@ -274,6 +272,8 @@ const AppContent = () => {
         profileRepository.getReferences(user.id),
       ]);
 
+      // userType is derived from the data, not a (removed) selector.
+      const uType = inferUserType(exps);
       const initialVisible: string[] = ['skills', 'education', 'projects'];
       if (uType === 'experienced') initialVisible.push('experience');
       if (uType === 'student') initialVisible.push('extracurriculars');
@@ -290,7 +290,7 @@ const AppContent = () => {
 
       setBuilderData({
         ...INITIAL_DATA,
-        userType: uType || undefined,
+        userType: uType,
         personalInfo: profile || INITIAL_DATA.personalInfo,
         experience: exps,
         projects: projs,
@@ -306,11 +306,7 @@ const AppContent = () => {
         visibleSections: uniqueVisible
       });
 
-      if (uType) {
-        setBuilderStep(AppStep.SECTIONS);
-      } else {
-        setBuilderStep(AppStep.USER_TYPE);
-      }
+      setBuilderStep(AppStep.SECTIONS);
     } catch (error) {
       console.error('Error loading profile data:', error);
       toast.error(t('common.profileLoadFailed'));
@@ -330,7 +326,7 @@ const AppContent = () => {
       ...INITIAL_DATA,
       visibleSections: DEFAULT_SECTIONS
     });
-    setBuilderStep(AppStep.USER_TYPE);
+    setBuilderStep(AppStep.SECTIONS);
     setCurrentResumeId(null);
     navigate({ screen: 'BUILDER' });
   };

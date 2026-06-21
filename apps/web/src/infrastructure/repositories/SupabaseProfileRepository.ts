@@ -225,11 +225,15 @@ export class SupabaseProfileRepository implements IProfileRepository {
 
     // --- Education ---
     async getEducations(userId: string): Promise<Education[]> {
+        // Order by end_date (graduation) DESC — start_date is now optional, so
+        // sorting by it would push single-date entries to the bottom. "Present"
+        // sorts above numeric years in text order, so in-progress study lands
+        // first, which is the desired ordering.
         const { data, error } = await supabase
             .from('educations')
             .select('*')
             .eq('user_id', userId)
-            .order('start_date', { ascending: false });
+            .order('end_date', { ascending: false });
 
         if (error) throw error;
 

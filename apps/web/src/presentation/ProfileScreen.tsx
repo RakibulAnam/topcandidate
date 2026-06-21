@@ -214,8 +214,35 @@ export const ProfileScreen = () => {
                 {t('profile.pageSubtitle')}
             </p>
 
-            {/* General Resume Banner */}
-            {!hasGeneralResume && (
+            {/* No content to generate from — a resume/toolkit needs at least one
+                education or experience entry. Shown instead of the generate CTA,
+                since generation would just fail. */}
+            {experiences.length === 0 && educations.length === 0 && (
+                <div className="mb-6 bg-accent-50 border border-accent-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">
+                            <AlertTriangle size={20} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-charcoal-900">{t('profile.noContentWarnTitle')}</h3>
+                            <p className="text-sm text-charcoal-600 mt-0.5">
+                                {t('profile.noContentWarnBody')}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('Education')}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-accent-500 text-white rounded-lg font-medium hover:bg-accent-600 transition-colors shadow-sm flex-shrink-0"
+                    >
+                        {t('profile.noContentWarnCta')}
+                        <ChevronRight size={18} />
+                    </button>
+                </div>
+            )}
+
+            {/* General Resume Banner — only once there's content to generate from. */}
+            {!hasGeneralResume && (experiences.length > 0 || educations.length > 0) && (
                 <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
                         <div className="w-10 h-10 bg-brand-600 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">

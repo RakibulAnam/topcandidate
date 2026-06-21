@@ -12,7 +12,6 @@ import { needsPolish, polishInBackground } from './components/profile/polish';
 import { ResumeService } from '../application/services/ResumeService';
 import { toast } from 'sonner';
 import {
-    UserTypeStep,
     PersonalInfoStep,
     ExperienceStep,
     ProjectsStep,
@@ -30,7 +29,6 @@ import {
     PersonalInfo,
     WorkExperience,
     Project,
-    UserType,
     Extracurricular,
     Award,
     Certification,
@@ -39,6 +37,7 @@ import {
     Education,
     Language,
     Reference,
+    inferUserType,
 } from '../domain/entities/Resume';
 import {
     ChevronLeft,
@@ -66,28 +65,28 @@ interface Props {
 
 enum SetupStep {
     IMPORT_RESUME = -1,
-    USER_TYPE = 0,
     PERSONAL_INFO = 1,
     EDUCATION = 2,
-    EXPERIENCE_OR_PROJECTS = 3,
-    SKILLS = 4,
-    EXTRACURRICULARS = 5,
-    AWARDS = 6,
-    CERTIFICATIONS = 7,
-    AFFILIATIONS = 8,
-    PUBLICATIONS = 9,
-    LANGUAGES = 10,
-    REFERENCES = 11,
+    EXPERIENCE = 3,
+    PROJECTS = 4,
+    SKILLS = 5,
+    EXTRACURRICULARS = 6,
+    AWARDS = 7,
+    CERTIFICATIONS = 8,
+    AFFILIATIONS = 9,
+    PUBLICATIONS = 10,
+    LANGUAGES = 11,
+    REFERENCES = 12,
 }
 
 type StepCopyT = ReturnType<typeof useT>;
 const stepCopyOf = (t: StepCopyT, step: SetupStep): { label: string; phase: string } => {
     switch (step) {
         case SetupStep.IMPORT_RESUME: return { label: t('profileSetup.stepImport'), phase: t('profileSetup.phaseQuickStart') };
-        case SetupStep.USER_TYPE: return { label: t('profileSetup.stepUserType'), phase: t('profileSetup.phaseAboutYou') };
         case SetupStep.PERSONAL_INFO: return { label: t('profileSetup.stepPersonalInfo'), phase: t('profileSetup.phaseAboutYou') };
         case SetupStep.EDUCATION: return { label: t('profileSetup.stepEducation'), phase: t('profileSetup.phaseAboutYou') };
-        case SetupStep.EXPERIENCE_OR_PROJECTS: return { label: t('profileSetup.stepExperience'), phase: t('profileSetup.phaseYourWork') };
+        case SetupStep.EXPERIENCE: return { label: t('profileSetup.stepExperience'), phase: t('profileSetup.phaseYourWork') };
+        case SetupStep.PROJECTS: return { label: t('profileSetup.stepProjects'), phase: t('profileSetup.phaseYourWork') };
         case SetupStep.SKILLS: return { label: t('profileSetup.stepSkills'), phase: t('profileSetup.phaseYourWork') };
         case SetupStep.EXTRACURRICULARS: return { label: t('profileSetup.stepActivities'), phase: t('profileSetup.phaseYourCredentials') };
         case SetupStep.AWARDS: return { label: t('profileSetup.stepAwards'), phase: t('profileSetup.phaseYourCredentials') };
@@ -117,8 +116,10 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     const [isGeneratingResume, setIsGeneratingResume] = useState(false);
     const [generationFailed, setGenerationFailed] = useState(false);
     const [generationError, setGenerationError] = useState<string | null>(null);
+    // Shown at finish when the user skipped BOTH education and experience — no
+    // resume/toolkit can be generated until they add one.
+    const [showNoResumeWarn, setShowNoResumeWarn] = useState(false);
 
-    const [userType, setUserType] = useState<UserType | undefined>(undefined);
     const [personalInfo, setPersonalInfo] = useState<PersonalInfo>({
         fullName: '',
         email: '',
@@ -137,6 +138,10 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     const [languages, setLanguages] = useState<Language[]>([]);
     const [references, setReferences] = useState<Reference[]>([]);
 
+    // userType is no longer chosen by the user — derive it from the data so the
+    // AI examples/framing stay consistent (experienced once any job exists).
+    const userType = inferUserType(experiences);
+
     useEffect(() => {
         if (user?.id) {
             loadExistingData();
@@ -148,14 +153,13 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         if (!user) return;
         setLoading(true);
         try {
-            const [profile, exps, projs, edus, skls, uType, extras, awds, certs, affs, pubs, langs, refs] =
+            const [profile, exps, projs, edus, skls, extras, awds, certs, affs, pubs, langs, refs] =
                 await Promise.all([
                     profileRepository.getProfile(user.id),
                     profileRepository.getExperiences(user.id),
                     profileRepository.getProjects(user.id),
                     profileRepository.getEducations(user.id),
                     profileRepository.getSkills(user.id),
-                    profileRepository.getUserType(user.id),
                     profileRepository.getExtracurriculars(user.id),
                     profileRepository.getAwards(user.id),
                     profileRepository.getCertifications(user.id),
@@ -170,7 +174,6 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             if (projs.length > 0) setProjects(projs);
             if (edus.length > 0) setEducation(edus);
             if (skls.length > 0) setSkills(skls);
-            if (uType) setUserType(uType);
             if (extras.length > 0) setExtracurriculars(extras);
             if (awds.length > 0) setAwards(awds);
             if (certs.length > 0) setCertifications(certs);
@@ -179,27 +182,11 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             if (langs.length > 0) setLanguages(langs);
             if (refs.length > 0) setReferences(refs);
 
-            // Resume at the first step that still lacks data.
-            let nextStep = SetupStep.IMPORT_RESUME;
-            if (uType) {
-                if (!(profile?.fullName && profile?.email)) {
-                    nextStep = SetupStep.PERSONAL_INFO;
-                } else if (edus.length === 0) {
-                    nextStep = SetupStep.EDUCATION;
-                } else if (
-                    (uType === 'experienced' && exps.length === 0) ||
-                    (uType === 'student' && projs.length === 0)
-                ) {
-                    nextStep = SetupStep.EXPERIENCE_OR_PROJECTS;
-                } else if (skls.length === 0) {
-                    nextStep = SetupStep.SKILLS;
-                } else {
-                    // Resume at the first credentials step for their path.
-                    nextStep = uType === 'student'
-                        ? SetupStep.EXTRACURRICULARS
-                        : SetupStep.CERTIFICATIONS;
-                }
-            }
+            // Returning users who already have contact details skip the import
+            // splash and resume at the form; everyone else starts at import.
+            const nextStep = (profile?.fullName && profile?.email)
+                ? SetupStep.PERSONAL_INFO
+                : SetupStep.IMPORT_RESUME;
             setCurrentStep(nextStep);
         } catch (error) {
             console.error('Error loading profile data:', error);
@@ -208,40 +195,33 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         }
     };
 
-    const getVisibleSteps = (): SetupStep[] => {
-        const base = [
-            SetupStep.IMPORT_RESUME,
-            SetupStep.USER_TYPE,
-            SetupStep.PERSONAL_INFO,
-            SetupStep.EDUCATION,
-            SetupStep.EXPERIENCE_OR_PROJECTS,
-            SetupStep.SKILLS,
-        ];
-        if (userType === 'student') {
-            return [...base, SetupStep.EXTRACURRICULARS, SetupStep.AWARDS, SetupStep.LANGUAGES, SetupStep.REFERENCES];
-        }
-        if (userType === 'experienced') {
-            return [
-                ...base,
-                SetupStep.CERTIFICATIONS,
-                SetupStep.AFFILIATIONS,
-                SetupStep.PUBLICATIONS,
-                SetupStep.LANGUAGES,
-                SetupStep.REFERENCES,
-            ];
-        }
-        return base;
-    };
+    // Every section is shown to everyone now (the student/experienced split is
+    // gone). All sections are optional/skippable except the final
+    // education-or-experience gate enforced at finish.
+    const getVisibleSteps = (): SetupStep[] => [
+        SetupStep.IMPORT_RESUME,
+        SetupStep.PERSONAL_INFO,
+        SetupStep.EDUCATION,
+        SetupStep.EXPERIENCE,
+        SetupStep.PROJECTS,
+        SetupStep.SKILLS,
+        SetupStep.EXTRACURRICULARS,
+        SetupStep.AWARDS,
+        SetupStep.CERTIFICATIONS,
+        SetupStep.AFFILIATIONS,
+        SetupStep.PUBLICATIONS,
+        SetupStep.LANGUAGES,
+        SetupStep.REFERENCES,
+    ];
 
     const stepHasContent = (step: SetupStep): boolean => {
         switch (step) {
             case SetupStep.IMPORT_RESUME: return true; // never blocks
-            case SetupStep.USER_TYPE: return !!userType;
             case SetupStep.PERSONAL_INFO:
                 return !!(personalInfo.fullName || '').trim() && !!(personalInfo.email || '').trim();
             case SetupStep.EDUCATION: return education.length > 0;
-            case SetupStep.EXPERIENCE_OR_PROJECTS:
-                return userType === 'student' ? projects.length > 0 : experiences.length > 0;
+            case SetupStep.EXPERIENCE: return experiences.length > 0;
+            case SetupStep.PROJECTS: return projects.length > 0;
             case SetupStep.SKILLS: return skills.length > 0;
             case SetupStep.EXTRACURRICULARS: return extracurriculars.length > 0;
             case SetupStep.AWARDS: return awards.length > 0;
@@ -275,9 +255,6 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         switch (currentStep) {
             case SetupStep.IMPORT_RESUME:
                 return true;
-            case SetupStep.USER_TYPE:
-                if (!userType) { showError(t('profileSetup.valUserType')); return false; }
-                return true;
             case SetupStep.PERSONAL_INFO:
                 if (!(personalInfo.fullName || '').trim()) { showError(t('profileSetup.valFullName')); return false; }
                 if (!(personalInfo.email || '').trim()) { showError(t('profileSetup.valEmail')); return false; }
@@ -287,51 +264,47 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                 }
                 return true;
             case SetupStep.EDUCATION:
-                if (education.length === 0) { showError(t('profileSetup.valEduOne')); return false; }
+                // Education is optional/skippable; validate only the entries the
+                // user actually added.
                 for (const edu of education) {
                     if (!(edu.school || '').trim() || !(edu.degree || '').trim() || !(edu.field || '').trim()) {
                         showError(t('profileSetup.valEduFields')); return false;
                     }
-                    if (!(edu.startDate || '').trim() || !(edu.endDate || '').trim()) {
+                    // Start date is optional (single-date education entries are
+                    // common); only the end date is required ("Present" counts).
+                    if (!(edu.endDate || '').trim()) {
                         showError(t('profileSetup.valEduDates')); return false;
                     }
                     if (flagGibberish(t('profileSetup.fieldFieldOfStudy'), edu.field)) return false;
                 }
                 return true;
-            case SetupStep.EXPERIENCE_OR_PROJECTS:
-                if (userType === 'experienced' && experiences.length === 0) {
-                    showError(t('profileSetup.valExpOne')); return false;
-                }
-                if (userType === 'student' && projects.length === 0) {
-                    showError(t('profileSetup.valProjOne')); return false;
-                }
-                if (userType === 'experienced') {
-                    for (const exp of experiences) {
-                        if (!(exp.company || '').trim() || !(exp.role || '').trim()) {
-                            showError(t('profileSetup.valExpFields')); return false;
-                        }
-                        if (!(exp.startDate || '').trim() || (!exp.isCurrent && !(exp.endDate || '').trim())) {
-                            showError(t('profileSetup.valExpDates')); return false;
-                        }
-                        if (!(exp.rawDescription || '').trim()) {
-                            showError(t('profileSetup.valExpDesc')); return false;
-                        }
-                        if (flagGibberish(t('profileSetup.fieldJobTitle'), exp.role)) return false;
-                        if (flagGibberish(t('profileSetup.fieldWhatYouDid'), exp.rawDescription)) return false;
+            case SetupStep.EXPERIENCE:
+                for (const exp of experiences) {
+                    if (!(exp.company || '').trim() || !(exp.role || '').trim()) {
+                        showError(t('profileSetup.valExpFields')); return false;
                     }
-                } else {
-                    for (const proj of projects) {
-                        if (!(proj.name || '').trim()) { showError(t('profileSetup.valProjName')); return false; }
-                        if (!(proj.rawDescription || '').trim()) {
-                            showError(t('profileSetup.valProjDesc')); return false;
-                        }
-                        if (flagGibberish(t('profileSetup.fieldProjectName'), proj.name)) return false;
-                        if (flagGibberish(t('profileSetup.fieldProjectDescription'), proj.rawDescription)) return false;
+                    if (!(exp.startDate || '').trim() || (!exp.isCurrent && !(exp.endDate || '').trim())) {
+                        showError(t('profileSetup.valExpDates')); return false;
                     }
+                    if (!(exp.rawDescription || '').trim()) {
+                        showError(t('profileSetup.valExpDesc')); return false;
+                    }
+                    if (flagGibberish(t('profileSetup.fieldJobTitle'), exp.role)) return false;
+                    if (flagGibberish(t('profileSetup.fieldWhatYouDid'), exp.rawDescription)) return false;
+                }
+                return true;
+            case SetupStep.PROJECTS:
+                for (const proj of projects) {
+                    if (!(proj.name || '').trim()) { showError(t('profileSetup.valProjName')); return false; }
+                    if (!(proj.rawDescription || '').trim()) {
+                        showError(t('profileSetup.valProjDesc')); return false;
+                    }
+                    if (flagGibberish(t('profileSetup.fieldProjectName'), proj.name)) return false;
+                    if (flagGibberish(t('profileSetup.fieldProjectDescription'), proj.rawDescription)) return false;
                 }
                 return true;
             case SetupStep.SKILLS:
-                if (skills.length === 0) { showError(t('profileSetup.valSkills')); return false; }
+                // Skills are optional now — no minimum.
                 return true;
             case SetupStep.EXTRACURRICULARS:
                 for (const item of extracurriculars) {
@@ -403,42 +376,38 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         setSaving(true);
         try {
             switch (currentStep) {
-                case SetupStep.USER_TYPE:
-                    if (userType) await profileRepository.saveUserType(user.id, userType);
-                    break;
                 case SetupStep.PERSONAL_INFO:
                     await profileRepository.saveProfile(user.id, personalInfo);
                     break;
                 case SetupStep.EDUCATION:
                     for (const edu of education) await profileRepository.saveEducation(user.id, edu);
                     break;
-                case SetupStep.EXPERIENCE_OR_PROJECTS:
+                case SetupStep.EXPERIENCE:
                     // Each save fires a "polished profile" pass in the
                     // background (hash-guarded) — never blocks setup; results
                     // appear on the Profile screen and feed every later
                     // generation. The raw text remains the source of truth,
                     // so a polish failure costs nothing (next save retries).
-                    if (userType === 'experienced') {
-                        for (const exp of experiences) {
-                            const savedId = await profileRepository.saveExperience(user.id, exp);
-                            if (needsPolish(exp.rawDescription ?? '', exp)) {
-                                polishInBackground({
-                                    text: exp.rawDescription ?? '',
-                                    context: { kind: 'experience', title: exp.role, organization: exp.company, guided: (exp.inputMode ?? 'guided') === 'guided' },
-                                    persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
-                                });
-                            }
+                    for (const exp of experiences) {
+                        const savedId = await profileRepository.saveExperience(user.id, exp);
+                        if (needsPolish(exp.rawDescription ?? '', exp)) {
+                            polishInBackground({
+                                text: exp.rawDescription ?? '',
+                                context: { kind: 'experience', title: exp.role, organization: exp.company, guided: (exp.inputMode ?? 'guided') === 'guided' },
+                                persist: (n, h) => profileRepository.saveExperienceNormalized(savedId, n, h),
+                            });
                         }
-                    } else {
-                        for (const proj of projects) {
-                            const savedId = await profileRepository.saveProject(user.id, proj);
-                            if (needsPolish(proj.rawDescription ?? '', proj)) {
-                                polishInBackground({
-                                    text: proj.rawDescription ?? '',
-                                    context: { kind: 'project', title: proj.name, technologies: proj.technologies, guided: (proj.inputMode ?? 'guided') === 'guided' },
-                                    persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
-                                });
-                            }
+                    }
+                    break;
+                case SetupStep.PROJECTS:
+                    for (const proj of projects) {
+                        const savedId = await profileRepository.saveProject(user.id, proj);
+                        if (needsPolish(proj.rawDescription ?? '', proj)) {
+                            polishInBackground({
+                                text: proj.rawDescription ?? '',
+                                context: { kind: 'project', title: proj.name, technologies: proj.technologies, guided: (proj.inputMode ?? 'guided') === 'guided' },
+                                persist: (n, h) => profileRepository.saveProjectNormalized(savedId, n, h),
+                            });
                         }
                     }
                     break;
@@ -496,7 +465,6 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     };
 
     const handleExtracted = (data: ExtractedProfileData) => {
-        if (data.userType) setUserType(data.userType);
         if (data.personalInfo) {
             setPersonalInfo(prev => ({
                 fullName: data.personalInfo?.fullName || prev.fullName,
@@ -527,26 +495,23 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         if (data.affiliations?.length) setAffiliations(data.affiliations);
         if (data.publications?.length) setPublications(data.publications);
 
-        setCurrentStep(SetupStep.USER_TYPE);
+        setCurrentStep(SetupStep.PERSONAL_INFO);
     };
 
-    const handleSkipImport = () => setCurrentStep(SetupStep.USER_TYPE);
+    const handleSkipImport = () => setCurrentStep(SetupStep.PERSONAL_INFO);
 
     const renderCurrentStep = () => {
         switch (currentStep) {
             case SetupStep.IMPORT_RESUME:
                 return <ResumeUploadStep onExtracted={handleExtracted} onSkip={handleSkipImport} />;
-            case SetupStep.USER_TYPE:
-                return <UserTypeStep userType={userType} update={setUserType} />;
             case SetupStep.PERSONAL_INFO:
                 return <PersonalInfoStep data={personalInfo} update={setPersonalInfo} />;
             case SetupStep.EDUCATION:
                 return <EducationStep data={education} update={setEducation} />;
-            case SetupStep.EXPERIENCE_OR_PROJECTS:
-                if (userType === 'student') {
-                    return <ProjectsStep data={projects} update={setProjects} userType={userType} />;
-                }
+            case SetupStep.EXPERIENCE:
                 return <ExperienceStep data={experiences} update={setExperiences} />;
+            case SetupStep.PROJECTS:
+                return <ProjectsStep data={projects} update={setProjects} userType={userType} />;
             case SetupStep.SKILLS:
                 return <SkillsStep data={skills} update={setSkills} userType={userType} />;
             case SetupStep.EXTRACURRICULARS:
@@ -628,9 +593,18 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             setCurrentStep(visibleSteps[currentStepIndex + 1]);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
+            // Final gate: a resume (general or tailored) and the toolkit can only
+            // be generated when there's real content to work from. If the user
+            // skipped BOTH education and experience, complete the profile but
+            // warn that nothing will be generated until they add one.
+            const canGenerate = education.length > 0 || experiences.length > 0;
             try {
                 if (user) await profileRepository.markProfileComplete(user.id);
-                track('profile_setup_completed', { user_type: userType });
+                track('profile_setup_completed', { user_type: userType, has_resume: canGenerate });
+                if (!canGenerate) {
+                    setShowNoResumeWarn(true);
+                    return;
+                }
                 toast.success(t('profileSetup.profileDoneToast'));
                 await handleGenerateGeneralResume();
             } catch (error) {
@@ -731,9 +705,49 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         );
     }
 
+    // -------------------- No content to generate from --------------------
+    if (showNoResumeWarn) {
+        return (
+            <div className="min-h-screen bg-charcoal-50 flex items-center justify-center px-4">
+                <div className="bg-white border border-charcoal-200 rounded-2xl p-8 max-w-md w-full text-center shadow-sm">
+                    <div className="w-14 h-14 bg-accent-50 border border-accent-100 rounded-full flex items-center justify-center mx-auto mb-5">
+                        <AlertCircle size={22} className="text-accent-600" />
+                    </div>
+                    <h2 className="font-display text-2xl font-semibold text-brand-700 mb-2">
+                        {t('profileSetup.noResumeWarnTitle')}
+                    </h2>
+                    <p className="text-brand-500 mb-5 leading-relaxed">
+                        {t('profileSetup.noResumeWarnBody')}
+                    </p>
+                    <div className="flex flex-col gap-2 mt-4">
+                        <button
+                            type="button"
+                            onClick={() => { setShowNoResumeWarn(false); setCurrentStep(SetupStep.EDUCATION); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 bg-brand-700 text-charcoal-50 rounded-full font-semibold hover:bg-brand-800 transition-colors"
+                        >
+                            {t('profileSetup.noResumeAddCta')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onComplete}
+                            className="w-full px-5 py-3 text-brand-600 hover:text-brand-700 font-semibold hover:bg-charcoal-100 rounded-full transition-colors text-sm"
+                        >
+                            {t('profileSetup.noResumeFinishCta')}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     // -------------------- Main wizard --------------------
     const isFirstStep = currentStep === SetupStep.IMPORT_RESUME;
     const isLastStep = currentStepIndex === visibleSteps.length - 1;
+    // Item sections are all optional now: the forward button reads "Skip" when
+    // the current section is empty, "Continue" once something's been added.
+    // (Import + contact details aren't item sections, so they always advance.)
+    const isItemSection = currentStep !== SetupStep.IMPORT_RESUME && currentStep !== SetupStep.PERSONAL_INFO;
+    const showSkip = !isLastStep && isItemSection && !stepHasContent(currentStep);
 
     return (
         <div className="min-h-screen bg-charcoal-50 flex flex-col">
@@ -937,7 +951,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                                 </>
                             ) : (
                                 <>
-                                    {t('profileSetup.continueCta')}
+                                    {showSkip ? t('profileSetup.skipCta') : t('profileSetup.continueCta')}
                                     <ChevronRight size={16} />
                                 </>
                             )}

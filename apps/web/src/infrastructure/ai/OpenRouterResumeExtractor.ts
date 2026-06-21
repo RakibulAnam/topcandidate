@@ -111,7 +111,20 @@ export class OpenRouterResumeExtractor implements IResumeExtractor {
       parsed.projects = parsed.projects.map((e) => ({ ...e, id: crypto.randomUUID() }));
     }
     if (parsed.education) {
-      parsed.education = parsed.education.map((e) => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
+      parsed.education = parsed.education.map((e) => {
+        const startDate = sanitizeDate(e.startDate);
+        const endDate = sanitizeDate(e.endDate);
+        // Education is usually a single (graduation) date, not a range. If the
+        // model produced only a start date, treat it as the end date — endDate
+        // is the mandatory, meaningful one; startDate is optional.
+        const single = !endDate && !!startDate;
+        return {
+          ...e,
+          id: crypto.randomUUID(),
+          startDate: single ? '' : startDate,
+          endDate: single ? startDate : endDate,
+        };
+      });
     }
     if (parsed.extracurriculars) {
       parsed.extracurriculars = parsed.extracurriculars.map((e) => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));

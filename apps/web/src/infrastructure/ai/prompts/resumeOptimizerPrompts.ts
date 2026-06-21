@@ -279,6 +279,15 @@ export function validateOptimizedResponse(input: ResumeData, output: OptimizedRe
   validateArrayCounts(input.extracurriculars, output.extracurriculars, 'extracurriculars');
 }
 
+// Validate by ID SET, not by position. The post-pipeline reorders output items
+// (reorderProjectsByJDFit moves the most JD-relevant project to the top), and
+// mergeOptimizedData() pairs optimized items back to input BY ID
+// (`find(e => e.id === item.id)`) — order is irrelevant downstream. A positional
+// check here was therefore both wrong and inconsistent with how the data is
+// used: a model returning the right items in a different order (which Gemini
+// legitimately does) tripped a spurious "ID mismatch in <field>". We only need
+// to guarantee that every input item is represented exactly once with non-empty
+// bullets, regardless of order.
 function validateArrayCounts(
   inputArray: { id: string }[] | undefined,
   outputArray: { id: string; refinedBullets: string[] }[] | undefined,
@@ -290,13 +299,20 @@ function validateArrayCounts(
     throw new Error(`AI did not return correct ${field} count`);
   }
 
-  inputArray.forEach((item, index) => {
-    const out = outputArray[index];
-    if (!out || out.id !== item.id) throw new Error(`ID mismatch in ${field}`);
+  const byId = new Map<string, { id: string; refinedBullets: string[] }>();
+  for (const out of outputArray) {
+    if (!out || typeof out.id !== 'string') throw new Error(`Malformed item in ${field}`);
+    if (byId.has(out.id)) throw new Error(`Duplicate ID in ${field}: ${out.id}`);
+    byId.set(out.id, out);
+  }
+
+  for (const item of inputArray) {
+    const out = byId.get(item.id);
+    if (!out) throw new Error(`ID mismatch in ${field}`);
     if (!out.refinedBullets || out.refinedBullets.length === 0) {
       throw new Error(`Empty bullets in ${field} ${item.id}`);
     }
-  });
+  }
 }
 
 // ────────────────────────────────────────────────

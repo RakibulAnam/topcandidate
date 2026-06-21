@@ -1,6 +1,6 @@
 // Application Service - Orchestrates use cases
 
-import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors } from '../../domain/entities/Resume';
+import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors, inferUserType } from '../../domain/entities/Resume';
 import { OptimizeResumeUseCase, IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase';
 import { ExportResumeUseCase, IResumeExporter } from '../../domain/usecases/ExportResumeUseCase';
 import { GenerateCoverLetterUseCase, ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase';
@@ -82,7 +82,10 @@ export class ResumeService {
     return this.repository.deleteGeneratedResume(id);
   }
 
-  async optimizeResume(data: ResumeData): Promise<OptimizedResumeData> {
+  async optimizeResume(rawData: ResumeData): Promise<OptimizedResumeData> {
+    // userType is derived, never selected — recompute it from the data so AI
+    // framing (seniority, tone) is always consistent with the actual content.
+    const data: ResumeData = { ...rawData, userType: inferUserType(rawData.experience) };
     const t0 = performance.now();
     console.info(`[resume-service] optimizeResume start jdLen=${data.targetJob?.description?.length ?? 0} exp=${data.experience?.length ?? 0} proj=${data.projects?.length ?? 0}`);
 
@@ -417,9 +420,11 @@ export class ResumeService {
     ]);
 
     // Determine visible sections based on user type and available data
+    // userType is derived from the data, not the (removed) selector.
+    const uTypeInferred = inferUserType(exps);
     const visibleSections: string[] = ['skills', 'education', 'projects'];
-    if (uType === 'experienced') visibleSections.push('experience');
-    if (uType === 'student') visibleSections.push('extracurriculars');
+    if (uTypeInferred === 'experienced') visibleSections.push('experience');
+    if (uTypeInferred === 'student') visibleSections.push('extracurriculars');
     if (extras.length > 0 && !visibleSections.includes('extracurriculars')) visibleSections.push('extracurriculars');
     if (awds.length > 0) visibleSections.push('awards');
     if (certs.length > 0) visibleSections.push('certifications');
@@ -430,7 +435,7 @@ export class ResumeService {
 
     // Assemble ResumeData with a generic target job
     const resumeData: ResumeData = {
-      userType: uType || undefined,
+      userType: uTypeInferred,
       targetJob: {
         title: 'General Purpose', // header appends " Resume - <year>"; avoid "Resume Resume"
         company: '',
@@ -509,10 +514,11 @@ export class ResumeService {
       this.profileRepository.getReferences(userId),
     ]);
 
-    // Determine visible sections
+    // Determine visible sections. userType is derived from the data.
+    const uTypeInferred = inferUserType(exps);
     const visibleSections: string[] = ['skills', 'education', 'projects'];
-    if (uType === 'experienced') visibleSections.push('experience');
-    if (uType === 'student') visibleSections.push('extracurriculars');
+    if (uTypeInferred === 'experienced') visibleSections.push('experience');
+    if (uTypeInferred === 'student') visibleSections.push('extracurriculars');
     if (extras.length > 0 && !visibleSections.includes('extracurriculars')) visibleSections.push('extracurriculars');
     if (awds.length > 0) visibleSections.push('awards');
     if (certs.length > 0) visibleSections.push('certifications');
@@ -523,7 +529,7 @@ export class ResumeService {
 
     // Assemble fresh ResumeData
     const resumeData: ResumeData = {
-      userType: uType || undefined,
+      userType: uTypeInferred,
       targetJob: {
         title: 'General Purpose', // header appends " Resume - <year>"; avoid "Resume Resume"
         company: '',

@@ -349,7 +349,9 @@ export class WordResumeExporter implements IResumeExporter {
                 size: pt(t.sizeItemTitle),
               }),
               new TextRun({
-                text: `\t${edu.startDate} \u2013 ${edu.endDate}`,
+                text: edu.startDate
+                  ? `\t${edu.startDate} \u2013 ${edu.endDate}`
+                  : `\t${edu.endDate}`,
                 bold: true,
                 size: pt(t.sizeMeta),
               }),

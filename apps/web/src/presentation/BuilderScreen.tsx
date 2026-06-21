@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { ResumeData, AppStep, ToolkitItem } from '../domain/entities';
 import {
-  UserTypeStep,
   TargetJobStep,
   PersonalInfoStep,
   ExperienceStep,
@@ -24,7 +23,7 @@ import { isGibberish } from '../application/validation/gibberishDetector';
 import { isValidEmail } from './components/ui/EmailInput';
 import { isValidPhone } from './components/ui/PhoneInput';
 import { useAuth } from '../infrastructure/auth/AuthContext';
-import { ChevronRight, ChevronLeft, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronLeft, Sparkles, AlertTriangle } from 'lucide-react';
 import { Navbar } from './components/Layout/Navbar';
 import { BuilderStepper } from './components/Builder/BuilderStepper';
 import { PurchaseModal } from './components/PurchaseModal';
@@ -33,7 +32,6 @@ import { ApiCallError } from '../infrastructure/ai/proxy/ProxyClients';
 import { useT } from './i18n/LocaleContext';
 
 const stepsInfoFor = (t: ReturnType<typeof useT>) => [
-  { id: AppStep.USER_TYPE, title: t('builder.stepsUserType') },
   { id: AppStep.SECTIONS, title: t('builder.stepsSections') },
   { id: AppStep.TARGET_JOB, title: t('builder.stepsTargetJob') },
   { id: AppStep.PERSONAL_INFO, title: t('builder.stepsPersonalInfo') },
@@ -52,7 +50,7 @@ const stepsInfoFor = (t: ReturnType<typeof useT>) => [
 
 // Static IDs without titles — used by getVisibleSteps which is called outside React.
 const STEP_IDS_INFO: { id: AppStep }[] = [
-  AppStep.USER_TYPE, AppStep.SECTIONS, AppStep.TARGET_JOB, AppStep.PERSONAL_INFO,
+  AppStep.SECTIONS, AppStep.TARGET_JOB, AppStep.PERSONAL_INFO,
   AppStep.EXPERIENCE, AppStep.PROJECTS, AppStep.EDUCATION, AppStep.SKILLS,
   AppStep.EXTRACURRICULARS, AppStep.AWARDS, AppStep.CERTIFICATIONS,
   AppStep.AFFILIATIONS, AppStep.PUBLICATIONS, AppStep.LANGUAGES, AppStep.REFERENCES,
@@ -64,9 +62,12 @@ const DEFAULT_SECTIONS = [
   'languages', 'references',
 ];
 
-export const getVisibleSteps = (userType?: 'experienced' | 'student', visibleSections?: string[]) => {
+// The student/experienced selector was removed — there's no USER_TYPE step and
+// no userType-based section filtering. Which section steps appear is driven
+// purely by the user's section selection (the SECTIONS step); when nothing is
+// explicitly selected yet, every section is shown.
+export const getVisibleSteps = (visibleSections?: string[]) => {
   const baseSteps = [AppStep.SECTIONS, AppStep.TARGET_JOB, AppStep.PERSONAL_INFO];
-  const stepsToShow = userType ? baseSteps : [AppStep.USER_TYPE, ...baseSteps];
 
   const sectionMap: Record<string, AppStep> = {
     'experience': AppStep.EXPERIENCE,
@@ -83,21 +84,13 @@ export const getVisibleSteps = (userType?: 'experienced' | 'student', visibleSec
   };
 
   return STEP_IDS_INFO.filter(s => {
-    if (stepsToShow.includes(s.id)) return true;
+    if (baseSteps.includes(s.id)) return true;
     const sectionKey = Object.keys(sectionMap).find(key => sectionMap[key] === s.id);
-
     if (sectionKey) {
       if (visibleSections && visibleSections.length > 0) {
         return visibleSections.includes(sectionKey);
       }
-      if (!userType) return false;
-      if (userType === 'student') {
-        if ([AppStep.EXPERIENCE, AppStep.CERTIFICATIONS, AppStep.AFFILIATIONS, AppStep.PUBLICATIONS].includes(s.id)) return false;
-      }
-      if (userType === 'experienced') {
-        if ([AppStep.EXTRACURRICULARS, AppStep.AWARDS].includes(s.id)) return false;
-      }
-      return true;
+      return true; // no explicit selection yet → show every section
     }
     return false;
   });
@@ -419,10 +412,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         break;
 
       case AppStep.EXPERIENCE:
-        if (resumeData.userType === 'experienced' && resumeData.experience.length === 0) {
-          if (showToast) toast.error(t('builder.addOneExp'));
-          isValid = false;
-        }
+        // Experience is optional/skippable — validate only the entries added.
         resumeData.experience.forEach((exp, index) => {
           if (!(exp.company || '').trim()) {
             newErrors[`experience.${index}.company`] = t('builder.errExpCompany');
@@ -450,10 +440,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         break;
 
       case AppStep.PROJECTS:
-        if (resumeData.userType === 'student' && resumeData.projects.length === 0) {
-          if (showToast) toast.error(t('builder.addOneProject'));
-          isValid = false;
-        }
+        // Projects are optional/skippable — validate only the entries added.
         resumeData.projects.forEach((proj, index) => {
           if (!(proj.name || '').trim()) {
             newErrors[`projects.${index}.name`] = t('builder.errProjectName');
@@ -482,11 +469,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
             newErrors[`education.${index}.field`] = t('builder.errField');
             isValid = false;
           }
-          if (!(edu.startDate || '').trim()) {
-            newErrors[`education.${index}.startDate`] = t('builder.errStartYear');
-            isValid = false;
-          }
-          if (!edu.isCurrent && !(edu.endDate || '').trim()) {
+          // Start date is optional for education (single-date entries are
+          // common). Only the end date is mandatory; "Present" satisfies it.
+          if (!(edu.endDate || '').trim()) {
             newErrors[`education.${index}.endDate`] = t('builder.errEndYear');
             isValid = false;
           }
@@ -495,10 +480,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         break;
 
       case AppStep.SKILLS:
-        if (resumeData.skills.length === 0) {
-          if (showToast) toast.error(t('builder.addOneSkill'));
-          isValid = false;
-        }
+        // Skills are optional/skippable now — the optimizer derives skills from
+        // experience/project descriptions when none are listed.
         break;
 
       case AppStep.EXTRACURRICULARS:
@@ -683,23 +666,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     }
     setErrors({});
 
-    // Pre-compute the next visible-sections so the same value drives BOTH
-    // the state write AND the immediate visible-steps lookup. Without this,
-    // the lookup on the next line reads the stale `resumeData.visibleSections`
-    // (React batches the setResumeData call), causing the user's first
-    // step-forward from USER_TYPE to navigate via getVisibleSteps's
-    // implicit defaults instead of the explicit ones we just set —
-    // resulting in a transient inconsistency.
-    let nextSections = resumeData.visibleSections;
-    if (step === AppStep.USER_TYPE && (!nextSections || nextSections.length === 0)) {
-      const defaults = ['education', 'skills', 'projects'];
-      if (resumeData.userType === 'experienced') defaults.push('experience');
-      if (resumeData.userType === 'student') defaults.push('extracurriculars');
-      nextSections = defaults;
-      setResumeData(prev => ({ ...prev, visibleSections: defaults }));
-    }
-
-    const visibleSteps = getVisibleSteps(resumeData.userType, nextSections);
+    const visibleSteps = getVisibleSteps(resumeData.visibleSections);
     const currentIndex = visibleSteps.findIndex(s => s.id === step);
 
     if (currentIndex < visibleSteps.length - 1) {
@@ -714,7 +681,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setErrors({});
 
-    const visibleSteps = getVisibleSteps(resumeData.userType, resumeData.visibleSections);
+    const visibleSteps = getVisibleSteps(resumeData.visibleSections);
     const currentIndex = visibleSteps.findIndex(s => s.id === step);
 
     // If we're on PREVIEW, currentIndex is -1 (PREVIEW isn't in the
@@ -735,6 +702,14 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const handleGenerate = async (opts?: { skipCreditCheck?: boolean }) => {
     if (!resumeService) {
       toast.error(t('builder.serviceNotInit'));
+      return;
+    }
+
+    // Content gate: a resume + toolkit can only be built from real content.
+    // Block (before any credit spend) unless there's at least one education or
+    // experience entry.
+    if (resumeData.education.length === 0 && resumeData.experience.length === 0) {
+      toast.error(t('builder.noResumeWarn'));
       return;
     }
 
@@ -1002,10 +977,33 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     );
   }
 
-  const visibleStepIds = getVisibleSteps(resumeData.userType, resumeData.visibleSections);
+  const visibleStepIds = getVisibleSteps(resumeData.visibleSections);
   const stepInfoMap = new Map(stepsInfoFor(t).map(s => [s.id, s]));
   const visibleSteps = visibleStepIds.map(s => stepInfoMap.get(s.id) ?? { id: s.id, title: '' });
   const isLastStep = visibleSteps.length > 0 && visibleSteps[visibleSteps.length - 1].id === step;
+  const isFirstStep = visibleSteps.length > 0 && visibleSteps[0].id === step;
+  // "Skip" when the current section step has no content; section steps are
+  // everything except the SECTIONS picker, TARGET_JOB and PERSONAL_INFO.
+  const sectionItemCount = (s: AppStep): number => {
+    switch (s) {
+      case AppStep.EXPERIENCE: return resumeData.experience.length;
+      case AppStep.PROJECTS: return resumeData.projects?.length ?? 0;
+      case AppStep.EDUCATION: return resumeData.education.length;
+      case AppStep.SKILLS: return resumeData.skills.length;
+      case AppStep.EXTRACURRICULARS: return resumeData.extracurriculars?.length ?? 0;
+      case AppStep.AWARDS: return resumeData.awards?.length ?? 0;
+      case AppStep.CERTIFICATIONS: return resumeData.certifications?.length ?? 0;
+      case AppStep.AFFILIATIONS: return resumeData.affiliations?.length ?? 0;
+      case AppStep.PUBLICATIONS: return resumeData.publications?.length ?? 0;
+      case AppStep.LANGUAGES: return resumeData.languages?.length ?? 0;
+      case AppStep.REFERENCES: return resumeData.references?.length ?? 0;
+      default: return -1; // not an item section (SECTIONS / TARGET_JOB / PERSONAL_INFO)
+    }
+  };
+  const showSkip = !isLastStep && sectionItemCount(step) === 0;
+  // A resume + toolkit can only be generated with at least one education or
+  // experience entry (enforced in handleGenerate + OptimizeResumeUseCase).
+  const canGenerateContent = resumeData.education.length > 0 || resumeData.experience.length > 0;
 
   return (
     <div className="min-h-screen bg-paper flex flex-col">
@@ -1033,13 +1031,17 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       />
 
       <main className="flex-1 max-w-3xl mx-auto w-full p-4 md:p-8">
+        {/* No-content gate banner — until there's an education or experience
+            entry, neither the tailored resume nor its toolkit can be generated
+            (the gate in handleGenerate blocks it). Shown on every step so the
+            user knows before reaching Generate, including the from-scratch path. */}
+        {resumeData.education.length === 0 && resumeData.experience.length === 0 && (
+          <div className="mb-4 bg-accent-50 border border-accent-200 rounded-xl px-4 py-3 flex items-start gap-3">
+            <AlertTriangle size={18} className="text-accent-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-charcoal-700">{t('builder.noResumeWarn')}</p>
+          </div>
+        )}
         <div className="bg-white rounded-xl shadow-sm border border-charcoal-100 p-6 md:p-10 min-h-[500px] relative">
-          {step === AppStep.USER_TYPE && (
-            <UserTypeStep
-              userType={resumeData.userType}
-              update={userType => setResumeData(prev => ({ ...prev, userType }))}
-            />
-          )}
           {step === AppStep.SECTIONS && (
             <SectionSelectionStep
               selected={resumeData.visibleSections || []}
@@ -1061,7 +1063,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               update={d => setResumeData(prev => ({ ...prev, personalInfo: d }))}
             />
           )}
-          {step === AppStep.EXPERIENCE && resumeData.userType === 'experienced' && (
+          {step === AppStep.EXPERIENCE && (
             <ExperienceStep
               data={resumeData.experience}
               errors={errors}
@@ -1170,8 +1172,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
           <button
             type="button"
             onClick={handleBack}
-            disabled={step === AppStep.USER_TYPE || isGenerating}
-            className={`flex items-center gap-2 px-6 min-h-11 rounded-lg text-sm font-bold transition-colors ${step === AppStep.USER_TYPE
+            disabled={isFirstStep || isGenerating}
+            className={`flex items-center gap-2 px-6 min-h-11 rounded-lg text-sm font-bold transition-colors ${isFirstStep
               ? 'opacity-0 cursor-default'
               : 'text-charcoal-600 hover:bg-charcoal-100'
               }`}
@@ -1185,16 +1187,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                 {generationError}
               </p>
             )}
-            {step === AppStep.USER_TYPE ? (
-              <button
-                type="button"
-                onClick={handleNext}
-                disabled={!resumeData.userType}
-                className="flex items-center gap-2 px-8 min-h-11 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {t('builder.nextCta')} <ChevronRight size={18} />
-              </button>
-            ) : isLastStep ? (
+            {isLastStep ? (
               <>
                 {credits !== null && (
                   <p
@@ -1210,7 +1203,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => { void handleGenerate(); }}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !canGenerateContent}
+                  title={!canGenerateContent ? t('builder.noResumeWarn') : undefined}
                   className="flex items-center gap-2 px-8 min-h-11 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
                 >
                   {isGenerating
@@ -1227,7 +1221,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
                 onClick={handleNext}
                 className="flex items-center gap-2 px-8 min-h-11 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {t('builder.nextCta')} <ChevronRight size={18} />
+                {showSkip ? t('builder.skipCta') : t('builder.nextCta')} <ChevronRight size={18} />
               </button>
             )}
           </div>

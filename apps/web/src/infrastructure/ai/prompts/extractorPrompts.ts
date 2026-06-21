@@ -39,6 +39,11 @@ export const EXTRACTOR_PROMPT = `
       YYYY-MM format (e.g. 2023-05). If only the year is known, use YYYY-01. If a date is
       genuinely unknown, use an empty string "". For current/ongoing roles, set endDate exactly
       to "Present" and isCurrent to true.
+      EDUCATION DATES: education is usually listed with a SINGLE date (the graduation /
+      completion / award date), not a range. When you see only one date for an education entry,
+      put it in endDate and leave startDate "". Only fill startDate when an explicit date RANGE
+      is given (e.g. "2018 – 2022" → startDate 2018-01, endDate 2022-01). For education still in
+      progress (e.g. "Expected 2026", "Present", "Ongoing"), set endDate to "Present".
     `;
 
 // JSON shape spec — guidance shown to the model alongside the enforced schema.

@@ -2,6 +2,15 @@
 
 export type UserType = 'experienced' | 'student';
 
+// `userType` is no longer a user-facing choice — the student/experienced
+// selector was removed. It is DERIVED from the profile: anyone with at least
+// one work experience is treated as 'experienced', everyone else as 'student'
+// / entry-level. It only tunes AI framing (seniority, cover-letter tone,
+// default section emphasis) — it never gates or hides sections anymore.
+export function inferUserType(experience?: readonly unknown[] | null): UserType {
+  return experience && experience.length > 0 ? 'experienced' : 'student';
+}
+
 export interface PersonalInfo {
   fullName: string;
   email: string;
@@ -62,7 +71,12 @@ export interface Education {
   school: string;
   degree: string;
   field: string;
-  startDate: string;
+  // Start date is OPTIONAL — resumes often list education with only a single
+  // (graduation/completion) date. When no range is known, leave startDate empty
+  // and put the single date in endDate. endDate is mandatory; ongoing study is
+  // encoded as the string "Present" (the convention the editors render), not a
+  // separate isCurrent boolean.
+  startDate?: string;
   endDate: string;
   gpa?: string; // Optional GPA/CGPA (e.g., "3.8/4.0" or "8.5/10")
 }
