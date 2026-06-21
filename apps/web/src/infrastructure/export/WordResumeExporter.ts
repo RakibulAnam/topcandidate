@@ -11,6 +11,7 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  ExternalHyperlink,
   HeadingLevel,
   AlignmentType,
   TabStopPosition,
@@ -24,9 +25,48 @@ import {
   TemplateDefinition,
   resolveTemplate,
 } from '../../presentation/templates/TemplateRegistry';
+import {
+  ContactSegment,
+  buildContactSegments,
+  normalizeWebUrl,
+  toMailto,
+  toTel,
+  CONTACT_SEPARATOR,
+} from '../../presentation/templates/contactLinks';
 
 // docx represents font size in half-points. helper to convert pt → half-pt.
 const pt = (points: number) => Math.round(points * 2);
+
+/**
+ * Builds a paragraph's `children` from contact segments: a real
+ * `ExternalHyperlink` (clickable) for each segment with an href, a plain
+ * `TextRun` for the rest, separated by `separator`. Links inherit the
+ * surrounding text color (no blue) so the three render surfaces stay
+ * WYSIWYG-identical and the brand's no-blue rule is respected — the visible
+ * text is the full URL, so it reads as a link and ATS still extracts it.
+ */
+const contactHyperlinkChildren = (
+  segments: ContactSegment[],
+  size: number,
+  font: string,
+  separator: string
+): (TextRun | ExternalHyperlink)[] => {
+  const children: (TextRun | ExternalHyperlink)[] = [];
+  segments.forEach((seg, i) => {
+    if (i > 0) children.push(new TextRun({ text: separator, size, font }));
+    if (seg.href) {
+      children.push(
+        new ExternalHyperlink({
+          link: seg.href,
+          children: [new TextRun({ text: seg.text, size, font })],
+        })
+      );
+    } else {
+      children.push(new TextRun({ text: seg.text, size, font }));
+    }
+  });
+  return children;
+};
 
 // docx represents paragraph spacing in twips (1/20 of a point).
 const twips = (points: number) => Math.round(points * 20);
@@ -174,25 +214,17 @@ export class WordResumeExporter implements IResumeExporter {
       }),
     ];
 
-    const contactParts = [
-      data.personalInfo.email,
-      data.personalInfo.phone,
-      data.personalInfo.location,
-      data.personalInfo.linkedin,
-      data.personalInfo.github,
-      data.personalInfo.website,
-    ].filter(Boolean);
+    const contactSegments = buildContactSegments(data.personalInfo);
 
-    if (contactParts.length > 0) {
+    if (contactSegments.length > 0) {
       headerLines.push(
         new Paragraph({
-          children: [
-            new TextRun({
-              text: contactParts.join('  |  '),
-              size: pt(t.sizeBody),
-              font: fontFamily,
-            }),
-          ],
+          children: contactHyperlinkChildren(
+            contactSegments,
+            pt(t.sizeBody),
+            fontFamily,
+            CONTACT_SEPARATOR
+          ),
           alignment: headerAlignment,
           spacing: { after: twips(t.sectionGapBefore) },
         })
@@ -280,14 +312,16 @@ export class WordResumeExporter implements IResumeExporter {
           })
         );
         if (proj.link) {
+          const projHref = normalizeWebUrl(proj.link);
           sections.push(
             new Paragraph({
               children: [
-                new TextRun({
-                  text: proj.link,
-                  size: pt(t.sizeMeta),
-                  color: '0563C1',
-                }),
+                projHref
+                  ? new ExternalHyperlink({
+                      link: projHref,
+                      children: [new TextRun({ text: proj.link, size: pt(t.sizeMeta) })],
+                    })
+                  : new TextRun({ text: proj.link, size: pt(t.sizeMeta) }),
               ],
               spacing: { after: twips(t.bulletGap) },
             })
@@ -451,14 +485,27 @@ export class WordResumeExporter implements IResumeExporter {
     ) {
       sections.push(this.createSectionHeading('Publications', t));
       for (const pub of data.publications) {
+        const pubPrefix = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}`;
+        const pubHref = pub.link ? normalizeWebUrl(pub.link) : undefined;
+        const pubChildren: (TextRun | ExternalHyperlink)[] =
+          pub.link && pubHref
+            ? [
+                new TextRun({ text: `${pubPrefix} [`, size: pt(t.sizeBody) }),
+                new ExternalHyperlink({
+                  link: pubHref,
+                  children: [new TextRun({ text: pub.link, size: pt(t.sizeBody) })],
+                }),
+                new TextRun({ text: ']', size: pt(t.sizeBody) }),
+              ]
+            : [
+                new TextRun({
+                  text: `${pubPrefix}${pub.link ? ` [${pub.link}]` : ''}`,
+                  size: pt(t.sizeBody),
+                }),
+              ];
         sections.push(
           new Paragraph({
-            children: [
-              new TextRun({
-                text: `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}${pub.link ? ` [${pub.link}]` : ''}`,
-                size: pt(t.sizeBody),
-              }),
-            ],
+            children: pubChildren,
             spacing: { before: twips(t.bulletGap) },
           })
         );
@@ -554,11 +601,18 @@ export class WordResumeExporter implements IResumeExporter {
             })
           );
         }
-        const contact = [ref.email, ref.phone].filter(Boolean).join(' · ');
-        if (contact) {
+        const refContactSegs: ContactSegment[] = [];
+        if (ref.email) refContactSegs.push({ text: ref.email, href: toMailto(ref.email) });
+        if (ref.phone) refContactSegs.push({ text: ref.phone, href: toTel(ref.phone) });
+        if (refContactSegs.length > 0) {
           sections.push(
             new Paragraph({
-              children: [new TextRun({ text: contact, size: pt(t.sizeBody) })],
+              children: contactHyperlinkChildren(
+                refContactSegs,
+                pt(t.sizeBody),
+                fontFamily,
+                ' · '
+              ),
             })
           );
         }
@@ -635,17 +689,25 @@ export class WordResumeExporter implements IResumeExporter {
         spacing: { after: twips(2) },
       })
     );
-    const senderFields = [
-      data.personalInfo.email,
-      data.personalInfo.phone,
-      data.personalInfo.location,
-      data.personalInfo.linkedin,
-    ].filter(Boolean) as string[];
-    for (const line of senderFields) {
+    const senderSegs: ContactSegment[] = [];
+    if (data.personalInfo.email)
+      senderSegs.push({ text: data.personalInfo.email, href: toMailto(data.personalInfo.email) });
+    if (data.personalInfo.phone)
+      senderSegs.push({ text: data.personalInfo.phone, href: toTel(data.personalInfo.phone) });
+    if (data.personalInfo.location)
+      senderSegs.push({ text: data.personalInfo.location });
+    if (data.personalInfo.linkedin)
+      senderSegs.push({ text: data.personalInfo.linkedin, href: normalizeWebUrl(data.personalInfo.linkedin) });
+    for (const seg of senderSegs) {
       paragraphs.push(
         new Paragraph({
           children: [
-            new TextRun({ text: line, size: pt(t.sizeBody), font: fontFamily }),
+            seg.href
+              ? new ExternalHyperlink({
+                  link: seg.href,
+                  children: [new TextRun({ text: seg.text, size: pt(t.sizeBody), font: fontFamily })],
+                })
+              : new TextRun({ text: seg.text, size: pt(t.sizeBody), font: fontFamily }),
           ],
           spacing: { after: twips(1) },
         })

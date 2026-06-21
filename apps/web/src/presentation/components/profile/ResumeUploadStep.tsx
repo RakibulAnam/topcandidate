@@ -2,7 +2,24 @@ import React, { useState, useRef } from 'react';
 import { Upload, FileText, Loader2, AlertCircle } from 'lucide-react';
 import { resumeExtractor } from '../../../infrastructure/config/dependencies';
 import { ExtractedProfileData } from '../../../domain/usecases/ExtractResumeUseCase';
+import { extractTextFromPdf, MIN_TEXT_LENGTH } from '../../utils/pdfText';
 import { toast } from 'sonner';
+
+// pdf.js reads the file in-browser; for text-based PDFs we send only the
+// extracted text (a few KB), so the file size barely matters — keep a generous
+// ceiling. The smaller cap applies ONLY to the scanned-PDF fallback that must
+// send the raw file over the wire (Vercel rejects request bodies > 4.5MB, and
+// base64 inflates ×1.333, so ~3.3MB raw is the real limit there).
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_FALLBACK_BYTES = 3 * 1024 * 1024;
+
+const readAsBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '');
+        reader.onerror = () => reject(new Error('Failed to read file.'));
+        reader.readAsDataURL(file);
+    });
 
 interface Props {
     onExtracted: (data: ExtractedProfileData) => void;
@@ -29,43 +46,68 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
             return;
         }
 
-        if (file.size > 5 * 1024 * 1024) { // 5MB limit
-            toast.error('File size must be less than 5MB.');
+        if (file.size > MAX_FILE_BYTES) {
+            toast.error('This file is too large (max 10 MB). Try a smaller PDF, or skip and fill in your profile manually.');
             return;
         }
 
         setIsProcessing(true);
 
         try {
-            // Convert file to base64
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-
-            reader.onload = async () => {
-                try {
-                    const base64String = reader.result as string;
-                    // Extract just the base64 part, removing the data... prefix
-                    const base64Data = base64String.split(',')[1];
-
-                    const extractedData = await resumeExtractor.extract(base64Data, file.type);
-                    toast.success('Resume analyzed successfully!');
-                    onExtracted(extractedData);
-                } catch (error) {
-                    console.error('Parsing error:', error);
-                    toast.error(error instanceof Error ? error.message : 'Failed to analyze resume.');
-                    setIsProcessing(false);
+            // 1) Try to pull selectable text out of the PDF in the browser.
+            //    Normal (text-based) resumes send only this text — a few KB —
+            //    so the request never approaches the server body limit.
+            let mode: 'text' | 'file' = 'text';
+            let payload = '';
+            try {
+                const { text } = await extractTextFromPdf(file);
+                if (text.length >= MIN_TEXT_LENGTH) {
+                    payload = text;
+                } else {
+                    mode = 'file'; // little/no text layer → likely scanned/image
                 }
-            };
+            } catch (err) {
+                console.error('In-browser PDF text extraction failed:', err);
+                mode = 'file'; // unreadable text layer → fall back to native read
+            }
 
-            reader.onerror = () => {
-                toast.error('Failed to read file.');
+            // 2) Scanned/image fallback: send the raw file for Gemini's native
+            //    multimodal read. This path is bounded by the Vercel body limit.
+            if (mode === 'file') {
+                if (file.size > MAX_FALLBACK_BYTES) {
+                    toast.error("We couldn't read this PDF's text (it may be scanned or image-based), and it's too large to process as an image (max 3 MB). Try a text-based PDF or a smaller file, or skip and fill in your profile manually.");
+                    setIsProcessing(false);
+                    return;
+                }
+                payload = await readAsBase64(file);
+            }
+
+            const extractedData = await resumeExtractor.extract(
+                payload,
+                mode === 'text' ? 'text/plain' : file.type,
+            );
+
+            // If almost nothing came back, the PDF was likely a scanned image
+            // (no selectable text) — guide the user rather than dropping them
+            // into an empty form with a "success" toast.
+            const gotSomething =
+                !!extractedData.experience?.length ||
+                !!extractedData.education?.length ||
+                !!extractedData.skills?.length ||
+                !!extractedData.projects?.length ||
+                !!extractedData.personalInfo?.fullName;
+            if (!gotSomething) {
+                toast.error("We couldn't read much from this PDF — it may be a scanned image. Try a text-based PDF, or skip and fill in your profile manually.");
                 setIsProcessing(false);
-            };
+                return;
+            }
 
+            toast.success('Resume analyzed successfully!');
+            onExtracted(extractedData);
         } catch (error) {
-            console.error('Unexpected error:', error);
+            console.error('Parsing error:', error);
+            toast.error(error instanceof Error ? error.message : "We couldn't analyze this resume. Try a text-based PDF, or skip and fill in your profile manually.");
             setIsProcessing(false);
-            toast.error('An unexpected error occurred.');
         }
     };
 
@@ -140,7 +182,7 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
                             </div>
                             <div>
                                 <h3 className="text-base font-semibold text-brand-700">Drop your PDF here</h3>
-                                <p className="text-sm text-charcoal-500 mt-1">or click to browse · max 5 MB</p>
+                                <p className="text-sm text-charcoal-500 mt-1">or click to browse · max 10 MB</p>
                             </div>
                             <button
                                 type="button"
@@ -173,9 +215,9 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
             <div className="bg-charcoal-100 border border-charcoal-200 p-4 rounded-xl flex items-start gap-3">
                 <AlertCircle className="text-brand-500 shrink-0 mt-0.5" size={16} />
                 <p className="text-xs text-brand-600 leading-relaxed">
-                    <span className="font-semibold">Privacy:</span> your file is read in the
-                    browser and only the extracted text is sent to our AI provider. The PDF
-                    itself is not stored anywhere.
+                    <span className="font-semibold">Privacy:</span> your file is sent securely to
+                    our AI provider only to extract its contents. It is not stored anywhere after
+                    analysis.
                 </p>
             </div>
         </div>

@@ -25,6 +25,7 @@
     "jspdf": "^4.2.1",
     "libphonenumber-js": "^1.13.1",
     "lucide-react": "^0.554.0",
+    "pdfjs-dist": "^6.0.227",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "sonner": "^2.0.7",
@@ -43,7 +44,8 @@
   "overrides": {
     "minimatch": "^9.0.7",
     "ws": "^8.21.0",
-    "undici": "^6.21.3"
+    "undici": "^6.21.3",
+    "dompurify": "^3.4.11"
   },
-  "//audit": "After overrides above, `npm audit --omit=dev` returns 0 vulnerabilities (production deps clean). Remaining advisories are inside @vercel/node — build-time only, never reach the deployed runtime. The recommended `npm audit fix --force` would downgrade @vercel/node to v4.0.0, a regression we won't take."
+  "//audit": "After overrides above, `npm audit --omit=dev` returns 0 vulnerabilities (production deps clean). The `dompurify` override pins pdfjs-dist's transitive dompurify to a patched 3.4.11 (the bundled 3.4.7 has moderate advisories; pdf.js only uses it for SVG rendering, which our text-only extraction never touches — the override keeps the audit clean regardless). Remaining advisories are inside @vercel/node — build-time only, never reach the deployed runtime. The recommended `npm audit fix --force` would downgrade @vercel/node to v4.0.0, a regression we won't take."
 }

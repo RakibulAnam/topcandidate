@@ -510,6 +510,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         }
         if (data.experience?.length) setExperiences(data.experience);
         if (data.projects?.length) setProjects(data.projects);
+        if (data.education?.length) setEducation(data.education);
         if (data.skills?.length) setSkills(data.skills);
         if (data.extracurriculars?.length) setExtracurriculars(data.extracurriculars);
         if (data.awards?.length) setAwards(data.awards);

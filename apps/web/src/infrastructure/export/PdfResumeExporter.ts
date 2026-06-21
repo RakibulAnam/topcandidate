@@ -16,6 +16,14 @@ import {
   TemplateDefinition,
   resolveTemplate,
 } from '../../presentation/templates/TemplateRegistry';
+import {
+  ContactSegment,
+  buildContactSegments,
+  normalizeWebUrl,
+  toMailto,
+  toTel,
+  CONTACT_SEPARATOR,
+} from '../../presentation/templates/contactLinks';
 
 // A4 @ 72 DPI in points
 const PAGE_WIDTH = 595.28;
@@ -103,7 +111,7 @@ export class PdfResumeExporter {
           { rightItalic: true }
         );
         if (proj.link)
-          this.renderMetaLine(doc, proj.link, t, cursor, contentWidth);
+          this.renderMetaLine(doc, proj.link, t, cursor, contentWidth, normalizeWebUrl(proj.link));
         const bullets =
           proj.refinedBullets && proj.refinedBullets.length > 0
             ? proj.refinedBullets
@@ -185,8 +193,33 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Publications', t, cursor);
       for (const pub of data.publications) {
         this.ensureSpace(doc, cursor, t.sizeBody * 2, t.margin);
-        const line = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}${pub.link ? ` [${pub.link}]` : ''}`;
-        this.renderBodyLine(doc, line, t, cursor, contentWidth);
+        const prefix = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}`;
+        const pubHref = pub.link ? normalizeWebUrl(pub.link) : undefined;
+        if (pub.link && pubHref) {
+          doc.setFont(t.pdfFont, 'normal');
+          doc.setFontSize(t.sizeBody);
+          const open = ' [';
+          const close = ']';
+          const total = doc.getTextWidth(prefix + open + pub.link + close);
+          if (total <= contentWidth) {
+            // Fits one line — render inline with the bracketed URL clickable.
+            this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
+            cursor.y += t.sizeBody * t.lineHeight;
+            let x = t.margin;
+            doc.text(prefix + open, x, cursor.y);
+            x += doc.getTextWidth(prefix + open);
+            doc.textWithLink(pub.link, x, cursor.y, { url: pubHref });
+            x += doc.getTextWidth(pub.link);
+            doc.text(close, x, cursor.y);
+          } else {
+            // Too long for one line — text wraps, URL gets its own clickable line.
+            this.renderBodyLine(doc, prefix, t, cursor, contentWidth);
+            this.renderMetaLine(doc, pub.link, t, cursor, contentWidth, pubHref);
+          }
+        } else {
+          const line = `${prefix}${pub.link ? ` [${pub.link}]` : ''}`;
+          this.renderBodyLine(doc, line, t, cursor, contentWidth);
+        }
         cursor.y += 2;
       }
       cursor.y += t.itemGap;
@@ -283,8 +316,17 @@ export class PdfResumeExporter {
         const posOrg = [ref.position, ref.organization].filter(Boolean).join(', ');
         if (posOrg) this.renderBodyLine(doc, posOrg, t, cursor, contentWidth);
 
-        const contact = [ref.email, ref.phone].filter(Boolean).join(' · ');
-        if (contact) this.renderBodyLine(doc, contact, t, cursor, contentWidth);
+        const contactSegs: ContactSegment[] = [];
+        if (ref.email) contactSegs.push({ text: ref.email, href: toMailto(ref.email) });
+        if (ref.phone) contactSegs.push({ text: ref.phone, href: toTel(ref.phone) });
+        if (contactSegs.length > 0) {
+          doc.setFont(t.pdfFont, 'normal');
+          doc.setFontSize(t.sizeBody);
+          this.renderContactSegments(doc, contactSegs, t, cursor, contentWidth, {
+            align: 'left',
+            separator: ' · ',
+          });
+        }
 
         if (ref.relationship) this.renderBodyLine(doc, ref.relationship, t, cursor, contentWidth);
 
@@ -310,29 +352,77 @@ export class PdfResumeExporter {
     });
     cursor.y += 4;
 
-    const contactParts = [
-      data.personalInfo.email,
-      data.personalInfo.phone,
-      data.personalInfo.location,
-      data.personalInfo.linkedin,
-      data.personalInfo.github,
-      data.personalInfo.website,
-    ].filter(Boolean) as string[];
-
-    if (contactParts.length > 0) {
+    const segments = buildContactSegments(data.personalInfo);
+    if (segments.length > 0) {
       doc.setFont(t.pdfFont, 'normal');
       doc.setFontSize(t.sizeBody);
-      const contactLine = contactParts.join('  |  ');
-      const wrapped = doc.splitTextToSize(contactLine, contentWidth);
-      for (const line of wrapped) {
-        cursor.y += t.sizeBody * t.lineHeight;
-        doc.text(line, nameX, cursor.y, {
-          align: t.headerAlignment === 'center' ? 'center' : 'left',
-        });
-      }
+      this.renderContactSegments(doc, segments, t, cursor, contentWidth, {
+        align: t.headerAlignment === 'center' ? 'center' : 'left',
+      });
     }
 
     cursor.y += t.sectionGapBefore;
+  }
+
+  /**
+   * Renders a contact line as individually-linkable segments. Segments with an
+   * `href` are drawn with `doc.textWithLink` (a real clickable annotation over
+   * the same visible text — ATS still extracts the text); others (and the
+   * separators) with `doc.text`. Because we manage per-segment x advancement,
+   * this also reproduces the previous left/center alignment and wrapping
+   * behavior, but without ever splitting a link mid-URL.
+   */
+  private renderContactSegments(
+    doc: jsPDF,
+    segments: ContactSegment[],
+    t: TemplateDefinition,
+    cursor: Cursor,
+    contentWidth: number,
+    opts?: { align?: 'left' | 'center'; separator?: string }
+  ): void {
+    const align = opts?.align ?? 'left';
+    const separator = opts?.separator ?? CONTACT_SEPARATOR;
+    // Font/size must already be set by the caller so getTextWidth is accurate.
+    const sepWidth = doc.getTextWidth(separator);
+
+    type Piece = { text: string; href?: string; width: number };
+    const lines: Piece[][] = [];
+    let current: Piece[] = [];
+    let currentWidth = 0;
+
+    for (const seg of segments) {
+      const segWidth = doc.getTextWidth(seg.text);
+      const hasPreceding = current.length > 0;
+      const projected = currentWidth + (hasPreceding ? sepWidth : 0) + segWidth;
+      if (hasPreceding && projected > contentWidth) {
+        // Wrap: the separator that would precede this segment is dropped.
+        lines.push(current);
+        current = [{ text: seg.text, href: seg.href, width: segWidth }];
+        currentWidth = segWidth;
+      } else {
+        if (hasPreceding) {
+          current.push({ text: separator, width: sepWidth });
+          currentWidth += sepWidth;
+        }
+        current.push({ text: seg.text, href: seg.href, width: segWidth });
+        currentWidth += segWidth;
+      }
+    }
+    if (current.length > 0) lines.push(current);
+
+    for (const line of lines) {
+      cursor.y += t.sizeBody * t.lineHeight;
+      const lineWidth = line.reduce((sum, p) => sum + p.width, 0);
+      let x = align === 'center' ? PAGE_WIDTH / 2 - lineWidth / 2 : t.margin;
+      for (const p of line) {
+        if (p.href) {
+          doc.textWithLink(p.text, x, cursor.y, { url: p.href });
+        } else {
+          doc.text(p.text, x, cursor.y);
+        }
+        x += p.width;
+      }
+    }
   }
 
   private renderSectionHeading(
@@ -425,7 +515,8 @@ export class PdfResumeExporter {
     text: string,
     t: TemplateDefinition,
     cursor: Cursor,
-    contentWidth: number
+    contentWidth: number,
+    url?: string
   ): void {
     if (!text) return;
     doc.setFont(t.pdfFont, 'normal');
@@ -434,7 +525,14 @@ export class PdfResumeExporter {
     const lines = doc.splitTextToSize(text, contentWidth);
     for (let i = 0; i < lines.length; i++) {
       if (i > 0) cursor.y += t.sizeMeta * t.lineHeight;
-      doc.text(lines[i], t.margin, cursor.y);
+      // When the whole meta line IS a single URL (e.g. a project link), make it
+      // clickable; otherwise plain text. (We only linkify when the text didn't
+      // wrap, so the annotation covers exactly the visible URL.)
+      if (url && lines.length === 1) {
+        doc.textWithLink(lines[i], t.margin, cursor.y, { url });
+      } else {
+        doc.text(lines[i], t.margin, cursor.y);
+      }
     }
   }
 
@@ -522,15 +620,24 @@ export class PdfResumeExporter {
 
     doc.setFont(t.pdfFont, 'normal');
     doc.setFontSize(t.sizeBody);
-    const senderLines = [
-      data.personalInfo.email,
-      data.personalInfo.phone,
-      data.personalInfo.location,
-      data.personalInfo.linkedin,
-    ].filter(Boolean) as string[];
-    for (const line of senderLines) {
+    // One field per line; each linkable field is clickable. Same derivation as
+    // the resume header so the two surfaces agree.
+    const senderSegs: ContactSegment[] = [];
+    if (data.personalInfo.email)
+      senderSegs.push({ text: data.personalInfo.email, href: toMailto(data.personalInfo.email) });
+    if (data.personalInfo.phone)
+      senderSegs.push({ text: data.personalInfo.phone, href: toTel(data.personalInfo.phone) });
+    if (data.personalInfo.location)
+      senderSegs.push({ text: data.personalInfo.location });
+    if (data.personalInfo.linkedin)
+      senderSegs.push({ text: data.personalInfo.linkedin, href: normalizeWebUrl(data.personalInfo.linkedin) });
+    for (const seg of senderSegs) {
       cursor.y += t.sizeBody * t.lineHeight;
-      doc.text(line, t.margin, cursor.y);
+      if (seg.href) {
+        doc.textWithLink(seg.text, t.margin, cursor.y, { url: seg.href });
+      } else {
+        doc.text(seg.text, t.margin, cursor.y);
+      }
     }
 
     cursor.y += t.sectionGapBefore;

@@ -5,7 +5,7 @@
 // All variants are single-column, real-text, no icons / no tables — i.e.
 // structurally ATS-safe regardless of which template the user picks.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { toast } from 'sonner';
 import { ResumeData, ToolkitItem, awardDetailText } from '../../domain/entities/Resume';
 import {
@@ -13,6 +13,14 @@ import {
   resolveTemplate,
   TemplateDefinition,
 } from '../templates/TemplateRegistry';
+import {
+  buildContactSegments,
+  normalizeWebUrl,
+  toMailto,
+  toTel,
+  CONTACT_SEPARATOR,
+  type ContactSegment,
+} from '../templates/contactLinks';
 import {
   Download,
   FileText,
@@ -89,6 +97,127 @@ const StatusDot: React.FC<{ status: ToolkitItemStatus }> = ({ status }) => {
 const PAGE_WIDTH_PT = 595.28;
 const PAGE_HEIGHT_PT = 841.89;
 
+// The fixed resume sheet is sized in pt and must stay pixel-identical to the
+// PDF (CLAUDE.md rule 7) — so on narrow screens we do NOT reflow it; we SCALE
+// the whole pt sheet to fit the viewport width via a CSS transform.
+// 1pt = 1/72in, 1 CSS px = 1/96in → pt × 96/72 = CSS px.
+const SHEET_PX_WIDTH = PAGE_WIDTH_PT * (96 / 72); // ≈ 793.7
+
+type ZoomMode = 'fit' | 'actual';
+
+/**
+ * Wraps a fixed-width pt "sheet" and scales it to fit the available width.
+ *  - zoom 'fit'    → scale = min(1, containerWidth / sheetWidth). On desktop
+ *    (container ≥ ~794px) scale clamps to 1, so desktop is visually unchanged.
+ *  - zoom 'actual' → scale = 1 (the pane scrolls horizontally; an explicit
+ *    user choice to view at full size and pan).
+ * The transform is compositor-only (no reflow). An outer box reserves the
+ * SCALED footprint so there's no spurious horizontal scroll and vertical space
+ * is correct even as the document grows multi-page (ResizeObserver re-measures).
+ */
+const ScaledDocument: React.FC<{ zoom: ZoomMode; children: React.ReactNode }> = ({
+  zoom,
+  children,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
+  const [scaledHeight, setScaledHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const sheet = sheetRef.current;
+    if (!container || !sheet) return;
+
+    const recompute = () => {
+      const avail = container.clientWidth;
+      const s = zoom === 'actual' ? 1 : Math.min(1, avail / SHEET_PX_WIDTH);
+      setScale(s);
+      // offsetHeight is the UNSCALED layout height (transform doesn't change it).
+      setScaledHeight(sheet.offsetHeight * s);
+    };
+
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    ro.observe(container); // width changes (viewport/orientation)
+    ro.observe(sheet); // height changes (template switch, edits, page growth)
+    return () => ro.disconnect();
+  }, [zoom]);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`w-full flex ${zoom === 'actual' ? 'justify-start' : 'justify-center'}`}
+    >
+      <div
+        style={{
+          width: SHEET_PX_WIDTH * scale,
+          height: scaledHeight || undefined,
+          // Don't let the flex parent shrink this below its explicit width —
+          // otherwise at 100% (scale 1, box = 794px) it collapses to the pane
+          // width and `overflow: hidden` clips the sheet's right edge instead
+          // of letting the scroll pane pan. In 'fit' mode the box already
+          // equals the container width, so this is a no-op there.
+          flexShrink: 0,
+          // Clip the unscaled layout box so it never leaks into the pane's
+          // horizontal scroll width. The visible scaled sheet fills this box
+          // exactly (transformOrigin top-left + matching scale), so nothing
+          // visible is clipped. At 100% the box matches the sheet 1:1, so the
+          // ancestor pane (overflow-x: auto) provides the horizontal pan.
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          ref={sheetRef}
+          style={{
+            width: SHEET_PX_WIDTH,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Renders text as an external link when an href is present, else plain text.
+ *  `color: inherit` keeps the resume's #000 ink (brand forbids blue/purple);
+ *  affordance is a hover underline. ATS reads the visible URL regardless. */
+const LinkableText: React.FC<{ href?: string; children: React.ReactNode }> = ({
+  href,
+  children,
+}) =>
+  href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="hover:underline focus-visible:underline"
+      style={{ color: 'inherit' }}
+    >
+      {children}
+    </a>
+  ) : (
+    <>{children}</>
+  );
+
+/** The pipe-separated contact line, with linkable segments wrapped in <a>. */
+const ContactSegmentsLine: React.FC<{
+  segments: ContactSegment[];
+  style: React.CSSProperties;
+}> = ({ segments, style }) => (
+  <div style={style}>
+    {segments.map((seg, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <span>{CONTACT_SEPARATOR}</span>}
+        <LinkableText href={seg.href}>{seg.text}</LinkableText>
+      </React.Fragment>
+    ))}
+  </div>
+);
+
 const formatDate = (dateString: string | undefined): string => {
   if (!dateString) return '';
   const s = dateString.toLowerCase();
@@ -147,6 +276,10 @@ export const Preview: React.FC<PreviewProps> = ({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [cooldownText, setCooldownText] = useState<string | null>(null);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
+  // Document zoom for the resume / cover-letter sheet. 'fit' scales the pt
+  // sheet to the viewport width (default — the right call on phones; clamps to
+  // 100% on desktop). 'actual' shows it at full size and lets the pane pan.
+  const [zoom, setZoom] = useState<ZoomMode>('fit');
   // Editing starts ON for a fresh generation (readOnly=false) and OFF for a
   // reopened/saved resume (readOnly=true) — but it's no longer permanent: the
   // user can toggle editing back on at any time, and edits autosave to the
@@ -183,17 +316,12 @@ export const Preview: React.FC<PreviewProps> = ({
 
   const template: TemplateDefinition = resolveTemplate(data.template);
 
-  // Build a plain pipe-separated contact line. Mirrors the PDF exporter
-  // exactly. Avoids Unicode icons (✉ ☎ ⌂ ⌘ ⊕) which can confuse some ATS
-  // parsers and which the PDF deliberately does not include.
-  const contactParts = [
-    data.personalInfo.email,
-    data.personalInfo.phone,
-    data.personalInfo.location,
-    data.personalInfo.linkedin,
-    data.personalInfo.github,
-    data.personalInfo.website,
-  ].filter(Boolean) as string[];
+  // Pipe-separated contact line as ordered segments (email · phone · location
+  // · linkedin · github · website). Mirrors the PDF/Word exporters exactly via
+  // the shared helper. Linkable segments render as <a>; the VISIBLE text stays
+  // the full URL/address so ATS parsers still read it. Avoids Unicode icons
+  // (✉ ☎ ⌂) which can confuse some ATS parsers.
+  const contactSegments = buildContactSegments(data.personalInfo);
 
   // Wrapper sheet — A4 in pt. Padding = template.margin pt on all sides.
   const sheetStyle: React.CSSProperties = {
@@ -379,8 +507,8 @@ export const Preview: React.FC<PreviewProps> = ({
           placeholder="YOUR NAME"
           readOnly={isReadOnly}
         />
-        {contactParts.length > 0 && (
-          <div style={contactLineStyle}>{contactParts.join('  |  ')}</div>
+        {contactSegments.length > 0 && (
+          <ContactSegmentsLine segments={contactSegments} style={contactLineStyle} />
         )}
       </header>
 
@@ -494,7 +622,9 @@ export const Preview: React.FC<PreviewProps> = ({
               </div>
               {project.link && (
                 <div style={{ ...italicLineStyle, fontStyle: 'normal' }}>
-                  {project.link}
+                  <LinkableText href={normalizeWebUrl(project.link)}>
+                    {project.link}
+                  </LinkableText>
                 </div>
               )}
               {project.refinedBullets && project.refinedBullets.length > 0 ? (
@@ -640,7 +770,13 @@ export const Preview: React.FC<PreviewProps> = ({
               <div key={pub.id} style={bodyTextStyle}>
                 {pub.title}
                 {pub.publisher ? `, ${pub.publisher}` : ''}, {pub.date}
-                {pub.link ? ` [${pub.link}]` : ''}
+                {pub.link ? (
+                  <>
+                    {' ['}
+                    <LinkableText href={normalizeWebUrl(pub.link)}>{pub.link}</LinkableText>
+                    {']'}
+                  </>
+                ) : ''}
               </div>
             ))}
           </section>
@@ -704,7 +840,13 @@ export const Preview: React.FC<PreviewProps> = ({
                   {[ref.position, ref.organization].filter(Boolean).join(', ')}
                 </div>
                 <div>
-                  {[ref.email, ref.phone].filter(Boolean).join(' · ')}
+                  {ref.email && (
+                    <LinkableText href={toMailto(ref.email)}>{ref.email}</LinkableText>
+                  )}
+                  {ref.email && ref.phone && ' · '}
+                  {ref.phone && (
+                    <LinkableText href={toTel(ref.phone)}>{ref.phone}</LinkableText>
+                  )}
                 </div>
                 {ref.relationship && <div>{ref.relationship}</div>}
               </div>
@@ -734,10 +876,28 @@ export const Preview: React.FC<PreviewProps> = ({
           {data.personalInfo.fullName}
         </div>
         <div style={{ fontSize: `${template.sizeBody}pt`, marginTop: '2pt' }}>
-          {data.personalInfo.email && <div>{data.personalInfo.email}</div>}
-          {data.personalInfo.phone && <div>{data.personalInfo.phone}</div>}
+          {data.personalInfo.email && (
+            <div>
+              <LinkableText href={toMailto(data.personalInfo.email)}>
+                {data.personalInfo.email}
+              </LinkableText>
+            </div>
+          )}
+          {data.personalInfo.phone && (
+            <div>
+              <LinkableText href={toTel(data.personalInfo.phone)}>
+                {data.personalInfo.phone}
+              </LinkableText>
+            </div>
+          )}
           {data.personalInfo.location && <div>{data.personalInfo.location}</div>}
-          {data.personalInfo.linkedin && <div>{data.personalInfo.linkedin}</div>}
+          {data.personalInfo.linkedin && (
+            <div>
+              <LinkableText href={normalizeWebUrl(data.personalInfo.linkedin)}>
+                {data.personalInfo.linkedin}
+              </LinkableText>
+            </div>
+          )}
         </div>
       </div>
 
@@ -813,7 +973,7 @@ export const Preview: React.FC<PreviewProps> = ({
   // ────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-screen bg-charcoal-50 overflow-hidden">
+    <div className="flex flex-col h-dvh bg-charcoal-50 overflow-hidden">
       {/* Top Navbar */}
       <header className="sticky top-0 z-10 flex flex-col md:flex-row items-start md:items-center justify-between px-4 md:px-6 py-4 bg-white border-b border-charcoal-200 shadow-sm shrink-0 gap-4">
         <div className="flex items-center justify-between w-full md:w-auto md:justify-start gap-4 md:gap-6">
@@ -842,7 +1002,7 @@ export const Preview: React.FC<PreviewProps> = ({
             <button
               type="button"
               onClick={() => setEditModeActive(v => !v)}
-              className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-md border shadow-sm transition-colors ${
+              className={`flex items-center gap-2 px-3.5 min-h-11 text-sm font-semibold rounded-md border shadow-sm transition-colors ${
                 editModeActive
                   ? 'bg-accent-400 border-accent-500 text-brand-900 hover:bg-accent-500'
                   : 'bg-white border-charcoal-300 text-charcoal-600 hover:bg-charcoal-50'
@@ -869,7 +1029,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 }
               }}
               disabled={!canRegenerate || isRegenerating}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-md border shadow-sm transition-colors disabled:opacity-50 bg-white border-brand-200 text-brand-700 hover:bg-brand-50"
+              className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold rounded-md border shadow-sm transition-colors disabled:opacity-50 bg-white border-brand-200 text-brand-700 hover:bg-brand-50"
               title={cooldownText || t('preview.regenerateLockedTitle')}
             >
               {isRegenerating ? (
@@ -885,6 +1045,39 @@ export const Preview: React.FC<PreviewProps> = ({
 
           {(activeTab === 'resume' || activeTab === 'coverLetter') && (
             <>
+              {/* Document zoom — Fit (scale to width) vs 100% (pan). Most
+                  useful on phones; on desktop 'fit' already renders at 100%. */}
+              <div
+                role="group"
+                aria-label={t('preview.zoomLabel')}
+                className="flex items-center rounded-md border border-charcoal-300 overflow-hidden shrink-0 self-stretch"
+              >
+                <button
+                  type="button"
+                  onClick={() => setZoom('fit')}
+                  aria-pressed={zoom === 'fit'}
+                  className={`px-3 min-h-11 text-sm font-semibold transition-colors ${
+                    zoom === 'fit'
+                      ? 'bg-brand-700 text-charcoal-50'
+                      : 'bg-white text-charcoal-600 hover:bg-charcoal-50'
+                  }`}
+                >
+                  {t('preview.zoomFit')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setZoom('actual')}
+                  aria-pressed={zoom === 'actual'}
+                  className={`px-3 min-h-11 text-sm font-semibold border-l border-charcoal-300 transition-colors ${
+                    zoom === 'actual'
+                      ? 'bg-brand-700 text-charcoal-50'
+                      : 'bg-white text-charcoal-600 hover:bg-charcoal-50'
+                  }`}
+                >
+                  {t('preview.zoomActual')}
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={
@@ -895,7 +1088,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   (activeTab === 'coverLetter' && (!onExportCoverLetter || getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')) ||
                   (activeTab !== 'resume' && activeTab !== 'coverLetter')
                 }
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-md hover:border-brand-700 shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-md hover:border-brand-700 shadow-sm transition-colors disabled:opacity-50"
               >
                 <FileText size={16} />
                 {t('preview.downloadWord')}
@@ -905,7 +1098,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 type="button"
                 onClick={handlePDFExport}
                 disabled={isPdfGenerating || (activeTab === 'coverLetter' && getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-md hover:bg-brand-800 shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-md hover:bg-brand-800 shadow-sm transition-colors disabled:opacity-50"
               >
                 {isPdfGenerating ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -1103,14 +1296,14 @@ export const Preview: React.FC<PreviewProps> = ({
         {/* Main Content Area */}
         <main className="flex-1 bg-charcoal-50 overflow-auto relative">
           {activeTab === 'resume' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0">
-              {resumeContent}
+            <div className="p-4 md:py-12">
+              <ScaledDocument zoom={zoom}>{resumeContent}</ScaledDocument>
             </div>
           )}
           {activeTab === 'coverLetter' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0">
+            <div className="p-4 md:py-12">
               {getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) === 'success' ? (
-                coverLetterContent
+                <ScaledDocument zoom={zoom}>{coverLetterContent}</ScaledDocument>
               ) : (
                 <ToolkitStatusCard
                   icon={FileCheck}
@@ -1126,7 +1319,7 @@ export const Preview: React.FC<PreviewProps> = ({
             </div>
           )}
           {activeTab === 'outreachEmail' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
+            <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'outreachEmail', regeneratingItem, toolkitPending) === 'success' ? (
                 <OutreachEmailViewer email={data.toolkit!.outreachEmail!} />
               ) : (
@@ -1144,7 +1337,7 @@ export const Preview: React.FC<PreviewProps> = ({
             </div>
           )}
           {activeTab === 'linkedInMessage' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
+            <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'linkedInMessage', regeneratingItem, toolkitPending) === 'success' ? (
                 <LinkedInMessageViewer message={data.toolkit!.linkedInMessage!} />
               ) : (
@@ -1162,7 +1355,7 @@ export const Preview: React.FC<PreviewProps> = ({
             </div>
           )}
           {activeTab === 'interviewPrep' && (
-            <div className="p-4 md:py-12 flex justify-center min-w-max md:min-w-0 w-full">
+            <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending) === 'success' ? (
                 <InterviewPrepViewer questions={data.toolkit!.interviewQuestions!} />
               ) : (
