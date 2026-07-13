@@ -174,11 +174,10 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                     <div className="max-w-3xl mx-auto text-center">
                         <Eyebrow className="mb-5">{t('landing.heroEyebrow')}</Eyebrow>
                         <h1 className="font-display text-[clamp(2rem,6.5vw,4.5rem)] font-semibold leading-[1.08] sm:leading-[1.04] text-brand-700 mb-6 text-balance">
-                            {t('landing.heroTitleLine1')}
-                            <br className="hidden sm:block" />{' '}
-                            <span className="italic text-accent-500">{t('landing.heroTitleAccent')}</span> {t('landing.heroTitleLine2')}
+                            {t('landing.heroTitlePrefix')}{' '}
+                            <span className="italic text-accent-500">{t('landing.heroTitleAccent')}</span>{t('landing.heroTitleSuffix')}
                         </h1>
-                        <p className="text-[17px] sm:text-xl text-brand-500 leading-relaxed max-w-2xl mx-auto mb-8">
+                        <p className="text-[17px] sm:text-xl text-brand-500 leading-relaxed max-w-2xl mx-auto mb-8 text-pretty">
                             {t('landing.heroSubtitle')}
                         </p>
 

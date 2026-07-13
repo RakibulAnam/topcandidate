@@ -916,10 +916,10 @@ export const en = {
 
     // ── Hero (centered) ──────────────────────────────────────────────────
     heroEyebrow: 'Built for Bangladesh · Pay with bKash',
-    heroTitleLine1: 'One job post in.',
-    heroTitleAccent: 'A complete application',
-    heroTitleLine2: 'out.',
-    heroSubtitle: 'Paste any job description and TOP CANDIDATE writes your tailored resume, cover letter, recruiter email, LinkedIn note, and interview prep — ATS-ready English, with answers you can rehearse in বাংলা.',
+    heroTitlePrefix: 'Become the candidate recruiters',
+    heroTitleAccent: "can't ignore",
+    heroTitleSuffix: '.',
+    heroSubtitle: "Every application is tailored to the exact job you're applying for — giving you an ATS-ready resume, personalized cover letter, recruiter outreach, LinkedIn message, and interview preparation with বাংলা guidance.",
     heroCtaPrimary: 'Start free',
     heroCtaSecondary: 'See a real example',
     trustFree: 'First resume free',
