@@ -80,9 +80,9 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | Auth (email + password, **Google OAuth**) | `src/presentation/LoginScreen.tsx`, `src/presentation/auth/ContinueWithGoogleButton.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth; Google via `signInWithGoogle` PKCE redirect — requires the Supabase Google provider configured) |
 | Profile setup (master profile) | `src/presentation/ProfileSetupScreen.tsx` | shipped — one-time profile capture used to seed future resumes |
 | Profile edit | `src/presentation/ProfileScreen.tsx` | shipped — view/edit saved master profile sections |
-| Dashboard area — Home, All Toolkits, Purchase History (one shared shell) | `src/presentation/DashboardScreen.tsx` (Home), `ApplicationsScreen.tsx`, `PurchaseHistoryScreen.tsx`, `src/presentation/components/dashboard/{DashboardShell,ToolkitCard,CommandPalette}.tsx` | shipped — redesigned. **Home** = dated welcome hero + a dark inline "Start a new application" card (Company/Title/JD captured here → `App.handleStartFromDashboard` prefills from profile and enters the builder just past Target Job), Master Resume banner, 6 recent toolkits, credits + help rows. **Routes** `/applications` + `/purchases` (`useBrowserNav`). **Global ⌘K** command palette over toolkits. `DashboardShell` owns the sticky top bar (Home/Applications/Master Resume nav + ⌘K search + credits pill + language + account menu), footer, and the shared credits / master-resume / palette / `PurchaseModal` state via `useDashboardShell()`. Uses the scoped dashboard gradient exception (§10). |
+| Dashboard area — Home, All Toolkits, Purchase History (one shared shell) | `src/presentation/DashboardScreen.tsx` (Home), `ApplicationsScreen.tsx`, `PurchaseHistoryScreen.tsx`, `src/presentation/components/dashboard/{DashboardShell,ToolkitCard,CommandPalette}.tsx` | shipped — redesigned. **Home** = dated welcome hero + a dark inline "Start a new application" card (Company/Title/JD captured here → routes to the **Summary screen** `/new`), Master Resume banner, 6 recent toolkits, credits + help rows. **Routes** `/applications` + `/purchases` (`useBrowserNav`). **Global ⌘K** command palette over toolkits. `DashboardShell` owns the sticky top bar (Home/Applications/Master Resume nav + ⌘K search + credits pill + language + account menu), footer, and the shared credits / master-resume / palette / `PurchaseModal` state via `useDashboardShell()`. Uses the scoped dashboard gradient exception (§10). |
 | Internationalisation (en + bn) | `src/presentation/i18n/` — `LocaleContext.tsx`, `LanguageToggle.tsx`, `locales/en.ts`, `locales/bn.ts` | shipped — full UI in English and Bengali; AI output stays English |
-| Resume builder (multi-step form) | `src/presentation/BuilderScreen.tsx` | shipped |
+| New-application flow | `src/presentation/SummaryScreen.tsx` (`/new`) → `src/presentation/BuilderScreen.tsx` | shipped — **the 7-step wizard is retired**. Dashboard start card → **Summary** (pick sections → `visibleSections`; greyed "+ Add" for sections not in the profile) → `BuilderScreen` in `autoGenerate` mode fires the 2-call generation on mount and renders only **Generating → Preview** (or error + retry). Opening an existing resume → Preview directly. |
 | Resume preview + templates | `src/presentation/components/Preview.tsx`, `src/presentation/templates/TemplateRegistry.ts` | shipped (4 ATS-safe templates). **Navigation:** a single artifact nav (Resume · Cover Letter · Outreach · LinkedIn · Interview) — desktop = left sidebar, mobile = a horizontal pill rail under a slim app bar. The **template picker is a quiet, collapsible control** (desktop = a disclosure nested under the active Resume tab; mobile = a bottom sheet opened from the action dock) — NOT the front-and-center grid it used to be. **Mobile chrome:** slim app bar (back · title · `⋮` overflow for Edit/Regenerate/Word) + a bottom action dock (Template · Fit/100% · Download PDF) in the thumb zone; the dock shows only on the Resume/Cover-Letter tabs. The Fit/100% zoom is mobile-only (on desktop `fit` already renders at 100%). **Document:** the fixed-width pt sheet is wrapped in `ScaledDocument` — a `transform: scale()` fit-to-width view driven by `ResizeObserver`; the pt sheet itself is untouched (rule 7 — still PDF-identical). Contact line + project/publication/reference links render as real hyperlinks via the shared `templates/contactLinks.ts` (also used by both exporters); visible text stays the full URL for ATS. |
 | Cover letter generation + viewer | `src/infrastructure/ai/GeminiCoverLetterGenerator.ts`, viewer inside `Preview.tsx` | shipped |
 | **Outreach email** generation + viewer | `src/infrastructure/ai/GeminiOutreachEmailGenerator.ts`, `src/presentation/components/Builder/ToolkitViewers.tsx` | shipped |
@@ -311,8 +311,8 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
 }
 ```
 
-**AppStep enum** (`src/domain/entities/AppStep.ts`) drives the builder's multi-step form.
-**Top-level screen routing** is driven by `useBrowserNav` (`src/presentation/hooks/useBrowserNav.ts`) — each transition pushes a `NavState` entry onto `window.history`, and the hook listens for `popstate` so browser back/forward buttons restore the previous screen. Use `navigate({ screen: 'LANDING' | 'LOGIN' | 'DASHBOARD' | 'PROFILE' | 'PROFILE_SETUP' | 'BUILDER' })` for every transition. Use `{ replace: true }` on auth-driven redirects (sign-in / sign-out / profile-setup → dashboard) so the back button doesn't bounce the user back through the auth flow.
+**AppStep enum** (`src/domain/entities/AppStep.ts`) still exists, but since the wizard was retired the tailored flow only uses `PREVIEW` (post-generation) — the other steps are legacy. `ProfileSetupScreen` has its own separate wizard.
+**Top-level screen routing** is driven by `useBrowserNav` (`src/presentation/hooks/useBrowserNav.ts`) — each transition pushes a `NavState` entry onto `window.history`, and the hook listens for `popstate` so browser back/forward buttons restore the previous screen. Use `navigate({ screen: 'LANDING' | 'LOGIN' | 'DASHBOARD' | 'APPLICATIONS' | 'PURCHASES' | 'PROFILE' | 'PROFILE_SETUP' | 'SUMMARY' | 'BUILDER' })` for every transition. Use `{ replace: true }` on auth-driven redirects (sign-in / sign-out / profile-setup → dashboard) so the back button doesn't bounce the user back through the auth flow.
 
 ---
 
@@ -324,19 +324,18 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
  User signs in ──► profileRepository.isProfileComplete() ──► ProfileSetupScreen (if incomplete)
                                                           └► DashboardScreen (if complete)
 
- DashboardScreen ──► "New Application" ──► ResumeSourceDialog
-                                          ├── "Use my profile" ──► prefill ResumeData from profileRepository
-                                          └── "Start fresh"    ──► empty ResumeData
-                  ──► (credits bar above the action cards) ──► PurchaseModal (bKash checkout) ──► /api/purchase (records pending; match-on-submit grants instantly if the bKash SMS already arrived — modal then shows the confirmed overlay immediately)
-                  ──► VerifyingPurchasePill tracks the row via Supabase Realtime (sub-second) + 20s fallback poll (no time cap)
+ DashboardScreen (Home) ──► dark "Start a new application" card: user pastes Company / Job Title / JD ──► SUMMARY
+ SummaryScreen (/new) ──► tick which profile sections to include (→ visibleSections); sections NOT in the
+                          profile show greyed "+ Add" (currently links to the Profile screen) ──► "Generate my application"
+                  ──► (credits pill in the top bar) ──► PurchaseModal (bKash checkout) ──► /api/purchase (records pending; match-on-submit grants instantly if the bKash SMS already arrived)
+                  ──► VerifyingPurchasePill tracks the row via Supabase Realtime + 20s fallback poll (no time cap)
 
- BuilderScreen (multi-step form, driven by AppStep + getVisibleSteps())
-   ── USER_TYPE  ── SECTIONS   ── TARGET_JOB    ── PERSONAL_INFO
-   ── EXPERIENCE ── PROJECTS   ── EDUCATION     ── SKILLS
-   ── EXTRACURRICULARS ── AWARDS ── CERTIFICATIONS ── AFFILIATIONS ── PUBLICATIONS
-   ── LANGUAGES ── REFERENCES   (BD-aware additions; toggle in SECTIONS step)
+ App.handleGenerateFromSummary ──► prefill ResumeData from profileRepository + apply the chosen visibleSections
+   + the pasted targetJob ──► BuilderScreen(autoGenerate). The old 7-step wizard is RETIRED: generation fires
+   on mount and the screen shows only a Generating state → Preview (or an error + retry). Opening an existing
+   resume goes straight to Preview. The profile is the single source of truth (no divergent pre-gen copy).
 
- Final step → handleGenerate() → resumeService.optimizeResume(data):
+ autoGenerate → handleGenerate() → resumeService.optimizeResume(data):
    0a. Client-side credit pre-check. If the locally-cached `toolkit_credits` is 0,
        open PurchaseModal and queue an auto-resume after success. Server still
        enforces the real check; this just avoids an obviously wasted round-trip.
