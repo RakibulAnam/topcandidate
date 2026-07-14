@@ -39,8 +39,8 @@ export const useDashboardShell = (): ShellCtx => {
 
 const Wordmark = () => (
   <div className="flex items-baseline gap-1 select-none">
-    <span className="font-display text-lg font-semibold text-brand-700">TOP</span>
-    <span className="font-display text-lg font-semibold text-accent-500">CANDIDATE</span>
+    <span className="font-display text-base font-semibold text-brand-700 sm:text-lg">TOP</span>
+    <span className="font-display text-base font-semibold text-accent-500 sm:text-lg">CANDIDATE</span>
   </div>
 );
 
@@ -172,6 +172,7 @@ export const DashboardShell: React.FC<Props> = ({
             <VerifyingPurchasePill onResubmit={openPurchase} onCredited={() => { void refreshCredits(); }} />
             <CreditsBadge credits={credits} onBuy={openPurchase} />
             <div className="hidden sm:block"><LanguageToggle /></div>
+            <div className="sm:hidden"><LanguageToggle variant="compact" /></div>
 
             {/* Account */}
             <div className="relative shrink-0">
@@ -190,9 +191,6 @@ export const DashboardShell: React.FC<Props> = ({
                     <div className="border-b border-charcoal-100 px-4 py-3">
                       <p className="text-xs text-charcoal-500">{t('dashboard.signedInAs')}</p>
                       <p className="truncate text-sm font-medium text-brand-700">{user?.email}</p>
-                    </div>
-                    <div className="border-b border-charcoal-100 px-4 py-2.5 sm:hidden">
-                      <LanguageToggle />
                     </div>
                     <button
                       type="button"

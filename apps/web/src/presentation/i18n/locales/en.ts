@@ -972,6 +972,7 @@ export const en = {
     search: {
       placeholder: 'Search your toolkits by company or role…',
       esc: 'ESC',
+      close: 'Close search',
       countAll: 'All {total} toolkits',
       countFiltered: '{n} of {total} toolkits',
       emptyTitle: 'Nothing for “{query}” yet',

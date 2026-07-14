@@ -958,6 +958,7 @@ export const bn: Dictionary = {
     search: {
       placeholder: 'কোম্পানি বা রোল দিয়ে টুলকিট খুঁজুন…',
       esc: 'ESC',
+      close: 'সার্চ বন্ধ করুন',
       countAll: 'সব {total}টি টুলকিট',
       countFiltered: '{total}টির মধ্যে {n}টি টুলকিট',
       emptyTitle: '“{query}” এর জন্য এখনো কিছু নেই',
