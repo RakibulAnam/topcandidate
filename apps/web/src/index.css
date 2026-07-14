@@ -57,9 +57,21 @@
   --color-charcoal-900: #0D0C09;
 
   /* Fonts — `font-sans`, `font-display`, `font-serif` utilities. */
-  --font-sans: 'Inter', 'Hind Siliguri', ui-sans-serif, system-ui, sans-serif;
-  --font-display: 'Fraunces', 'Tiro Bangla', Georgia, serif;
+  --font-sans: 'Instrument Sans', 'Hind Siliguri', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Source Serif 4', 'Tiro Bangla', Georgia, serif;
   --font-serif: 'Merriweather', Georgia, serif;
+
+  /* ── Dashboard dark CTA card (scoped) — inset surfaces on the #1A1812 hero
+     card. See the scoped gradient/dark-surface exception in CLAUDE.md rule 3. */
+  --color-cta-surface: #23201A;
+  --color-cta-border: #3A362C;
+}
+
+/* Hero CTA card "glint" — a slow diagonal sheen sliding across the dark card.
+   Part of the documented dashboard gradient exception (CLAUDE.md rule 3). */
+@keyframes glintMove {
+  0% { background-position: 200% 50%; }
+  100% { background-position: -200% 50%; }
 }
 
 /* ── Base typography ─────────────────────────────────────────────────────── */
@@ -173,7 +185,7 @@ body {
 .font-display {
   font-family: var(--font-display);
   font-optical-sizing: auto;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
 .font-serif {
@@ -184,11 +196,11 @@ body {
  * English digits / Latin words inside Bengali strings still fall back to Inter.
  */
 html[data-locale="bn"] body {
-  font-family: 'Hind Siliguri', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Hind Siliguri', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
 }
 
 html[data-locale="bn"] .font-display {
-  font-family: 'Tiro Bangla', 'Fraunces', Georgia, serif;
+  font-family: 'Tiro Bangla', 'Source Serif 4', Georgia, serif;
   letter-spacing: 0;
 }
 

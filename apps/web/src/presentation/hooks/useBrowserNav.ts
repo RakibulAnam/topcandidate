@@ -4,6 +4,8 @@ export type NavScreen =
   | 'LANDING'
   | 'LOGIN'
   | 'DASHBOARD'
+  | 'APPLICATIONS'
+  | 'PURCHASES'
   | 'PROFILE'
   | 'PROFILE_SETUP'
   | 'BUILDER'
@@ -18,6 +20,8 @@ const SCREEN_PATHS: Record<NavScreen, string> = {
   LANDING: '/',
   LOGIN: '/login',
   DASHBOARD: '/dashboard',
+  APPLICATIONS: '/applications',
+  PURCHASES: '/purchases',
   PROFILE: '/profile',
   PROFILE_SETUP: '/profile-setup',
   BUILDER: '/builder',

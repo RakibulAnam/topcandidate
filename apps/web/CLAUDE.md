@@ -9,7 +9,7 @@
 
 2. **No new documentation files** (`*.md`) unless the user explicitly asks. Update the existing ones (AGENTS.md, CLAUDE.md, README.md, DEPLOYING.md) instead.
 
-3. **Brand constraints are non-negotiable.** No gradients. No generic blue / indigo / purple palettes. Accent color is Saffron (`accent-*`); primary ink is `brand-*`; neutrals are `charcoal-*` (warm stone). The wordmark is two words — "TOP" in `brand-700`, "CANDIDATE" in `accent-500`. Never a square "T" badge.
+3. **Brand constraints are non-negotiable.** No gradients. No generic blue / indigo / purple palettes. Accent color is Saffron (`accent-*`); primary ink is `brand-*`; neutrals are `charcoal-*` (warm stone). The wordmark is two words — "TOP" in `brand-700`, "CANDIDATE" in `accent-500`. Never a square "T" badge. **Two scoped exceptions only** (do not extend either elsewhere): bKash magenta `#E2136E` inside `PurchaseModal.tsx`, and the **2026 dashboard redesign** hero/master gradients + 5 muted per-artifact toolkit-chip tints (incl. blue/purple) on the dark "Start a new application" card — both documented in `AGENTS.md` §10. Fonts are `Source Serif 4` (display) + `Instrument Sans` (UI), swapped in with that redesign.
 
 4. **Respect Clean Architecture layering.** Domain depends on nothing. Infrastructure implements domain interfaces. Presentation goes through `ResumeService`, never direct-imports a Gemini class. If you think you need to break this, stop and ask.
 
@@ -57,7 +57,7 @@ npm run typecheck:api  # run the api/ type-check alone (fast feedback while edit
 node_modules/.bin/tsx -e "await import('./api/_lib/aiFactory.ts'); console.log('ok')"
 ```
 
-For UI changes: start `npm run dev`, exercise the flow yourself, and report what you tested. If you couldn't test the UI from this environment, say so explicitly — don't claim success.
+For UI changes: start `npm run dev`, exercise the flow yourself, and report what you tested. If you couldn't test the UI from this environment, say so explicitly — don't claim success. **A shared test account for logging in (pre-seeded with toolkits/purchases/credits) lives in [`TEST_ACCOUNT.md`](TEST_ACCOUNT.md).**
 
 ## Skills
 

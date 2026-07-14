@@ -13,7 +13,9 @@ import { Navbar } from './components/Layout/Navbar';
 import { DashboardScreen } from './DashboardScreen';
 import { ProfileScreen } from './ProfileScreen';
 import { ProfileSetupScreen } from './ProfileSetupScreen';
-import { ResumeSourceDialog } from './components/ResumeSourceDialog';
+import { DashboardShell } from './components/dashboard/DashboardShell';
+import { ApplicationsScreen } from './ApplicationsScreen';
+import { PurchaseHistoryScreen } from './PurchaseHistoryScreen';
 import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
@@ -54,7 +56,7 @@ const DEFAULT_SECTIONS = [
 ];
 
 const UNAUTHED_SCREENS: NavScreen[] = ['LANDING', 'LOGIN', 'LEGAL_TERMS'];
-const AUTHED_SCREENS: NavScreen[] = ['DASHBOARD', 'PROFILE', 'PROFILE_SETUP', 'BUILDER'];
+const AUTHED_SCREENS: NavScreen[] = ['DASHBOARD', 'APPLICATIONS', 'PURCHASES', 'PROFILE', 'PROFILE_SETUP', 'BUILDER'];
 
 // Recovery detection. The password-reset link returns to `?auth=recovery`
 // (set by requestPasswordReset). client.ts captures that marker at module load
@@ -67,7 +69,6 @@ const AppContent = () => {
   const { user, loading } = useAuth();
   const t = useT();
   const [checkingProfile, setCheckingProfile] = useState(true);
-  const [showSourceDialog, setShowSourceDialog] = useState(false);
 
   const [resumeService, setResumeService] = useState<ResumeService | null>(null);
 
@@ -254,7 +255,7 @@ const AppContent = () => {
     );
   }
 
-  const prefillFromProfile = async () => {
+  const prefillFromProfile = async (opts?: { targetJob?: ResumeData['targetJob']; step?: AppStep }) => {
     if (!user) return;
     try {
       const [profile, exps, projs, skls, edus, extras, awds, certs, affils, pubs, langs, refs] = await Promise.all([
@@ -291,6 +292,7 @@ const AppContent = () => {
       setBuilderData({
         ...INITIAL_DATA,
         userType: uType,
+        targetJob: opts?.targetJob ?? INITIAL_DATA.targetJob,
         personalInfo: profile || INITIAL_DATA.personalInfo,
         experience: exps,
         projects: projs,
@@ -306,28 +308,21 @@ const AppContent = () => {
         visibleSections: uniqueVisible
       });
 
-      setBuilderStep(AppStep.SECTIONS);
+      setBuilderStep(opts?.step ?? AppStep.SECTIONS);
     } catch (error) {
       console.error('Error loading profile data:', error);
       toast.error(t('common.profileLoadFailed'));
     }
   };
 
-  const handleChooseProfile = async () => {
-    setShowSourceDialog(false);
-    await prefillFromProfile();
+  // Dashboard fast-path: the JD / company / title are captured on the
+  // dashboard's "Start a new application" card. Prefill everything else from
+  // the profile and drop the user into the builder just past the Target Job
+  // step (which is now pre-filled). The credit gate + 2-call generation hot
+  // path in BuilderScreen are unchanged.
+  const handleStartFromDashboard = async (targetJob: ResumeData['targetJob']) => {
     setCurrentResumeId(null);
-    navigate({ screen: 'BUILDER' });
-  };
-
-  const handleChooseFresh = () => {
-    setShowSourceDialog(false);
-    setBuilderData({
-      ...INITIAL_DATA,
-      visibleSections: DEFAULT_SECTIONS
-    });
-    setBuilderStep(AppStep.SECTIONS);
-    setCurrentResumeId(null);
+    await prefillFromProfile({ targetJob, step: AppStep.PERSONAL_INFO });
     navigate({ screen: 'BUILDER' });
   };
 
@@ -380,24 +375,35 @@ const AppContent = () => {
     );
   }
 
-  // Default: DASHBOARD (authenticated fallback)
+  // Dashboard area — Home / All Toolkits / Purchase History share ONE shell so
+  // credits, the master resume, the ⌘K palette, and the PurchaseModal persist
+  // across navigation between them.
   return (
-    <>
-      <DashboardScreen
-        onCreateNew={() => setShowSourceDialog(true)}
-        onEditProfile={() => navigate({ screen: 'PROFILE' })}
-        onOpenApplication={() => {
-          navigate({ screen: 'BUILDER' });
-        }}
-        onOpenResume={handleOpenResume}
-      />
-      <ResumeSourceDialog
-        isOpen={showSourceDialog}
-        onClose={() => setShowSourceDialog(false)}
-        onChooseProfile={handleChooseProfile}
-        onChooseFresh={handleChooseFresh}
-      />
-    </>
+    <DashboardShell
+      active={screen === 'APPLICATIONS' ? 'applications' : screen === 'PURCHASES' ? null : 'home'}
+      onNavigate={(s) => navigate({ screen: s })}
+      onEditProfile={() => navigate({ screen: 'PROFILE' })}
+      onOpenResume={handleOpenResume}
+      onStartNew={() => navigate({ screen: 'DASHBOARD' })}
+      resumeService={resumeService}
+    >
+      {screen === 'APPLICATIONS' ? (
+        <ApplicationsScreen
+          onOpenResume={handleOpenResume}
+          onNewApplication={() => navigate({ screen: 'DASHBOARD' })}
+          onBack={() => navigate({ screen: 'DASHBOARD' })}
+        />
+      ) : screen === 'PURCHASES' ? (
+        <PurchaseHistoryScreen onBack={() => navigate({ screen: 'DASHBOARD' })} />
+      ) : (
+        <DashboardScreen
+          onStartApplication={handleStartFromDashboard}
+          onOpenResume={handleOpenResume}
+          onEditProfile={() => navigate({ screen: 'PROFILE' })}
+          onNavigate={(s) => navigate({ screen: s })}
+        />
+      )}
+    </DashboardShell>
   );
 };
 
