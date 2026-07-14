@@ -945,7 +945,10 @@ export const en = {
     companiesCountMany: '{count} companies so far',
     viewAll: 'View all',
     // ── Redesign: credits + help rows ──
-    creditsOfLeft: 'of {total} left',
+    creditsRemaining: '{n} credits left',
+    creditsValueHint: 'each one builds a full application, tailored to the job',
+    creditsNone: 'No credits left',
+    creditsNoneHint: 'top up to build your next application',
     purchaseHistoryLink: 'purchase history',
     topUp: 'Top up',
     helpTitle: 'Need a hand?',

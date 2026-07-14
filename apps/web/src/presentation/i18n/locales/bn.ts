@@ -931,7 +931,10 @@ export const bn: Dictionary = {
     companiesCountMany: 'এ পর্যন্ত {count}টি কোম্পানি',
     viewAll: 'সব দেখুন',
     // ── Redesign: credits + help rows ──
-    creditsOfLeft: '{total}টির মধ্যে বাকি',
+    creditsRemaining: '{n}টি ক্রেডিট বাকি',
+    creditsValueHint: 'প্রতিটি দিয়ে একটা জবের জন্য পুরো অ্যাপ্লিকেশন তৈরি হয়',
+    creditsNone: 'কোনো ক্রেডিট নেই',
+    creditsNoneHint: 'পরের অ্যাপ্লিকেশন বানাতে টপ আপ করুন',
     purchaseHistoryLink: 'পারচেজ হিস্টরি',
     topUp: 'টপ আপ',
     helpTitle: 'সাহায্য দরকার?',

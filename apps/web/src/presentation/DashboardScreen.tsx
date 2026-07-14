@@ -11,7 +11,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../infrastructure/auth/AuthContext';
-import { createResumeService, purchaseRepository } from '../infrastructure/config/dependencies';
+import { createResumeService } from '../infrastructure/config/dependencies';
 import { ResumeService } from '../application/services/ResumeService';
 import type { ResumeListItem } from '../domain/repositories/IResumeRepository';
 import type { NavScreen } from './hooks/useBrowserNav';
@@ -55,7 +55,6 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
   const [recent, setRecent] = useState<ResumeListItem[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
-  const [creditsBought, setCreditsBought] = useState(0);
   const [buildingMaster, setBuildingMaster] = useState(false);
 
   const firstName = (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0]
@@ -74,10 +73,6 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
     svc.getGeneratedResumesPaginated(user.id, { page: 1, pageSize: RECENT_LIMIT })
       .then(({ items, total }) => { if (!cancelled) { setRecent(items); setRecentTotal(total); } })
       .catch((err) => { if (!cancelled) console.warn('recent toolkits failed', err); });
-    // Total credits ever bought (completed top-ups) → the "of N left" note.
-    purchaseRepository.listMyPurchases(50)
-      .then((ps) => { if (!cancelled) setCreditsBought(ps.filter(p => p.status === 'completed').reduce((s, p) => s + p.creditsGranted, 0)); })
-      .catch(() => { /* non-critical */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
@@ -290,9 +285,11 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
             <span className="h-2 w-2 rounded-full bg-accent-400" />
           </span>
           <span className="min-w-0 flex-1 text-[13.5px]">
-            <strong className="text-brand-700">{credits ?? 0} {t('dashboard.creditsUnit')}</strong>{' '}
+            <strong className="text-brand-700">
+              {(credits ?? 0) > 0 ? t('dashboard.creditsRemaining', { n: credits ?? 0 }) : t('dashboard.creditsNone')}
+            </strong>{' '}
             <span className="text-charcoal-500">
-              {creditsBought > 0 && <>{t('dashboard.creditsOfLeft', { total: creditsBought })} · </>}
+              {(credits ?? 0) > 0 ? t('dashboard.creditsValueHint') : t('dashboard.creditsNoneHint')} ·{' '}
               <a href="#" onClick={(e) => { e.preventDefault(); onNavigate('PURCHASES'); }} className="text-charcoal-500 underline transition-colors hover:text-accent-600">
                 {t('dashboard.purchaseHistoryLink')}
               </a>
