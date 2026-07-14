@@ -131,13 +131,13 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           />
           <div className="relative mb-4 flex items-center gap-2.5">
             <span
-              className="flex h-[22px] w-[22px] items-center justify-center rounded-[7px]"
+              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[7px]"
               style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
             >
               <Sparkles size={12} className="text-[#FFF7EA]" fill="#FFF7EA" />
             </span>
-            <span className="font-display text-[22px] font-semibold text-charcoal-50">{t('dashboard.startTitle')}</span>
-            <span className="ml-auto text-sm font-semibold text-[#A89F8C]">{t('dashboard.startCost')}</span>
+            <span className="font-display text-[19px] font-semibold leading-tight text-charcoal-50 sm:text-[22px]">{t('dashboard.startTitle')}</span>
+            <span className="ml-auto shrink-0 self-start whitespace-nowrap rounded-full border border-cta-border px-2.5 py-1 text-[11.5px] font-semibold text-[#A89F8C]">{t('dashboard.startCost')}</span>
           </div>
 
           <div className="relative flex flex-col gap-3.5">
@@ -165,22 +165,24 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
               placeholder={t('dashboard.startJdPlaceholder')}
               className="min-h-[110px] w-full resize-y rounded-xl border border-cta-border bg-cta-surface px-4 py-3.5 text-[15px] leading-relaxed text-charcoal-50 outline-none placeholder:text-charcoal-400"
             />
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className="text-[12.5px] text-[#8B8574]">{t('dashboard.startYoullGet')}</span>
-              {CHIPS.map((c) => (
-                <span
-                  key={c.key}
-                  className="rounded-full border px-3 py-[5px] text-[12.5px] font-semibold"
-                  style={{ color: c.color, background: c.bg, borderColor: c.border }}
-                >
-                  {t(`dashboard.${c.key}` as any)}
-                </span>
-              ))}
-              <div className="flex-1" />
+            <div className="flex flex-col gap-3.5 sm:flex-row sm:items-center sm:gap-2.5">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                <span className="text-[12.5px] text-[#8B8574]">{t('dashboard.startYoullGet')}</span>
+                {CHIPS.map((c) => (
+                  <span
+                    key={c.key}
+                    className="rounded-full border px-2.5 py-[5px] text-[12px] font-semibold sm:px-3 sm:text-[12.5px]"
+                    style={{ color: c.color, background: c.bg, borderColor: c.border }}
+                  >
+                    {t(`dashboard.${c.key}` as any)}
+                  </span>
+                ))}
+              </div>
+              <div className="hidden flex-1 sm:block" />
               <button
                 type="button"
                 onClick={handleStart}
-                className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-accent-400 px-[26px] py-3 text-[15px] font-bold text-brand-800 transition-all hover:-translate-y-px hover:bg-accent-300"
+                className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-accent-400 px-[26px] py-3.5 text-[15px] font-bold text-brand-800 transition-all hover:-translate-y-px hover:bg-accent-300 sm:w-auto sm:py-3"
               >
                 {t('dashboard.startCta')}
                 <ArrowRight size={16} />
@@ -221,7 +223,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
             <button
               type="button"
               onClick={() => onOpenResume(generalResume.id)}
-              className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800"
+              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 sm:w-auto"
             >
               {t('dashboard.masterOpenCta')}
               <ArrowRight size={14} />
@@ -231,7 +233,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
               type="button"
               onClick={handleBuildMaster}
               disabled={buildingMaster}
-              className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 disabled:opacity-60 sm:w-auto"
             >
               {buildingMaster ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
               {buildingMaster ? t('dashboard.masterBuilding') : t('dashboard.masterBuildCta')}

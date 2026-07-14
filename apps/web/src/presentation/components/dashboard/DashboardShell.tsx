@@ -137,7 +137,7 @@ export const DashboardShell: React.FC<Props> = ({
       <div className="flex min-h-screen flex-col" style={{ background: '#F6F4EE' }}>
         {/* Top bar */}
         <header className="sticky top-0 z-40 border-b border-charcoal-200 bg-[rgba(246,244,238,0.88)] backdrop-blur-[12px]">
-          <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-2 px-[clamp(12px,4vw,32px)] sm:gap-4">
+          <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-1.5 px-[clamp(10px,3vw,32px)] sm:gap-4">
             <a href="#" onClick={(e) => { e.preventDefault(); onNavigate('DASHBOARD'); }} className="shrink-0">
               <Wordmark />
             </a>
@@ -172,7 +172,7 @@ export const DashboardShell: React.FC<Props> = ({
             <VerifyingPurchasePill onResubmit={openPurchase} onCredited={() => { void refreshCredits(); }} />
             <CreditsBadge credits={credits} onBuy={openPurchase} />
             <div className="hidden sm:block"><LanguageToggle /></div>
-            <div className="sm:hidden"><LanguageToggle variant="compact" /></div>
+            <div className="sm:hidden"><LanguageToggle variant="mini" /></div>
 
             {/* Account */}
             <div className="relative shrink-0">
