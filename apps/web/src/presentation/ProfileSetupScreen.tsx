@@ -665,6 +665,10 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent-600">
                             {t('profileSetup.introEyebrow')}
                         </p>
+                        {/* Let the user read this primer in either language. */}
+                        <div className="ml-auto shrink-0">
+                            <LanguageToggle variant="compact" />
+                        </div>
                     </div>
                     <h1 className="mb-5 font-display text-[clamp(40px,10vw,64px)] font-semibold leading-none text-brand-700">
                         {t('profileSetup.introTitle')}
