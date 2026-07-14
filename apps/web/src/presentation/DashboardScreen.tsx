@@ -1,662 +1,328 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-    Plus,
-    FileText,
-    User,
-    MoreVertical,
-    Search,
-    Loader2,
-    Trash,
-    ArrowRight,
-    LogOut,
-    CheckCircle2,
-    Sparkles,
-    Briefcase,
-    ChevronLeft,
-    ChevronRight,
-} from 'lucide-react';
-import { useAuth } from '../infrastructure/auth/AuthContext';
-import { createResumeService, applicationRepository, profileRepository } from '../infrastructure/config/dependencies';
-import { Application } from '../domain/repositories/IApplicationRepository';
-import { ResumeService } from '../application/services/ResumeService';
+// DashboardScreen — the redesigned Home body (the sticky top bar + footer +
+// shared credits/master/purchase state live in <DashboardShell>, which wraps
+// this). Sections top→bottom: dated welcome hero, the dark inline
+// "Start a new application" card, the Master Resume banner, a 6-card recent
+// toolkits grid, and the credits + help rows.
+//
+// The start card captures company/title/JD on the dashboard and hands them to
+// App's handleStartFromDashboard, which prefills from the profile and enters
+// the builder past the Target Job step. See App.tsx.
+import React, { useEffect, useRef, useState } from 'react';
+import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy } from 'lucide-react';
 import { toast } from 'sonner';
-import { useT } from './i18n/LocaleContext';
-import { LanguageToggle } from './i18n/LanguageToggle';
-import { PurchaseModal } from './components/PurchaseModal';
-import { PurchaseHistorySection } from './components/PurchaseHistorySection';
-import { HelpContactSection } from './components/HelpContactSection';
-import { CreditsBadge } from './components/CreditsBadge';
-import { VerifyingPurchasePill } from './components/Layout/VerifyingPurchasePill';
-import type { ResumeData } from '../domain/entities';
+import { useAuth } from '../infrastructure/auth/AuthContext';
+import { createResumeService, purchaseRepository } from '../infrastructure/config/dependencies';
+import { ResumeService } from '../application/services/ResumeService';
+import type { ResumeListItem } from '../domain/repositories/IResumeRepository';
+import type { NavScreen } from './hooks/useBrowserNav';
+import { useT, useLocale } from './i18n/LocaleContext';
+import { contactMailto } from './support';
+import { ToolkitCard } from './components/dashboard/ToolkitCard';
+import { useRelativeTime } from './components/dashboard/relativeTime';
+import { useDashboardShell } from './components/dashboard/DashboardShell';
 
 interface Props {
-    onCreateNew: () => void;
-    onEditProfile: () => void;
-    onOpenApplication: (id: string) => void;
-    onOpenResume?: (id: string, data?: ResumeData) => void;
+  onStartApplication: (targetJob: { company: string; title: string; description: string }) => void;
+  onOpenResume: (id: string) => void;
+  onEditProfile: () => void;
+  onNavigate: (screen: NavScreen) => void;
 }
 
-type ResumeListItem = { id: string; title: string; date: string; updatedAt?: string; company?: string };
+// The 5 toolkit artifacts, tinted per the redesign. These muted per-artifact
+// hues (incl. blue/purple) ride the documented dashboard brand exception
+// (apps/web/CLAUDE.md rule 3) — they only ever appear on the dark CTA card.
+const CHIPS = [
+  { key: 'chipResume', color: '#E8A83E', bg: 'rgba(232,150,15,0.14)', border: 'rgba(232,150,15,0.32)' },
+  { key: 'chipCover', color: '#E89A7E', bg: 'rgba(224,120,86,0.14)', border: 'rgba(224,120,86,0.32)' },
+  { key: 'chipEmail', color: '#8CC9A0', bg: 'rgba(95,168,118,0.14)', border: 'rgba(95,168,118,0.32)' },
+  { key: 'chipLinkedin', color: '#9DB8DF', bg: 'rgba(107,140,190,0.16)', border: 'rgba(107,140,190,0.34)' },
+  { key: 'chipInterview', color: '#B7A3D8', bg: 'rgba(150,120,190,0.16)', border: 'rgba(150,120,190,0.34)' },
+] as const;
 
-const Wordmark = () => (
-    <div className="flex items-baseline gap-1.5 select-none">
-        <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
-        <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
-    </div>
-);
+const RECENT_LIMIT = 6;
 
-export const DashboardScreen = ({ onCreateNew, onEditProfile, onOpenApplication, onOpenResume }: Props) => {
-    const { user, signOut } = useAuth();
-    const t = useT();
+export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfile, onNavigate }: Props) => {
+  const { user } = useAuth();
+  const t = useT();
+  const { locale } = useLocale();
+  const rel = useRelativeTime();
+  const { credits, generalResume, setGeneralResume, openPurchase } = useDashboardShell();
 
-    const formatRelative = (iso?: string | null): string | null => {
-        if (!iso) return null;
-        const d = new Date(iso);
-        if (Number.isNaN(d.getTime())) return null;
-        const diffMs = Date.now() - d.getTime();
-        const sec = Math.round(diffMs / 1000);
-        if (sec < 60) return t('dashboard.relativeJustNow');
-        const min = Math.round(sec / 60);
-        if (min < 60) return t('dashboard.relativeMin', { n: min });
-        const hr = Math.round(min / 60);
-        if (hr < 24) return t('dashboard.relativeHr', { n: hr });
-        const days = Math.round(hr / 24);
-        if (days < 7) return t('dashboard.relativeDay', { n: days });
-        return d.toLocaleDateString();
-    };
+  const [company, setCompany] = useState('');
+  const [title, setTitle] = useState('');
+  const [jd, setJd] = useState('');
+  const jdRef = useRef<HTMLTextAreaElement>(null);
 
-    const PAGE_SIZE = 9;
+  const [recent, setRecent] = useState<ResumeListItem[]>([]);
+  const [recentTotal, setRecentTotal] = useState(0);
+  const [creditsBought, setCreditsBought] = useState(0);
+  const [buildingMaster, setBuildingMaster] = useState(false);
 
-    const [applications, setApplications] = useState<Application[]>([]);
-    const [generalResume, setGeneralResume] = useState<ResumeListItem | null>(null);
-    const [tailored, setTailored] = useState<ResumeListItem[]>([]);
-    const [tailoredTotal, setTailoredTotal] = useState(0);
-    const [loading, setLoading] = useState(true);
-    const [tailoredLoading, setTailoredLoading] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [debouncedSearch, setDebouncedSearch] = useState('');
-    const [page, setPage] = useState(1);
-    const [refreshKey, setRefreshKey] = useState(0);
-    const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-    const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-    const [buildingMaster, setBuildingMaster] = useState(false);
-    const [credits, setCredits] = useState<number | null>(null);
-    const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const firstName = (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0]
+    ?? user?.email?.split('@')[0]
+    ?? t('dashboard.greetingFallbackName');
 
-    const refreshCredits = useCallback(async () => {
-        if (!user) return;
-        try {
-            const balance = await profileRepository.getToolkitCredits(user.id);
-            if (balance !== null) setCredits(balance);
-        } catch (err) {
-            console.warn('Could not refresh toolkit credits', err);
-        }
-    }, [user]);
+  const today = new Date().toLocaleDateString(locale === 'bn' ? 'bn-BD' : 'en-US', {
+    weekday: 'long', month: 'long', day: 'numeric',
+  });
 
-    const totalPages = Math.ceil(tailoredTotal / PAGE_SIZE);
-
-    // Debounce search input: reset to page 1 and fire query after 350 ms idle.
-    useEffect(() => {
-        const t = setTimeout(() => {
-            setDebouncedSearch(searchTerm.trim());
-            setPage(1);
-        }, 350);
-        return () => clearTimeout(t);
-    }, [searchTerm]);
-
-    // Load static data once on mount: General Resume, applications, credits.
-    useEffect(() => {
-        if (!user) return;
-        let cancelled = false;
-        setLoading(true);
-        const resumeService = createResumeService();
-        Promise.all([
-            applicationRepository.getApplications(user.id),
-            resumeService.getGeneratedResumes(user.id),
-            profileRepository.getToolkitCredits(user.id).catch(err => {
-                console.warn('Could not load toolkit credits', err);
-                return null;
-            }),
-        ]).then(([apps, allResumes, creditBalance]) => {
-            if (cancelled) return;
-            setApplications(apps);
-            setGeneralResume(allResumes.find(r => r.title === ResumeService.GENERAL_RESUME_TITLE) ?? null);
-            if (creditBalance !== null) setCredits(creditBalance);
-        }).catch(err => {
-            if (!cancelled) console.error(err);
-        }).finally(() => {
-            if (!cancelled) setLoading(false);
-        });
-        return () => { cancelled = true; };
+  // Recent toolkits (6) + total company count.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const svc = createResumeService();
+    svc.getGeneratedResumesPaginated(user.id, { page: 1, pageSize: RECENT_LIMIT })
+      .then(({ items, total }) => { if (!cancelled) { setRecent(items); setRecentTotal(total); } })
+      .catch((err) => { if (!cancelled) console.warn('recent toolkits failed', err); });
+    // Total credits ever bought (completed top-ups) → the "of N left" note.
+    purchaseRepository.listMyPurchases(50)
+      .then((ps) => { if (!cancelled) setCreditsBought(ps.filter(p => p.status === 'completed').reduce((s, p) => s + p.creditsGranted, 0)); })
+      .catch(() => { /* non-critical */ });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.id]);
+  }, [user?.id]);
 
-    // Load the paginated tailored list whenever page, search, or refreshKey changes.
-    useEffect(() => {
-        if (!user) return;
-        let cancelled = false;
-        setTailoredLoading(true);
-        const resumeService = createResumeService();
-        resumeService.getGeneratedResumesPaginated(user.id, {
-            page,
-            pageSize: PAGE_SIZE,
-            search: debouncedSearch || undefined,
-        }).then(({ items, total }) => {
-            if (cancelled) return;
-            setTailored(items);
-            setTailoredTotal(total);
-        }).catch(err => {
-            if (!cancelled) console.error(err);
-        }).finally(() => {
-            if (!cancelled) setTailoredLoading(false);
-        });
-        return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.id, page, debouncedSearch, refreshKey]);
+  const handleStart = () => {
+    if (!jd.trim()) {
+      toast.message(t('dashboard.startNeedJd'));
+      jdRef.current?.focus();
+      return;
+    }
+    onStartApplication({ company: company.trim(), title: title.trim(), description: jd.trim() });
+  };
 
-    const handleDeleteResume = async (id: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!confirm(t('dashboard.confirmDelete'))) return;
-        try {
-            const resumeService = createResumeService();
-            await resumeService.deleteGeneratedResume(id);
-            toast.success(t('dashboard.deleted'));
+  const handleBuildMaster = async () => {
+    if (!user || buildingMaster) return;
+    setBuildingMaster(true);
+    try {
+      const id = await createResumeService().generateGeneralResume(user.id);
+      toast.success(t('dashboard.masterReady'));
+      const now = new Date().toISOString();
+      setGeneralResume({ id, title: ResumeService.GENERAL_RESUME_TITLE, date: now, updatedAt: now });
+      onOpenResume(id);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err?.message || t('dashboard.masterError'));
+      setBuildingMaster(false);
+    }
+  };
 
-            // Recalculate pages after removal: if the current page would become
-            // empty, retreat to the last non-empty page first, then refresh.
-            const newTotal = tailoredTotal - 1;
-            const newTotalPages = Math.max(1, Math.ceil(newTotal / PAGE_SIZE));
-            if (page > newTotalPages) {
-                setPage(newTotalPages); // effect re-runs automatically
-            } else {
-                setRefreshKey(k => k + 1);
-            }
-        } catch (error) {
-            console.error('Failed to delete resume:', error);
-            toast.error(t('dashboard.deleteFailed'));
-        }
-        setActiveMenuId(null);
-    };
+  const masterUpdatedAt = generalResume?.updatedAt ?? generalResume?.date;
 
-    const handleBuildMaster = async () => {
-        if (!user || buildingMaster) return;
-        setBuildingMaster(true);
-        try {
-            const resumeService = createResumeService();
-            const id = await resumeService.generateGeneralResume(user.id);
-            toast.success(t('dashboard.masterReady'));
-            setGeneralResume({
-                id,
-                title: ResumeService.GENERAL_RESUME_TITLE,
-                date: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            });
-            onOpenResume?.(id);
-        } catch (error: any) {
-            console.error(error);
-            toast.error(error?.message || t('dashboard.masterError'));
-            setBuildingMaster(false);
-        }
-    };
+  return (
+    <div className="flex flex-col gap-[clamp(28px,4vw,40px)]">
+      {/* Hero */}
+      <section>
+        <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.08em] text-accent-600">{today}</div>
+        <h1 className="font-display text-[clamp(30px,5.5vw,44px)] font-semibold leading-[1.1] text-brand-700">
+          {t('dashboard.welcomeBack', { name: firstName })}
+        </h1>
+        <p className="mt-2.5 text-base leading-relaxed text-charcoal-500">
+          <strong className="font-semibold text-brand-700">{t('dashboard.heroSubBold')}</strong>
+          {t('dashboard.heroSubRest')}
+        </p>
+      </section>
 
-    const firstName = (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0]
-        ?? user?.email?.split('@')[0]
-        ?? t('dashboard.greetingFallbackName');
-
-    const masterUpdatedAt = generalResume?.updatedAt ?? generalResume?.date;
-
-    // Pagination page-number array: always show first, last, and up to 3 around
-    // current page, with null as an ellipsis sentinel.
-    const pageNumbers = (() => {
-        if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
-        const pages: (number | null)[] = [];
-        const addPage = (n: number) => { if (!pages.includes(n)) pages.push(n); };
-        addPage(1);
-        if (page > 3) pages.push(null);
-        for (let p = Math.max(2, page - 1); p <= Math.min(totalPages - 1, page + 1); p++) addPage(p);
-        if (page < totalPages - 2) pages.push(null);
-        addPage(totalPages);
-        return pages;
-    })();
-
-    return (
-        <div className="min-h-screen bg-paper flex flex-col">
-            {/* Top nav */}
-            <header className="bg-paper/90 backdrop-blur-md border-b border-charcoal-200 sticky top-0 z-30">
-                <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-                    <Wordmark />
-                    <div className="relative flex items-center gap-1.5 sm:gap-2 min-w-0">
-                        <VerifyingPurchasePill onResubmit={() => setPurchaseModalOpen(true)} onCredited={() => { void refreshCredits(); }} />
-                        <CreditsBadge credits={credits} onBuy={() => setPurchaseModalOpen(true)} />
-                        {/* Language toggle lives in the bar on desktop; on phones it
-                            moves into the account menu to keep the row from overflowing. */}
-                        <div className="hidden sm:block"><LanguageToggle /></div>
-                        <button
-                            type="button"
-                            onClick={() => setProfileMenuOpen(v => !v)}
-                            className="inline-flex items-center gap-2 pl-1 pr-2 sm:pr-3 py-1 min-h-11 sm:min-h-0 rounded-full bg-white border border-charcoal-200 hover:border-charcoal-300 transition-colors shrink-0"
-                            aria-label={t('dashboard.accountMenuLabel')}
-                        >
-                            <span className="w-7 h-7 rounded-full bg-brand-700 text-charcoal-50 text-xs font-semibold flex items-center justify-center">
-                                {firstName.charAt(0).toUpperCase()}
-                            </span>
-                            <span className="hidden sm:inline text-sm font-medium text-brand-700 max-w-[140px] truncate">
-                                {firstName}
-                            </span>
-                        </button>
-
-                        {profileMenuOpen && (
-                            <>
-                                <div
-                                    className="fixed inset-0 z-30"
-                                    onClick={() => setProfileMenuOpen(false)}
-                                    aria-hidden
-                                />
-                                <div className="absolute right-0 top-full mt-2 w-56 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl shadow-xl border border-charcoal-200 py-1 z-40">
-                                    <div className="px-4 py-3 border-b border-charcoal-100">
-                                        <p className="text-xs text-charcoal-500">{t('dashboard.signedInAs')}</p>
-                                        <p className="text-sm font-medium text-brand-700 truncate">{user?.email}</p>
-                                    </div>
-                                    {/* Language toggle for phones (hidden in the bar at this width). */}
-                                    <div className="sm:hidden px-4 py-2.5 border-b border-charcoal-100">
-                                        <LanguageToggle />
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setProfileMenuOpen(false);
-                                            onEditProfile();
-                                        }}
-                                        className="w-full text-left flex items-center gap-2 px-4 py-2.5 text-sm text-brand-700 hover:bg-charcoal-50 transition-colors"
-                                    >
-                                        <User size={16} /> {t('dashboard.myProfile')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setProfileMenuOpen(false);
-                                            signOut();
-                                        }}
-                                        className="w-full text-left flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                    >
-                                        <LogOut size={16} /> {t('dashboard.signOut')}
-                                    </button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            </header>
-
-            <main
-                className="flex-1 w-full"
-                onClick={() => setActiveMenuId(null)}
+      {/* Start a new application (dark) */}
+      <section>
+        <div className="relative overflow-hidden rounded-[20px] bg-brand-700 p-[clamp(18px,3vw,28px)] shadow-[0_24px_48px_-20px_rgba(25,23,18,0.35)]">
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background: 'linear-gradient(105deg, transparent 40%, rgba(232,150,15,0.10) 50%, transparent 60%)',
+              backgroundSize: '200% 100%',
+              animation: 'glintMove 7s linear infinite',
+            }}
+          />
+          <div className="relative mb-4 flex items-center gap-2.5">
+            <span
+              className="flex h-[22px] w-[22px] items-center justify-center rounded-[7px]"
+              style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
             >
-                <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-10 lg:pt-14 pb-12 lg:pb-16">
-                    {/* Greeting */}
-                    <div className="mb-8 lg:mb-10">
-                        <h1 className="font-display text-3xl sm:text-4xl font-semibold leading-tight text-brand-700">
-                            {t('dashboard.greetingPrefix')} <span className="italic text-accent-500">{firstName}</span>{t('dashboard.greetingSuffix')}
-                        </h1>
-                        <p className="mt-2 text-brand-500">
-                            {t('dashboard.greetingHelp')}
-                        </p>
-                    </div>
+              <Sparkles size={12} className="text-[#FFF7EA]" fill="#FFF7EA" />
+            </span>
+            <span className="font-display text-[22px] font-semibold text-charcoal-50">{t('dashboard.startTitle')}</span>
+            <span className="ml-auto text-sm font-semibold text-[#A89F8C]">{t('dashboard.startCost')}</span>
+          </div>
 
-                    {/* Two-card primary action zone */}
-                    <div className="grid lg:grid-cols-2 gap-4 lg:gap-5 mb-12 lg:mb-16">
-                        {/* Card A — Tailor for a job (primary, dark) */}
-                        <button
-                            type="button"
-                            onClick={onCreateNew}
-                            className="group text-left relative bg-brand-700 hover:bg-brand-800 transition-colors rounded-2xl p-7 sm:p-8 flex flex-col min-h-[260px]"
-                        >
-                            <div className="flex items-center justify-between gap-3">
-                                <span className="text-[11px] uppercase tracking-[0.22em] text-accent-400 font-semibold">
-                                    {t('dashboard.tailorEyebrow')}
-                                </span>
-                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-800 bg-accent-400 rounded-full px-2.5 py-1">
-                                    {credits === 0 ? t('dashboard.tailorCostNoteZero') : t('dashboard.tailorCostNote')}
-                                </span>
-                            </div>
-                            <h2 className="mt-3 font-display text-2xl sm:text-[26px] font-semibold leading-snug text-charcoal-50">
-                                {t('dashboard.tailorTitle')}
-                            </h2>
-                            <p className="mt-2 text-[15px] leading-relaxed text-charcoal-300">
-                                {t('dashboard.tailorBody')}
-                            </p>
-                            <div className="mt-auto inline-flex items-center gap-2 self-start px-5 py-3 bg-accent-400 text-brand-800 rounded-full text-sm font-semibold group-hover:bg-accent-300 transition-colors">
-                                <Plus size={16} />
-                                {t('dashboard.tailorCta')}
-                            </div>
-                        </button>
-
-                        {/* Card B — Master resume */}
-                        {generalResume ? (
-                            <button
-                                type="button"
-                                onClick={() => onOpenResume?.(generalResume.id)}
-                                className="group text-left relative bg-white hover:border-brand-700 hover:shadow-md transition-all border border-charcoal-200 rounded-2xl p-7 sm:p-8 flex flex-col min-h-[260px]"
-                            >
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold">
-                                            {t('dashboard.masterEyebrow')}
-                                        </span>
-                                        <span className="inline-flex items-center text-[11px] font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-200 rounded-full px-2 py-0.5">
-                                            {t('dashboard.masterCostNote')}
-                                        </span>
-                                    </div>
-                                    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-brand-600 bg-charcoal-50 border border-charcoal-200 rounded-full px-2.5 py-1">
-                                        <CheckCircle2 size={12} className="text-accent-500" />
-                                        {t('dashboard.masterReadyBadge')}
-                                    </span>
-                                </div>
-                                <h2 className="mt-3 font-display text-2xl sm:text-[26px] font-semibold leading-snug text-brand-700">
-                                    {t('dashboard.masterReadyTitle')}
-                                </h2>
-                                <p className="mt-2 text-[15px] leading-relaxed text-brand-500">
-                                    {t('dashboard.masterReadyBody')}
-                                </p>
-                                <div className="mt-auto pt-6 flex items-center justify-between">
-                                    <span className="text-xs text-charcoal-500">
-                                        {masterUpdatedAt
-                                            ? t('dashboard.masterUpdated', { when: formatRelative(masterUpdatedAt) ?? '' })
-                                            : t('dashboard.masterUpToDate')}
-                                    </span>
-                                    <span className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 group-hover:text-accent-600 transition-colors">
-                                        {t('dashboard.masterOpenCta')}
-                                        <ArrowRight size={16} />
-                                    </span>
-                                </div>
-                            </button>
-                        ) : (
-                            <div className="relative bg-white border border-dashed border-charcoal-300 rounded-2xl p-7 sm:p-8 flex flex-col min-h-[260px]">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold">
-                                        {t('dashboard.masterEyebrow')}
-                                    </span>
-                                    <span className="inline-flex items-center text-[11px] font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-200 rounded-full px-2 py-0.5">
-                                        {t('dashboard.masterCostNote')}
-                                    </span>
-                                </div>
-                                <h2 className="mt-3 font-display text-2xl sm:text-[26px] font-semibold leading-snug text-brand-700">
-                                    {t('dashboard.masterEmptyTitle')}
-                                </h2>
-                                <p className="mt-2 text-[15px] leading-relaxed text-brand-500">
-                                    {t('dashboard.masterEmptyBody')}
-                                </p>
-                                <button
-                                    type="button"
-                                    onClick={handleBuildMaster}
-                                    disabled={buildingMaster}
-                                    className="mt-auto inline-flex items-center gap-2 self-start px-5 py-3 bg-brand-700 text-charcoal-50 rounded-full text-sm font-semibold hover:bg-brand-800 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-                                >
-                                    {buildingMaster ? (
-                                        <>
-                                            <Loader2 size={16} className="animate-spin" />
-                                            {t('dashboard.masterBuilding')}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Sparkles size={16} />
-                                            {t('dashboard.masterBuildCta')}
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Tailored applications list */}
-                    <section>
-                        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
-                            <div>
-                                <h2 className="font-display text-2xl font-semibold text-brand-700 leading-tight">
-                                    {t('dashboard.appsTitle')}
-                                </h2>
-                                <p className="text-sm text-brand-500 mt-1">
-                                    {tailoredTotal === 0 && !debouncedSearch
-                                        ? t('dashboard.appsEmpty')
-                                        : tailoredTotal === 1
-                                            ? t('dashboard.appsCountOne', { count: tailoredTotal })
-                                            : t('dashboard.appsCountMany', { count: tailoredTotal })}
-                                </p>
-                            </div>
-
-                            {(tailoredTotal > 0 || debouncedSearch) && (
-                                <div className="relative w-full sm:w-72">
-                                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-charcoal-400" size={16} />
-                                    <input
-                                        type="text"
-                                        placeholder={t('dashboard.appsSearchPlaceholder')}
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pl-9 pr-4 py-2.5 bg-white border border-charcoal-200 rounded-full text-sm focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:border-brand-500 transition-colors outline-none"
-                                    />
-                                </div>
-                            )}
-                        </div>
-
-                        {loading ? (
-                            <div className="flex justify-center py-16">
-                                <Loader2 className="animate-spin text-brand-600" size={28} />
-                            </div>
-                        ) : tailoredTotal === 0 && !debouncedSearch ? (
-                            <div className="bg-white rounded-2xl border border-charcoal-200 px-6 py-12 text-center">
-                                <div className="w-12 h-12 mx-auto rounded-full bg-accent-50 border border-accent-100 flex items-center justify-center mb-4">
-                                    <Briefcase className="text-accent-600" size={20} />
-                                </div>
-                                <h3 className="font-display text-lg font-semibold text-brand-700 mb-1.5">
-                                    {t('dashboard.appsEmptyStateTitle')}
-                                </h3>
-                                <p className="text-sm text-brand-500 max-w-md mx-auto">
-                                    {t('dashboard.appsEmptyStateBefore')}
-                                    <span className="font-semibold text-brand-700">{t('dashboard.appsEmptyStateCta')}</span>
-                                    {t('dashboard.appsEmptyStateAfter')}
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="relative">
-                                {/* Spinner overlay while paginating (keeps layout stable) */}
-                                {tailoredLoading && (
-                                    <div className="absolute inset-0 bg-paper/60 flex items-center justify-center z-10 rounded-2xl">
-                                        <Loader2 className="animate-spin text-brand-600" size={28} />
-                                    </div>
-                                )}
-
-                                {tailored.length === 0 && !tailoredLoading ? (
-                                    <div className="bg-white rounded-2xl border border-charcoal-200 px-6 py-10 text-center">
-                                        <p className="text-sm text-brand-500">
-                                            {t('dashboard.appsNoMatch', { query: searchTerm })}
-                                        </p>
-                                    </div>
-                                ) : (
-                                    <ul className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                        {tailored.map(resume => {
-                                            const displayTitle = resume.title.replace(/ Resume$/i, '').replace(/Resume$/i, '').trim() || t('dashboard.untitledRole');
-                                            return (
-                                                <li
-                                                    key={resume.id}
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    aria-label={t('dashboard.open') + ' ' + displayTitle}
-                                                    className="relative bg-white rounded-2xl border border-charcoal-200 p-5 hover:border-brand-700 hover:shadow-md transition-all cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
-                                                    onClick={() => onOpenResume?.(resume.id)}
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === 'Enter' || e.key === ' ') {
-                                                            e.preventDefault();
-                                                            onOpenResume?.(resume.id);
-                                                        }
-                                                    }}
-                                                >
-                                                    <div className="flex items-start gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-charcoal-50 border border-charcoal-200 text-brand-700 flex items-center justify-center shrink-0 group-hover:bg-accent-50 group-hover:border-accent-200 group-hover:text-accent-600 transition-colors">
-                                                            <FileText size={18} />
-                                                        </div>
-                                                        <div className="flex-1 min-w-0">
-                                                            <h3 className="font-display text-[17px] font-semibold text-brand-700 leading-snug line-clamp-2">
-                                                                {displayTitle}
-                                                            </h3>
-                                                            {resume.company && (
-                                                                <p className="text-sm text-charcoal-500 mt-0.5 line-clamp-1">{resume.company}</p>
-                                                            )}
-                                                        </div>
-                                                        <div className="relative">
-                                                            <button
-                                                                type="button"
-                                                                aria-label={t('dashboard.appActionsLabel')}
-                                                                className="inline-flex items-center justify-center min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 text-charcoal-400 hover:text-brand-700 p-1.5 -mr-1.5 -mt-1.5 rounded-full hover:bg-charcoal-50 transition-colors"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    setActiveMenuId(activeMenuId === resume.id ? null : resume.id);
-                                                                }}
-                                                            >
-                                                                <MoreVertical size={18} />
-                                                            </button>
-
-                                                            {activeMenuId === resume.id && (
-                                                                <div className="absolute right-0 mt-2 w-44 bg-white rounded-xl shadow-lg border border-charcoal-200 py-1 z-20">
-                                                                    <button
-                                                                        type="button"
-                                                                        className="flex items-center w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                                                        onClick={(e) => handleDeleteResume(resume.id, e)}
-                                                                    >
-                                                                        <Trash size={15} className="mr-2" />
-                                                                        {t('dashboard.delete')}
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="mt-5 pt-4 border-t border-charcoal-100 flex items-center justify-between text-xs">
-                                                        <span className="text-charcoal-500">
-                                                            {t('dashboard.builtOn', { when: formatRelative(resume.updatedAt ?? resume.date) ?? '' })}
-                                                        </span>
-                                                        <span className="inline-flex items-center gap-1 text-brand-600 font-semibold group-hover:text-accent-600 transition-colors">
-                                                            {t('dashboard.open')}
-                                                            <ArrowRight size={13} />
-                                                        </span>
-                                                    </div>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                )}
-
-                                {/* Pagination controls */}
-                                {totalPages > 1 && (
-                                    <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-                                        <p className="text-xs text-charcoal-500 order-2 sm:order-1">
-                                            {t('dashboard.appsPageRange', {
-                                                from: (page - 1) * PAGE_SIZE + 1,
-                                                to: Math.min(page * PAGE_SIZE, tailoredTotal),
-                                                total: tailoredTotal,
-                                            })}
-                                        </p>
-
-                                        <div className="flex items-center gap-1 order-1 sm:order-2">
-                                            <button
-                                                type="button"
-                                                onClick={() => setPage(p => Math.max(1, p - 1))}
-                                                disabled={page <= 1 || tailoredLoading}
-                                                aria-label={t('dashboard.appsPrevPage')}
-                                                className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                            >
-                                                <ChevronLeft size={16} />
-                                            </button>
-
-                                            {pageNumbers.map((n, i) =>
-                                                n === null ? (
-                                                    <span key={`ellipsis-${i}`} className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-xs text-charcoal-400 select-none">
-                                                        …
-                                                    </span>
-                                                ) : (
-                                                    <button
-                                                        key={n}
-                                                        type="button"
-                                                        onClick={() => setPage(n)}
-                                                        disabled={tailoredLoading}
-                                                        aria-current={n === page ? 'page' : undefined}
-                                                        className={`w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg text-xs font-medium transition-colors disabled:cursor-not-allowed ${
-                                                            n === page
-                                                                ? 'bg-brand-700 text-charcoal-50 border border-brand-700'
-                                                                : 'border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700'
-                                                        }`}
-                                                    >
-                                                        {n}
-                                                    </button>
-                                                )
-                                            )}
-
-                                            <button
-                                                type="button"
-                                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                                                disabled={page >= totalPages || tailoredLoading}
-                                                aria-label={t('dashboard.appsNextPage')}
-                                                className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-charcoal-200 text-charcoal-600 hover:border-brand-700 hover:text-brand-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                            >
-                                                <ChevronRight size={16} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </section>
-
-                    {/* Legacy applications (only shown if real legacy data exists) */}
-                    {applications.length > 0 && (
-                        <section className="mt-12">
-                            <h2 className="font-display text-lg font-semibold text-brand-700 mb-4">
-                                {t('dashboard.legacyTitle')}
-                            </h2>
-                            <ul className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {applications.map(app => (
-                                    <li key={app.id}>
-                                        <button
-                                            type="button"
-                                            onClick={() => onOpenApplication(app.id)}
-                                            className="w-full text-left bg-white rounded-2xl border border-charcoal-200 p-5 hover:border-brand-700 hover:shadow-md transition-all"
-                                        >
-                                            <h3 className="font-display text-base font-semibold text-brand-700 line-clamp-1">{app.jobTitle}</h3>
-                                            <p className="text-sm text-charcoal-500 mt-1 line-clamp-1">{app.companyName}</p>
-                                            <p className="text-xs text-charcoal-500 mt-3">
-                                                {new Date(app.createdAt).toLocaleDateString()}
-                                            </p>
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
-                        </section>
-                    )}
-
-                    <PurchaseHistorySection />
-
-                    <HelpContactSection />
-                </div>
-            </main>
-
-            <footer className="border-t border-charcoal-200 bg-charcoal-50 py-6">
-                <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-brand-500">
-                    <Wordmark />
-                    <div className="flex items-center gap-4">
-                        <a href="#help" className="hover:text-brand-700 transition-colors">{t('help.eyebrow')}</a>
-                        <p>{t('dashboard.footerLine', { year: new Date().getFullYear() })}</p>
-                    </div>
-                </div>
-            </footer>
-
-            <PurchaseModal
-                isOpen={purchaseModalOpen}
-                onClose={() => setPurchaseModalOpen(false)}
-                // Pending purchases credit asynchronously when the bKash SMS is
-                // verified. In dev mock mode the grant is synchronous, so we
-                // refetch the balance immediately; in prod the modal closes
-                // before credits land and the next dashboard mount picks it up.
-                onSuccess={() => { void refreshCredits(); }}
+          <div className="relative flex flex-col gap-3.5">
+            <div className="flex flex-wrap gap-3.5">
+              <input
+                type="text"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                placeholder={t('dashboard.startCompanyPlaceholder')}
+                className="min-w-0 max-w-[320px] flex-[1_1_200px] rounded-xl border border-cta-border bg-cta-surface px-4 py-3 text-[15px] text-charcoal-50 outline-none placeholder:text-charcoal-400"
+              />
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t('dashboard.startJobTitlePlaceholder')}
+                className="min-w-0 max-w-[320px] flex-[1_1_200px] rounded-xl border border-cta-border bg-cta-surface px-4 py-3 text-[15px] text-charcoal-50 outline-none placeholder:text-charcoal-400"
+              />
+            </div>
+            <textarea
+              ref={jdRef}
+              rows={5}
+              value={jd}
+              onChange={(e) => setJd(e.target.value)}
+              placeholder={t('dashboard.startJdPlaceholder')}
+              className="min-h-[110px] w-full resize-y rounded-xl border border-cta-border bg-cta-surface px-4 py-3.5 text-[15px] leading-relaxed text-charcoal-50 outline-none placeholder:text-charcoal-400"
             />
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="text-[12.5px] text-[#8B8574]">{t('dashboard.startYoullGet')}</span>
+              {CHIPS.map((c) => (
+                <span
+                  key={c.key}
+                  className="rounded-full border px-3 py-[5px] text-[12.5px] font-semibold"
+                  style={{ color: c.color, background: c.bg, borderColor: c.border }}
+                >
+                  {t(`dashboard.${c.key}` as any)}
+                </span>
+              ))}
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={handleStart}
+                className="inline-flex items-center justify-center gap-2.5 rounded-xl bg-accent-400 px-[26px] py-3 text-[15px] font-bold text-brand-800 transition-all hover:-translate-y-px hover:bg-accent-300"
+              >
+                {t('dashboard.startCta')}
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
         </div>
-    );
+      </section>
+
+      {/* Master Resume banner */}
+      <section>
+        <div
+          className="flex flex-wrap items-center gap-x-5 gap-y-4 rounded-[18px] border px-[clamp(18px,3vw,28px)] py-[22px] shadow-[0_8px_24px_-12px_rgba(199,126,16,0.25)]"
+          style={{ background: 'linear-gradient(120deg, #FFFDF8, #FBF4E4)', borderColor: '#EBD9B4' }}
+        >
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] border bg-white" style={{ borderColor: '#EFE3C8' }}>
+            <FileText size={20} className="text-accent-600" />
+          </span>
+          <span className="min-w-0 flex-[1_1_320px]">
+            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              <span className="font-display text-[19px] font-semibold text-brand-700">{t('dashboard.bannerTitle')}</span>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700">{t('dashboard.masterCostNote')}</span>
+            </span>
+            <span className="mt-1 block text-[13px] leading-relaxed text-charcoal-500">
+              {masterUpdatedAt
+                ? t('dashboard.bannerBody', { when: rel(masterUpdatedAt) ?? '' })
+                : t('dashboard.bannerBodyNoDate')}
+            </span>
+          </span>
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); onEditProfile(); }}
+            className="whitespace-nowrap text-[13.5px] font-semibold text-charcoal-500 transition-colors hover:text-accent-600"
+          >
+            {t('dashboard.bannerUpdateProfile')}
+          </a>
+          {generalResume ? (
+            <button
+              type="button"
+              onClick={() => onOpenResume(generalResume.id)}
+              className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800"
+            >
+              {t('dashboard.masterOpenCta')}
+              <ArrowRight size={14} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBuildMaster}
+              disabled={buildingMaster}
+              className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 disabled:opacity-60"
+            >
+              {buildingMaster ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {buildingMaster ? t('dashboard.masterBuilding') : t('dashboard.masterBuildCta')}
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* Recent toolkits */}
+      <section>
+        <div className="mb-5 flex flex-wrap items-baseline gap-x-3.5 gap-y-2.5">
+          <h2 className="font-display text-[22px] font-semibold text-brand-700">{t('dashboard.toolkitsTitle')}</h2>
+          {recentTotal > 0 && (
+            <span className="text-[13px] text-charcoal-500">
+              {recentTotal === 1 ? t('dashboard.companiesCountOne', { count: recentTotal }) : t('dashboard.companiesCountMany', { count: recentTotal })}
+            </span>
+          )}
+          <div className="flex-1" />
+          {recentTotal > RECENT_LIMIT && (
+            <a
+              href="#"
+              onClick={(e) => { e.preventDefault(); onNavigate('APPLICATIONS'); }}
+              className="text-[13.5px] font-semibold text-charcoal-500 transition-colors hover:text-accent-600"
+            >
+              {t('dashboard.viewAll')} →
+            </a>
+          )}
+        </div>
+        {recentTotal === 0 ? (
+          <div className="rounded-2xl border border-dashed border-charcoal-300 px-6 py-12 text-center">
+            <p className="text-sm text-charcoal-500">{t('dashboard.appsEmpty')}</p>
+          </div>
+        ) : (
+          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+            {recent.map((item) => (
+              <ToolkitCard
+                key={item.id}
+                item={item}
+                builtLabel={t('dashboard.builtOn', { when: rel(item.updatedAt ?? item.date) ?? '' })}
+                onOpen={onOpenResume}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Credits + Help rows */}
+      <section className="flex flex-wrap gap-5">
+        <div className="flex flex-[1_1_320px] items-center gap-3.5 rounded-[14px] border border-charcoal-200 bg-white px-5 py-3.5 shadow-[0_1px_3px_rgba(25,23,18,0.03)]">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-accent-50">
+            <span className="h-2 w-2 rounded-full bg-accent-400" />
+          </span>
+          <span className="min-w-0 flex-1 text-[13.5px]">
+            <strong className="text-brand-700">{credits ?? 0} {t('dashboard.creditsUnit')}</strong>{' '}
+            <span className="text-charcoal-500">
+              {creditsBought > 0 && <>{t('dashboard.creditsOfLeft', { total: creditsBought })} · </>}
+              <a href="#" onClick={(e) => { e.preventDefault(); onNavigate('PURCHASES'); }} className="text-charcoal-500 underline transition-colors hover:text-accent-600">
+                {t('dashboard.purchaseHistoryLink')}
+              </a>
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={openPurchase}
+            className="rounded-full bg-accent-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-600 transition-colors hover:bg-accent-100"
+          >
+            {t('dashboard.topUp')}
+          </button>
+        </div>
+
+        <div className="flex flex-[1_1_320px] flex-wrap items-center gap-x-3.5 gap-y-2.5 rounded-[14px] border border-charcoal-200 bg-white px-5 py-3.5 shadow-[0_1px_3px_rgba(25,23,18,0.03)]">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] bg-accent-50">
+            <LifeBuoy size={16} className="text-accent-600" />
+          </span>
+          <span className="min-w-0 flex-1 text-[13.5px]">
+            <strong className="text-brand-700">{t('dashboard.helpTitle')}</strong>{' '}
+            <span className="text-charcoal-500">{t('dashboard.helpBody')}</span>
+          </span>
+          <a
+            href={contactMailto(t('help.emailSubject'))}
+            className="text-[13px] font-semibold text-charcoal-500 transition-colors hover:text-accent-600"
+          >
+            {t('dashboard.helpEmail')}
+          </a>
+        </div>
+      </section>
+    </div>
+  );
 };

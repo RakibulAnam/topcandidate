@@ -4,8 +4,11 @@ export type NavScreen =
   | 'LANDING'
   | 'LOGIN'
   | 'DASHBOARD'
+  | 'APPLICATIONS'
+  | 'PURCHASES'
   | 'PROFILE'
   | 'PROFILE_SETUP'
+  | 'SUMMARY'
   | 'BUILDER'
   | 'RESET_PASSWORD'
   | 'LEGAL_TERMS';
@@ -18,8 +21,11 @@ const SCREEN_PATHS: Record<NavScreen, string> = {
   LANDING: '/',
   LOGIN: '/login',
   DASHBOARD: '/dashboard',
+  APPLICATIONS: '/applications',
+  PURCHASES: '/purchases',
   PROFILE: '/profile',
   PROFILE_SETUP: '/profile-setup',
+  SUMMARY: '/new',
   BUILDER: '/builder',
   RESET_PASSWORD: '/auth/reset-password',
   LEGAL_TERMS: '/legal/terms',

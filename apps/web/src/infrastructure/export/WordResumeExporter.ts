@@ -207,16 +207,32 @@ export class WordResumeExporter implements IResumeExporter {
     fontFamily: string,
     headerAlignment: typeof AlignmentType[keyof typeof AlignmentType]
   ): Paragraph[] {
+    const contactSegments = buildContactSegments(data.personalInfo);
+    const hasContact = contactSegments.length > 0;
+
+    // A full-width letterhead rule (headerRule) is a paragraph bottom border —
+    // applied to the last line of the header block (contact if present, else
+    // the name). ATS-safe (a border, not a table).
+    const letterheadBorder = t.headerRule
+      ? {
+          bottom: {
+            color: '000000',
+            space: 4,
+            style: BorderStyle.SINGLE,
+            size: 6,
+          },
+        }
+      : undefined;
+
     const headerLines: Paragraph[] = [
       new Paragraph({
         text: data.personalInfo.fullName,
         heading: HeadingLevel.HEADING_1,
+        border: hasContact ? undefined : letterheadBorder,
       }),
     ];
 
-    const contactSegments = buildContactSegments(data.personalInfo);
-
-    if (contactSegments.length > 0) {
+    if (hasContact) {
       headerLines.push(
         new Paragraph({
           children: contactHyperlinkChildren(
@@ -227,6 +243,7 @@ export class WordResumeExporter implements IResumeExporter {
           ),
           alignment: headerAlignment,
           spacing: { after: twips(t.sectionGapBefore) },
+          border: letterheadBorder,
         })
       );
     }
@@ -636,20 +653,24 @@ export class WordResumeExporter implements IResumeExporter {
     text: string,
     t: TemplateDefinition
   ): Paragraph {
+    // Word is a reflowable format, so a partial "rule to the right" isn't
+    // expressible as a paragraph border. Both ruled styles ('rule-under' and
+    // 'rule-right') therefore render as a full-width underline here; only
+    // 'plain-caps' is rule-free. Headings are always all-caps (Heading2 style).
+    const ruled = t.headingStyle !== 'plain-caps';
     return new Paragraph({
       text,
       heading: HeadingLevel.HEADING_2,
-      border:
-        t.sectionDivider === 'rule'
-          ? {
-              bottom: {
-                color: '000000',
-                space: 1,
-                style: BorderStyle.SINGLE,
-                size: 6,
-              },
-            }
-          : undefined,
+      border: ruled
+        ? {
+            bottom: {
+              color: '000000',
+              space: 1,
+              style: BorderStyle.SINGLE,
+              size: 6,
+            },
+          }
+        : undefined,
     });
   }
 

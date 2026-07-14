@@ -80,10 +80,10 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | Auth (email + password, **Google OAuth**) | `src/presentation/LoginScreen.tsx`, `src/presentation/auth/ContinueWithGoogleButton.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth; Google via `signInWithGoogle` PKCE redirect — requires the Supabase Google provider configured) |
 | Profile setup (master profile) | `src/presentation/ProfileSetupScreen.tsx` | shipped — one-time profile capture used to seed future resumes |
 | Profile edit | `src/presentation/ProfileScreen.tsx` | shipped — view/edit saved master profile sections |
-| Dashboard (two-card action zone — Master vs. Tailor — + applications grid) | `src/presentation/DashboardScreen.tsx` | shipped |
+| Dashboard area — Home, All Toolkits, Purchase History (one shared shell) | `src/presentation/DashboardScreen.tsx` (Home), `ApplicationsScreen.tsx`, `PurchaseHistoryScreen.tsx`, `src/presentation/components/dashboard/{DashboardShell,ToolkitCard,CommandPalette}.tsx` | shipped — redesigned. **Home** = dated welcome hero + a dark inline "Start a new application" card (Company/Title/JD captured here → routes to the **Summary screen** `/new`), Master Resume banner, 6 recent toolkits, credits + help rows. **Routes** `/applications` + `/purchases` (`useBrowserNav`). **Global ⌘K** command palette over toolkits. `DashboardShell` owns the sticky top bar (Home/Applications/Master Resume nav + ⌘K search + credits pill + language + account menu), footer, and the shared credits / master-resume / palette / `PurchaseModal` state via `useDashboardShell()`. Uses the scoped dashboard gradient exception (§10). |
 | Internationalisation (en + bn) | `src/presentation/i18n/` — `LocaleContext.tsx`, `LanguageToggle.tsx`, `locales/en.ts`, `locales/bn.ts` | shipped — full UI in English and Bengali; AI output stays English |
-| Resume builder (multi-step form) | `src/presentation/BuilderScreen.tsx` | shipped |
-| Resume preview + templates | `src/presentation/components/Preview.tsx`, `src/presentation/templates/TemplateRegistry.ts` | shipped (4 ATS-safe templates). **Navigation:** a single artifact nav (Resume · Cover Letter · Outreach · LinkedIn · Interview) — desktop = left sidebar, mobile = a horizontal pill rail under a slim app bar. The **template picker is a quiet, collapsible control** (desktop = a disclosure nested under the active Resume tab; mobile = a bottom sheet opened from the action dock) — NOT the front-and-center grid it used to be. **Mobile chrome:** slim app bar (back · title · `⋮` overflow for Edit/Regenerate/Word) + a bottom action dock (Template · Fit/100% · Download PDF) in the thumb zone; the dock shows only on the Resume/Cover-Letter tabs. The Fit/100% zoom is mobile-only (on desktop `fit` already renders at 100%). **Document:** the fixed-width pt sheet is wrapped in `ScaledDocument` — a `transform: scale()` fit-to-width view driven by `ResizeObserver`; the pt sheet itself is untouched (rule 7 — still PDF-identical). Contact line + project/publication/reference links render as real hyperlinks via the shared `templates/contactLinks.ts` (also used by both exporters); visible text stays the full URL for ATS. |
+| New-application flow | `src/presentation/SummaryScreen.tsx` (`/new`) → `src/presentation/BuilderScreen.tsx` | shipped — **the 7-step wizard is retired**. Dashboard start card → **Summary** (pick sections → `visibleSections`; greyed "+ Add" for sections not in the profile) → `BuilderScreen` in `autoGenerate` mode fires the 2-call generation on mount and renders only **Generating → Preview** (or error + retry). Opening an existing resume → Preview directly. |
+| Resume preview + templates | `src/presentation/components/Preview.tsx`, `src/presentation/templates/TemplateRegistry.ts` | shipped (**5 ATS-safe templates**: Classic, Modern, Serif, Compact, Executive). All are single-column, real-text, no tables/columns/images — parser-safe regardless of pick. They vary on real layout dimensions, not just type: font family, header alignment (left/center), an optional full-width **letterhead rule** (`headerRule`), **section-heading style** (`headingStyle`: full underline / rule-to-the-right / plain tracked caps), **name style** (`nameStyle`: bold title-case vs tracked uppercase — now honored in the PDF exporter too), and density. All three renderers (Preview, `PdfResumeExporter`, `WordResumeExporter`) read these from the shared registry; Word approximates rule-right as a full underline (a reflowable doc can't express a partial rule). The **template picker cards are name-only** (no descriptions — each name shown in its own typeface as a subtle cue; description survives as the hover `title`). **Navigation:** a single artifact nav (Resume · Cover Letter · Outreach · LinkedIn · Interview) — desktop = left sidebar, mobile = a horizontal pill rail under a slim app bar. The **template picker is a quiet, collapsible control** (desktop = a disclosure nested under the active Resume tab; mobile = a bottom sheet opened from the action dock) — NOT the front-and-center grid it used to be. **Mobile chrome:** slim app bar (back · title · `⋮` overflow for Edit/Regenerate/Word) + a bottom action dock (Template · Fit/100% · Download PDF) in the thumb zone; the dock shows only on the Resume/Cover-Letter tabs. The Fit/100% zoom is mobile-only (on desktop `fit` already renders at 100%). **Document:** the fixed-width pt sheet is wrapped in `ScaledDocument` — a `transform: scale()` fit-to-width view driven by `ResizeObserver`; the pt sheet itself is untouched (rule 7 — still PDF-identical). Contact line + project/publication/reference links render as real hyperlinks via the shared `templates/contactLinks.ts` (also used by both exporters); visible text stays the full URL for ATS. |
 | Cover letter generation + viewer | `src/infrastructure/ai/GeminiCoverLetterGenerator.ts`, viewer inside `Preview.tsx` | shipped |
 | **Outreach email** generation + viewer | `src/infrastructure/ai/GeminiOutreachEmailGenerator.ts`, `src/presentation/components/Builder/ToolkitViewers.tsx` | shipped |
 | **LinkedIn note** generation + viewer | `src/infrastructure/ai/GeminiLinkedInMessageGenerator.ts`, `ToolkitViewers.tsx` | shipped |
@@ -283,7 +283,7 @@ ResumeData {
   coverLetter?: string                 // AI-generated
   toolkit?: JobToolkit                 // AI-generated sibling artifacts
   visibleSections?: string[]           // user's section selection
-  template?: 'ats-classic' | 'ats-modern' | 'ats-serif' | 'ats-compact'
+  template?: 'ats-classic' | 'ats-modern' | 'ats-serif' | 'ats-compact' | 'ats-executive'
 }
 
 JobToolkit {
@@ -311,8 +311,8 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
 }
 ```
 
-**AppStep enum** (`src/domain/entities/AppStep.ts`) drives the builder's multi-step form.
-**Top-level screen routing** is driven by `useBrowserNav` (`src/presentation/hooks/useBrowserNav.ts`) — each transition pushes a `NavState` entry onto `window.history`, and the hook listens for `popstate` so browser back/forward buttons restore the previous screen. Use `navigate({ screen: 'LANDING' | 'LOGIN' | 'DASHBOARD' | 'PROFILE' | 'PROFILE_SETUP' | 'BUILDER' })` for every transition. Use `{ replace: true }` on auth-driven redirects (sign-in / sign-out / profile-setup → dashboard) so the back button doesn't bounce the user back through the auth flow.
+**AppStep enum** (`src/domain/entities/AppStep.ts`) still exists, but since the wizard was retired the tailored flow only uses `PREVIEW` (post-generation) — the other steps are legacy. `ProfileSetupScreen` has its own separate wizard.
+**Top-level screen routing** is driven by `useBrowserNav` (`src/presentation/hooks/useBrowserNav.ts`) — each transition pushes a `NavState` entry onto `window.history`, and the hook listens for `popstate` so browser back/forward buttons restore the previous screen. Use `navigate({ screen: 'LANDING' | 'LOGIN' | 'DASHBOARD' | 'APPLICATIONS' | 'PURCHASES' | 'PROFILE' | 'PROFILE_SETUP' | 'SUMMARY' | 'BUILDER' })` for every transition. Use `{ replace: true }` on auth-driven redirects (sign-in / sign-out / profile-setup → dashboard) so the back button doesn't bounce the user back through the auth flow.
 
 ---
 
@@ -324,19 +324,18 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
  User signs in ──► profileRepository.isProfileComplete() ──► ProfileSetupScreen (if incomplete)
                                                           └► DashboardScreen (if complete)
 
- DashboardScreen ──► "New Application" ──► ResumeSourceDialog
-                                          ├── "Use my profile" ──► prefill ResumeData from profileRepository
-                                          └── "Start fresh"    ──► empty ResumeData
-                  ──► (credits bar above the action cards) ──► PurchaseModal (bKash checkout) ──► /api/purchase (records pending; match-on-submit grants instantly if the bKash SMS already arrived — modal then shows the confirmed overlay immediately)
-                  ──► VerifyingPurchasePill tracks the row via Supabase Realtime (sub-second) + 20s fallback poll (no time cap)
+ DashboardScreen (Home) ──► dark "Start a new application" card: user pastes Company / Job Title / JD ──► SUMMARY
+ SummaryScreen (/new) ──► tick which profile sections to include (→ visibleSections); sections NOT in the
+                          profile show greyed "+ Add" (currently links to the Profile screen) ──► "Generate my application"
+                  ──► (credits pill in the top bar) ──► PurchaseModal (bKash checkout) ──► /api/purchase (records pending; match-on-submit grants instantly if the bKash SMS already arrived)
+                  ──► VerifyingPurchasePill tracks the row via Supabase Realtime + 20s fallback poll (no time cap)
 
- BuilderScreen (multi-step form, driven by AppStep + getVisibleSteps())
-   ── USER_TYPE  ── SECTIONS   ── TARGET_JOB    ── PERSONAL_INFO
-   ── EXPERIENCE ── PROJECTS   ── EDUCATION     ── SKILLS
-   ── EXTRACURRICULARS ── AWARDS ── CERTIFICATIONS ── AFFILIATIONS ── PUBLICATIONS
-   ── LANGUAGES ── REFERENCES   (BD-aware additions; toggle in SECTIONS step)
+ App.handleGenerateFromSummary ──► prefill ResumeData from profileRepository + apply the chosen visibleSections
+   + the pasted targetJob ──► BuilderScreen(autoGenerate). The old 7-step wizard is RETIRED: generation fires
+   on mount and the screen shows only a Generating state → Preview (or an error + retry). Opening an existing
+   resume goes straight to Preview. The profile is the single source of truth (no divergent pre-gen copy).
 
- Final step → handleGenerate() → resumeService.optimizeResume(data):
+ autoGenerate → handleGenerate() → resumeService.optimizeResume(data):
    0a. Client-side credit pre-check. If the locally-cached `toolkit_credits` is 0,
        open PurchaseModal and queue an auto-resume after success. Server still
        enforces the real check; this just avoids an obviously wasted round-trip.
@@ -391,7 +390,7 @@ src/presentation/components/Builder/ToolkitViewers.tsx
                                         Outreach email, LinkedIn note, Interview prep (copy-to-clipboard)
 src/presentation/components/FormSteps.tsx  All step forms (TargetJob, Experience, Projects, etc.)
 src/presentation/components/PurchaseModal.tsx  bKash checkout for the toolkit-credits pack (shared by Dashboard + Builder)
-src/presentation/templates/TemplateRegistry.ts  4 ATS-safe template definitions (all single-column)
+src/presentation/templates/TemplateRegistry.ts  5 ATS-safe template definitions (all single-column)
 
 src/application/services/ResumeService.ts   Orchestrator — call this from presentation
 src/application/validation/                  Pre-flight content gates (run client-side before AI calls)
@@ -609,15 +608,17 @@ Guard failures throw, which the service-layer `withRetry` (1 retry) handles auto
 - `charcoal-*` — Stone (warm neutrals, 50 = `#FAFAF7`). Backgrounds, borders, muted text.
 
 **Explicit constraints:**
-- **No gradients** anywhere (search existing codebase if you think you need one — chances are you don't).
-- **No blue, indigo, or purple** brand colors (generic AI look).
+- **No gradients** anywhere — with ONE scoped exception, the dashboard hero/master surfaces (see below). Everywhere else, search the codebase before adding one — chances are you don't need it.
+- **No blue, indigo, or purple** brand colors (generic AI look) — except the two muted dashboard toolkit-chip tints noted in the scoped exception below.
 - No emojis in UI unless the user asked for them.
 
 **Scoped exception — bKash magenta (`#E2136E`):** the small "bKash" trust chip and required-field asterisk inside `PurchaseModal.tsx` use bKash's brand magenta (inline `bg-[#E2136E]/10` / `text-[#E2136E]`). This is deliberate — the modal is a payment surface where users need to recognise the bKash brand to trust the flow. The exception is scoped to that one component: the primary CTA, active stepper highlight, and copy button all stay Saffron. Do NOT extend bKash magenta to any other screen, button, or component.
 
+**Scoped exception — dashboard hero gradients + toolkit tints (2026 redesign):** the dashboard area (`DashboardScreen` Home, `components/dashboard/*`) uses a deliberate, narrow set of gradients: the dark "Start a new application" CTA card's animated amber glint (`@keyframes glintMove` in `index.css`) and its amber icon square (`linear-gradient(135deg,#E8960F,#C7590E)`), plus the cream Master Resume banner (`linear-gradient(120deg,#FFFDF8,#FBF4E4)`). The same exception covers the **5 muted per-artifact toolkit-chip tints** on that dark card — Tailored Resume (amber), Cover Letter (coral), Recruiter Email (green), LinkedIn Message (blue `#9DB8DF`), Interview Prep (purple `#B7A3D8`) — the only place blue/purple appear, always as low-opacity semantic labels on the dark surface. Everywhere else the flat Saffron/Ink/Stone rules hold; do NOT extend gradients or blue/purple to other surfaces.
+
 **Fonts** (Google Fonts, loaded in `index.html`):
-- `Inter` — UI and body (default `font-sans`) — Latin script
-- `Fraunces` — display headlines (`font-display`) — editorial serif, Latin
+- `Instrument Sans` — UI and body (default `font-sans`) — Latin script (adopted with the 2026 dashboard redesign, replacing Inter)
+- `Source Serif 4` — display headlines (`font-display`) — editorial serif, Latin (adopted with the 2026 dashboard redesign, replacing Fraunces)
 - `Merriweather` — resume template serif (`font-serif`) — don't change, used by PDF
 - `Hind Siliguri` — Bengali UI/body. Stack swaps in via `html[data-locale="bn"] body`
 - `Tiro Bangla` — Bengali display headlines. Stack swaps in via `html[data-locale="bn"] .font-display`

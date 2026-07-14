@@ -7,8 +7,11 @@
 //
 // Every template is single-column, real-text, no icons / no tables / no
 // columns / no rasterization — i.e. structurally ATS-safe regardless of
-// which one the user picks. The only differences between templates are
-// typography (font family, sizes), header alignment, and whitespace density.
+// which one the user picks. Templates differ in typography (font family,
+// sizes), header treatment (alignment + an optional full-width letterhead
+// rule), section-heading style (full underline / rule-to-the-right / plain
+// tracked caps), name treatment (bold title-case vs tracked uppercase), and
+// whitespace density. None of these affect parseability.
 
 import { ResumeTemplate } from '../../domain/entities/Resume';
 
@@ -44,16 +47,24 @@ export interface TemplateDefinition {
 
     // Layout
     headerAlignment: 'left' | 'center';
-    sectionDivider: 'rule' | 'none';
+    // A full-width horizontal rule beneath the header block (name + contact) —
+    // a "letterhead" divider. ATS-safe (it's a paragraph border / drawn line,
+    // not a table).
+    headerRule: boolean;
+    // Section-heading treatment:
+    //  - 'rule-under'  : bold caps above a full-width underline (Classic/Modern)
+    //  - 'rule-right'  : bold caps with a thin rule filling the width to its right
+    //  - 'plain-caps'  : bold tracked caps, no rule (Compact)
+    headingStyle: 'rule-under' | 'rule-right' | 'plain-caps';
     nameStyle: 'bold' | 'uppercase';
 }
 
 export const templateRegistry: Record<ResumeTemplate, TemplateDefinition> = {
     'ats-classic': {
         id: 'ats-classic',
-        displayName: 'ATS Classic',
+        displayName: 'Classic',
         description:
-            'Left-aligned Helvetica with bold uppercase section headings and a thin underline. The most universally compatible layout — the safest default for any application.',
+            'Left-aligned Helvetica, underlined section headings. The most universally compatible layout — the safe default for any application.',
         pdfFont: 'helvetica',
         cssFont:
             "'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif",
@@ -69,14 +80,15 @@ export const templateRegistry: Record<ResumeTemplate, TemplateDefinition> = {
         itemGap: 8,
         bulletGap: 2,
         headerAlignment: 'left',
-        sectionDivider: 'rule',
+        headerRule: false,
+        headingStyle: 'rule-under',
         nameStyle: 'bold',
     },
     'ats-modern': {
         id: 'ats-modern',
-        displayName: 'ATS Modern',
+        displayName: 'Modern',
         description:
-            'Centered name and contact line with bold uppercase section headings. Same parser-safe structure as Classic — just a more modern, balanced visual.',
+            'Centered name and contact under a full-width letterhead rule, with underlined headings. Balanced and contemporary.',
         pdfFont: 'helvetica',
         cssFont:
             "'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif",
@@ -92,14 +104,15 @@ export const templateRegistry: Record<ResumeTemplate, TemplateDefinition> = {
         itemGap: 9,
         bulletGap: 2,
         headerAlignment: 'center',
-        sectionDivider: 'rule',
+        headerRule: true,
+        headingStyle: 'rule-under',
         nameStyle: 'bold',
     },
     'ats-serif': {
         id: 'ats-serif',
-        displayName: 'ATS Serif',
+        displayName: 'Serif',
         description:
-            'Times Roman, left-aligned, with bold uppercase headings and a thin underline. Traditional, conservative tone preferred in finance, law, and academia.',
+            'Times Roman with headings that trail a thin rule to the right margin. Traditional tone preferred in finance, law, and academia.',
         pdfFont: 'times',
         cssFont:
             "'Times New Roman', 'Liberation Serif', 'DejaVu Serif', Times, serif",
@@ -115,14 +128,15 @@ export const templateRegistry: Record<ResumeTemplate, TemplateDefinition> = {
         itemGap: 8,
         bulletGap: 2,
         headerAlignment: 'left',
-        sectionDivider: 'rule',
+        headerRule: false,
+        headingStyle: 'rule-right',
         nameStyle: 'bold',
     },
     'ats-compact': {
         id: 'ats-compact',
-        displayName: 'ATS Compact',
+        displayName: 'Compact',
         description:
-            'Helvetica with tighter spacing and slightly smaller type so longer histories fit on one page. Same parser-safe structure as Classic.',
+            'Tighter spacing, smaller type, and rule-free tracked headings so longer histories fit on one page.',
         pdfFont: 'helvetica',
         cssFont:
             "'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif",
@@ -138,8 +152,33 @@ export const templateRegistry: Record<ResumeTemplate, TemplateDefinition> = {
         itemGap: 5,
         bulletGap: 1,
         headerAlignment: 'left',
-        sectionDivider: 'rule',
+        headerRule: false,
+        headingStyle: 'plain-caps',
         nameStyle: 'bold',
+    },
+    'ats-executive': {
+        id: 'ats-executive',
+        displayName: 'Executive',
+        description:
+            'A tracked uppercase name over a full-width letterhead rule, with headings that trail a rule to the right. An authoritative, senior look.',
+        pdfFont: 'helvetica',
+        cssFont:
+            "'Helvetica Neue', Helvetica, Arial, 'Liberation Sans', sans-serif",
+        sizeName: 21,
+        sizeHeading: 11,
+        sizeItemTitle: 10.5,
+        sizeBody: 10,
+        sizeMeta: 9.5,
+        lineHeight: 1.3,
+        margin: 44,
+        sectionGapBefore: 16,
+        headingGapAfter: 8,
+        itemGap: 9,
+        bulletGap: 2,
+        headerAlignment: 'left',
+        headerRule: true,
+        headingStyle: 'rule-right',
+        nameStyle: 'uppercase',
     },
 };
 
@@ -149,7 +188,7 @@ export const templateRegistry: Record<ResumeTemplate, TemplateDefinition> = {
 // saved resumes continue to render without forcing a data migration.
 const LEGACY_TEMPLATE_MAP: Record<string, ResumeTemplate> = {
     classic: 'ats-classic',
-    executive: 'ats-modern',
+    executive: 'ats-executive',
     minimal: 'ats-classic',
     compact: 'ats-compact',
     technical: 'ats-classic',

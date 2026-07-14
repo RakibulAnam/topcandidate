@@ -1,100 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { ResumeData, AppStep, ToolkitItem } from '../domain/entities';
-import {
-  TargetJobStep,
-  PersonalInfoStep,
-  ExperienceStep,
-  ProjectsStep,
-  EducationStep,
-  SkillsStep,
-  ExtracurricularStep,
-  AwardsStep,
-  CertificationsStep,
-  AffiliationsStep,
-  PublicationsStep,
-  LanguagesStep,
-  ReferencesStep,
-  SectionSelectionStep,
-} from './components/FormSteps';
 import { Preview } from './components/Preview';
 import { ResumeService } from '../application/services/ResumeService';
 import { isGibberish } from '../application/validation/gibberishDetector';
 import { isValidEmail } from './components/ui/EmailInput';
 import { isValidPhone } from './components/ui/PhoneInput';
 import { useAuth } from '../infrastructure/auth/AuthContext';
-import { ChevronRight, ChevronLeft, Sparkles, AlertTriangle } from 'lucide-react';
+import { Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Layout/Navbar';
-import { BuilderStepper } from './components/Builder/BuilderStepper';
 import { PurchaseModal } from './components/PurchaseModal';
 import { profileRepository } from '../infrastructure/config/dependencies';
 import { ApiCallError } from '../infrastructure/ai/proxy/ProxyClients';
 import { useT } from './i18n/LocaleContext';
 
-const stepsInfoFor = (t: ReturnType<typeof useT>) => [
-  { id: AppStep.SECTIONS, title: t('builder.stepsSections') },
-  { id: AppStep.TARGET_JOB, title: t('builder.stepsTargetJob') },
-  { id: AppStep.PERSONAL_INFO, title: t('builder.stepsPersonalInfo') },
-  { id: AppStep.EXPERIENCE, title: t('builder.stepsExperience') },
-  { id: AppStep.PROJECTS, title: t('builder.stepsProjects') },
-  { id: AppStep.EDUCATION, title: t('builder.stepsEducation') },
-  { id: AppStep.SKILLS, title: t('builder.stepsSkills') },
-  { id: AppStep.EXTRACURRICULARS, title: t('builder.stepsActivities') },
-  { id: AppStep.AWARDS, title: t('builder.stepsAwards') },
-  { id: AppStep.CERTIFICATIONS, title: t('builder.stepsCertifications') },
-  { id: AppStep.AFFILIATIONS, title: t('builder.stepsAffiliations') },
-  { id: AppStep.PUBLICATIONS, title: t('builder.stepsPublications') },
-  { id: AppStep.LANGUAGES, title: t('builder.stepsLanguages') },
-  { id: AppStep.REFERENCES, title: t('builder.stepsReferences') },
-];
-
-// Static IDs without titles — used by getVisibleSteps which is called outside React.
-const STEP_IDS_INFO: { id: AppStep }[] = [
-  AppStep.SECTIONS, AppStep.TARGET_JOB, AppStep.PERSONAL_INFO,
-  AppStep.EXPERIENCE, AppStep.PROJECTS, AppStep.EDUCATION, AppStep.SKILLS,
-  AppStep.EXTRACURRICULARS, AppStep.AWARDS, AppStep.CERTIFICATIONS,
-  AppStep.AFFILIATIONS, AppStep.PUBLICATIONS, AppStep.LANGUAGES, AppStep.REFERENCES,
-].map(id => ({ id }));
-
-const DEFAULT_SECTIONS = [
-  'experience', 'education', 'projects', 'skills',
-  'extracurriculars', 'awards', 'certifications', 'affiliations', 'publications',
-  'languages', 'references',
-];
-
-// The student/experienced selector was removed — there's no USER_TYPE step and
-// no userType-based section filtering. Which section steps appear is driven
-// purely by the user's section selection (the SECTIONS step); when nothing is
-// explicitly selected yet, every section is shown.
-export const getVisibleSteps = (visibleSections?: string[]) => {
-  const baseSteps = [AppStep.SECTIONS, AppStep.TARGET_JOB, AppStep.PERSONAL_INFO];
-
-  const sectionMap: Record<string, AppStep> = {
-    'experience': AppStep.EXPERIENCE,
-    'projects': AppStep.PROJECTS,
-    'education': AppStep.EDUCATION,
-    'skills': AppStep.SKILLS,
-    'extracurriculars': AppStep.EXTRACURRICULARS,
-    'awards': AppStep.AWARDS,
-    'certifications': AppStep.CERTIFICATIONS,
-    'affiliations': AppStep.AFFILIATIONS,
-    'publications': AppStep.PUBLICATIONS,
-    'languages': AppStep.LANGUAGES,
-    'references': AppStep.REFERENCES,
-  };
-
-  return STEP_IDS_INFO.filter(s => {
-    if (baseSteps.includes(s.id)) return true;
-    const sectionKey = Object.keys(sectionMap).find(key => sectionMap[key] === s.id);
-    if (sectionKey) {
-      if (visibleSections && visibleSections.length > 0) {
-        return visibleSections.includes(sectionKey);
-      }
-      return true; // no explicit selection yet → show every section
-    }
-    return false;
-  });
-};
 
 interface BuilderScreenProps {
   initialData: ResumeData;
@@ -102,6 +21,10 @@ interface BuilderScreenProps {
   currentResumeId: string | null;
   resumeService: ResumeService | null;
   onExit: () => void;
+  // When true (entered from the Summary screen), generation fires automatically
+  // once credits are known and this screen renders only Generating → Preview
+  // (or an error + retry). The step wizard has been retired.
+  autoGenerate?: boolean;
 }
 
 export const BuilderScreen: React.FC<BuilderScreenProps> = ({
@@ -110,6 +33,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   currentResumeId,
   resumeService,
   onExit,
+  autoGenerate = false,
 }) => {
   const { user } = useAuth();
   const t = useT();
@@ -351,353 +275,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     }
   };
 
-  const validateStep = (currentStepId: AppStep, showToast = true): boolean => {
-    const newErrors: Record<string, string> = {};
-    let isValid = true;
 
-    // Gibberish guard — refuses to advance past free-form text fields that
-    // look like keyboard mashing. Skips proper-noun fields (company, school,
-    // person names) where a dictionary check would false-positive. Errors
-    // here surface inline on the field, matching how required-field errors
-    // already render.
-    const GIBBERISH_MSG = t('builder.gibberishField');
-    const flagIfGibberish = (key: string, text: string | undefined) => {
-      if (text && text.trim().length > 0 && isGibberish(text)) {
-        newErrors[key] = GIBBERISH_MSG;
-        isValid = false;
-      }
-    };
 
-    switch (currentStepId) {
-      case AppStep.SECTIONS:
-        if (!resumeData.visibleSections || resumeData.visibleSections.length === 0) {
-          if (showToast) toast.error(t('builder.selectAtLeastOneSection'));
-          isValid = false;
-        }
-        break;
-
-      case AppStep.TARGET_JOB:
-        if (!(resumeData.targetJob?.title || '').trim()) {
-          newErrors['targetJob.title'] = t('builder.errJobTitle');
-          isValid = false;
-        }
-        if (!(resumeData.targetJob?.company || '').trim()) {
-          newErrors['targetJob.company'] = t('builder.errCompany');
-          isValid = false;
-        }
-        if (!(resumeData.targetJob?.description || '').trim()) {
-          newErrors['targetJob.description'] = t('builder.errJobDescription');
-          isValid = false;
-        }
-        flagIfGibberish('targetJob.title', resumeData.targetJob?.title);
-        flagIfGibberish('targetJob.description', resumeData.targetJob?.description);
-        break;
-
-      case AppStep.PERSONAL_INFO:
-        if (!(resumeData.personalInfo.fullName || '').trim()) {
-          newErrors['personalInfo.fullName'] = t('builder.errFullName');
-          isValid = false;
-        }
-        if (!(resumeData.personalInfo.email || '').trim()) {
-          newErrors['personalInfo.email'] = t('builder.errEmail');
-          isValid = false;
-        } else if (!isValidEmail(resumeData.personalInfo.email)) {
-          newErrors['personalInfo.email'] = t('builder.errEmailInvalid');
-          isValid = false;
-        }
-        if ((resumeData.personalInfo.phone || '').trim() && !isValidPhone(resumeData.personalInfo.phone)) {
-          newErrors['personalInfo.phone'] = t('builder.errPhoneInvalid');
-          isValid = false;
-        }
-        break;
-
-      case AppStep.EXPERIENCE:
-        // Experience is optional/skippable — validate only the entries added.
-        resumeData.experience.forEach((exp, index) => {
-          if (!(exp.company || '').trim()) {
-            newErrors[`experience.${index}.company`] = t('builder.errExpCompany');
-            isValid = false;
-          }
-          if (!(exp.role || '').trim()) {
-            newErrors[`experience.${index}.role`] = t('builder.errExpRole');
-            isValid = false;
-          }
-          if (!(exp.startDate || '').trim()) {
-            newErrors[`experience.${index}.startDate`] = t('builder.errStartDate');
-            isValid = false;
-          }
-          if (!exp.isCurrent && !(exp.endDate || '').trim()) {
-            newErrors[`experience.${index}.endDate`] = t('builder.errEndDate');
-            isValid = false;
-          }
-          if (!(exp.rawDescription || '').trim()) {
-            newErrors[`experience.${index}.rawDescription`] = t('builder.errDescription');
-            isValid = false;
-          }
-          flagIfGibberish(`experience.${index}.role`, exp.role);
-          flagIfGibberish(`experience.${index}.rawDescription`, exp.rawDescription);
-        });
-        break;
-
-      case AppStep.PROJECTS:
-        // Projects are optional/skippable — validate only the entries added.
-        resumeData.projects.forEach((proj, index) => {
-          if (!(proj.name || '').trim()) {
-            newErrors[`projects.${index}.name`] = t('builder.errProjectName');
-            isValid = false;
-          }
-          if (!(proj.rawDescription || '').trim()) {
-            newErrors[`projects.${index}.rawDescription`] = t('builder.errDescription');
-            isValid = false;
-          }
-          flagIfGibberish(`projects.${index}.name`, proj.name);
-          flagIfGibberish(`projects.${index}.rawDescription`, proj.rawDescription);
-        });
-        break;
-
-      case AppStep.EDUCATION:
-        resumeData.education.forEach((edu, index) => {
-          if (!(edu.school || '').trim()) {
-            newErrors[`education.${index}.school`] = t('builder.errSchool');
-            isValid = false;
-          }
-          if (!(edu.degree || '').trim()) {
-            newErrors[`education.${index}.degree`] = t('builder.errDegree');
-            isValid = false;
-          }
-          if (!(edu.field || '').trim()) {
-            newErrors[`education.${index}.field`] = t('builder.errField');
-            isValid = false;
-          }
-          // Start date is optional for education (single-date entries are
-          // common). Only the end date is mandatory; "Present" satisfies it.
-          if (!(edu.endDate || '').trim()) {
-            newErrors[`education.${index}.endDate`] = t('builder.errEndYear');
-            isValid = false;
-          }
-          flagIfGibberish(`education.${index}.field`, edu.field);
-        });
-        break;
-
-      case AppStep.SKILLS:
-        // Skills are optional/skippable now — the optimizer derives skills from
-        // experience/project descriptions when none are listed.
-        break;
-
-      case AppStep.EXTRACURRICULARS:
-        resumeData.extracurriculars?.forEach((item, index) => {
-          if (!(item.title || '').trim()) {
-            newErrors[`extracurriculars.${index}.title`] = t('builder.errRole');
-            isValid = false;
-          }
-          if (!(item.organization || '').trim()) {
-            newErrors[`extracurriculars.${index}.organization`] = t('builder.errOrganization');
-            isValid = false;
-          }
-          if (!(item.startDate || '').trim()) {
-            newErrors[`extracurriculars.${index}.startDate`] = t('builder.errStartDate');
-            isValid = false;
-          }
-          if (!(item.endDate || '').trim()) {
-            newErrors[`extracurriculars.${index}.endDate`] = t('builder.errEndDate');
-            isValid = false;
-          }
-          flagIfGibberish(`extracurriculars.${index}.title`, item.title);
-          flagIfGibberish(`extracurriculars.${index}.description`, item.description);
-        });
-        break;
-
-      case AppStep.AWARDS:
-        resumeData.awards?.forEach((item, index) => {
-          if (!(item.title || '').trim()) {
-            newErrors[`awards.${index}.title`] = t('builder.errAwardTitle');
-            isValid = false;
-          }
-          if (!(item.issuer || '').trim()) {
-            newErrors[`awards.${index}.issuer`] = t('builder.errIssuer');
-            isValid = false;
-          }
-          if (!(item.date || '').trim()) {
-            newErrors[`awards.${index}.date`] = t('builder.errDate');
-            isValid = false;
-          }
-          flagIfGibberish(`awards.${index}.title`, item.title);
-          flagIfGibberish(`awards.${index}.description`, item.description);
-        });
-        break;
-
-      case AppStep.CERTIFICATIONS:
-        resumeData.certifications?.forEach((item, index) => {
-          if (!(item.name || '').trim()) {
-            newErrors[`certifications.${index}.name`] = t('builder.errCertName');
-            isValid = false;
-          }
-          if (!(item.issuer || '').trim()) {
-            newErrors[`certifications.${index}.issuer`] = t('builder.errIssuer');
-            isValid = false;
-          }
-          if (!(item.date || '').trim()) {
-            newErrors[`certifications.${index}.date`] = t('builder.errDate');
-            isValid = false;
-          }
-        });
-        break;
-
-      case AppStep.AFFILIATIONS:
-        resumeData.affiliations?.forEach((item, index) => {
-          if (!(item.organization || '').trim()) {
-            newErrors[`affiliations.${index}.organization`] = t('builder.errOrganization');
-            isValid = false;
-          }
-          if (!(item.role || '').trim()) {
-            newErrors[`affiliations.${index}.role`] = t('builder.errRole');
-            isValid = false;
-          }
-          if (!(item.startDate || '').trim()) {
-            newErrors[`affiliations.${index}.startDate`] = t('builder.errStartDate');
-            isValid = false;
-          }
-          if (!(item.endDate || '').trim()) {
-            newErrors[`affiliations.${index}.endDate`] = t('builder.errEndDate');
-            isValid = false;
-          }
-          flagIfGibberish(`affiliations.${index}.role`, item.role);
-        });
-        break;
-
-      case AppStep.PUBLICATIONS:
-        resumeData.publications?.forEach((item, index) => {
-          if (!(item.title || '').trim()) {
-            newErrors[`publications.${index}.title`] = t('builder.errTitle');
-            isValid = false;
-          }
-          if (!(item.publisher || '').trim()) {
-            newErrors[`publications.${index}.publisher`] = t('builder.errPublisher');
-            isValid = false;
-          }
-          if (!(item.date || '').trim()) {
-            newErrors[`publications.${index}.date`] = t('builder.errDate');
-            isValid = false;
-          }
-          flagIfGibberish(`publications.${index}.title`, item.title);
-        });
-        break;
-
-      case AppStep.LANGUAGES:
-        resumeData.languages?.forEach((item, index) => {
-          if (!(item.name || '').trim()) {
-            newErrors[`languages.${index}.name`] = t('builder.errLanguage');
-            isValid = false;
-          }
-        });
-        break;
-
-      case AppStep.REFERENCES:
-        resumeData.references?.forEach((item, index) => {
-          if (!(item.name || '').trim()) {
-            newErrors[`references.${index}.name`] = t('builder.errName');
-            isValid = false;
-          }
-          if (!(item.position || '').trim()) {
-            newErrors[`references.${index}.position`] = t('builder.errPosition');
-            isValid = false;
-          }
-          if (!(item.organization || '').trim()) {
-            newErrors[`references.${index}.organization`] = t('builder.errOrganization');
-            isValid = false;
-          }
-          if (!(item.email || '').trim()) {
-            newErrors[`references.${index}.email`] = t('builder.errEmail');
-            isValid = false;
-          } else if (!isValidEmail(item.email)) {
-            newErrors[`references.${index}.email`] = t('builder.errEmailInvalid');
-            isValid = false;
-          }
-          if (!(item.phone || '').trim()) {
-            newErrors[`references.${index}.phone`] = t('builder.errPhone');
-            isValid = false;
-          } else if (!isValidPhone(item.phone)) {
-            newErrors[`references.${index}.phone`] = t('builder.errPhoneInvalid');
-            isValid = false;
-          }
-          flagIfGibberish(`references.${index}.position`, item.position);
-          flagIfGibberish(`references.${index}.relationship`, item.relationship);
-        });
-        break;
-
-      default:
-        break;
-    }
-
-    setErrors(newErrors);
-
-    // Field-level errors (red borders + inline messages) carry the detail —
-    // the toast just nudges the user to look up. The fallback toast covers
-    // steps that fail without setting any inline error (e.g. "add at least
-    // one work experience").
-    if (!isValid && showToast) {
-      if (Object.keys(newErrors).length > 0) {
-        toast.error(t('builder.fieldsErrorToast'));
-        // Scroll the first invalid field into view + focus it. The audit
-        // (2026-05-30 C9) flagged that long forms felt opaque on failed
-        // validation because the user couldn't tell which field broke.
-        requestAnimationFrame(() => {
-          const firstInvalid = document.querySelector<HTMLElement>('[aria-invalid="true"]');
-          if (firstInvalid) {
-            firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Focus only if it's a focusable input — avoid stealing focus
-            // from a wrapping label or generic div.
-            if ('focus' in firstInvalid && typeof firstInvalid.focus === 'function') {
-              try { firstInvalid.focus({ preventScroll: true }); } catch { /* ignore */ }
-            }
-          }
-        });
-      } else {
-        toast.error(t('builder.fieldsErrorFallback'));
-      }
-    }
-
-    return isValid;
-  };
-
-  const handleNext = () => {
-    if (!validateStep(step, true)) {
-      return;
-    }
-    setErrors({});
-
-    const visibleSteps = getVisibleSteps(resumeData.visibleSections);
-    const currentIndex = visibleSteps.findIndex(s => s.id === step);
-
-    if (currentIndex < visibleSteps.length - 1) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      setStep(visibleSteps[currentIndex + 1].id);
-    } else {
-      handleGenerate();
-    }
-  };
-
-  const handleBack = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    setErrors({});
-
-    const visibleSteps = getVisibleSteps(resumeData.visibleSections);
-    const currentIndex = visibleSteps.findIndex(s => s.id === step);
-
-    // If we're on PREVIEW, currentIndex is -1 (PREVIEW isn't in the
-    // visible-steps list). Send the user back to the last visible step so
-    // they can edit before regenerating.
-    if (step === AppStep.PREVIEW) {
-      setStep(visibleSteps[visibleSteps.length - 1].id);
-      return;
-    }
-
-    if (currentIndex > 0) {
-      setStep(visibleSteps[currentIndex - 1].id);
-    }
-    // currentIndex === 0 → we're on the first step; no back navigation
-    // (the screen's Exit Builder button is the way out).
-  };
 
   const handleGenerate = async (opts?: { skipCreditCheck?: boolean }) => {
     if (!resumeService) {
@@ -866,6 +445,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       const errName = err instanceof Error ? err.name : 'Unknown';
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[builder] generation failed name=${errName} status=${errStatus ?? '-'} code=${errCode ?? '-'} msg="${errMsg}"`);
+      setGenerationError(errMsg);
       // Server says no credits left — open the purchase modal instead of
       // showing an error. Covers the race where the local count was stale
       // (e.g. user bought credits in another tab and they ran out, or the
@@ -908,6 +488,18 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       setIsGenerating(false);
     }
   };
+
+  // Summary-screen fast path: once credits are known, fire generation once.
+  // Everything (profile data, targetJob, visibleSections) is already set on
+  // initialData by App before navigating here, so no step input is needed.
+  const autoGenFired = useRef(false);
+  useEffect(() => {
+    if (autoGenerate && !autoGenFired.current && resumeService && credits !== null) {
+      autoGenFired.current = true;
+      void handleGenerate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoGenerate, resumeService, credits]);
 
   const handlePurchaseSuccess = () => {
     if (!user) return;
@@ -977,36 +569,13 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     );
   }
 
-  const visibleStepIds = getVisibleSteps(resumeData.visibleSections);
-  const stepInfoMap = new Map(stepsInfoFor(t).map(s => [s.id, s]));
-  const visibleSteps = visibleStepIds.map(s => stepInfoMap.get(s.id) ?? { id: s.id, title: '' });
-  const isLastStep = visibleSteps.length > 0 && visibleSteps[visibleSteps.length - 1].id === step;
-  const isFirstStep = visibleSteps.length > 0 && visibleSteps[0].id === step;
-  // "Skip" when the current section step has no content; section steps are
-  // everything except the SECTIONS picker, TARGET_JOB and PERSONAL_INFO.
-  const sectionItemCount = (s: AppStep): number => {
-    switch (s) {
-      case AppStep.EXPERIENCE: return resumeData.experience.length;
-      case AppStep.PROJECTS: return resumeData.projects?.length ?? 0;
-      case AppStep.EDUCATION: return resumeData.education.length;
-      case AppStep.SKILLS: return resumeData.skills.length;
-      case AppStep.EXTRACURRICULARS: return resumeData.extracurriculars?.length ?? 0;
-      case AppStep.AWARDS: return resumeData.awards?.length ?? 0;
-      case AppStep.CERTIFICATIONS: return resumeData.certifications?.length ?? 0;
-      case AppStep.AFFILIATIONS: return resumeData.affiliations?.length ?? 0;
-      case AppStep.PUBLICATIONS: return resumeData.publications?.length ?? 0;
-      case AppStep.LANGUAGES: return resumeData.languages?.length ?? 0;
-      case AppStep.REFERENCES: return resumeData.references?.length ?? 0;
-      default: return -1; // not an item section (SECTIONS / TARGET_JOB / PERSONAL_INFO)
-    }
-  };
-  const showSkip = !isLastStep && sectionItemCount(step) === 0;
-  // A resume + toolkit can only be generated with at least one education or
-  // experience entry (enforced in handleGenerate + OptimizeResumeUseCase).
-  const canGenerateContent = resumeData.education.length > 0 || resumeData.experience.length > 0;
-
+  // Tailored flow (entered from the Summary screen): there is no step wizard.
+  // autoGenerate fires generation on mount; this shows a calm progress screen
+  // while it runs and a retry on failure. Opening an existing resume returns
+  // <Preview> above, so this render only ever shows generate / error states.
+  const artifactChips = ['chipResume', 'chipCover', 'chipEmail', 'chipLinkedin', 'chipInterview'];
   return (
-    <div className="min-h-screen bg-paper flex flex-col">
+    <div className="flex min-h-screen flex-col" style={{ background: '#F6F4EE' }}>
       <Navbar
         onDashboardClick={onExit}
         showExitBuilder={true}
@@ -1014,219 +583,57 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onBuyCredits={() => setPurchaseModalOpen(true)}
         onCredited={handlePurchaseSuccess}
       />
-      <BuilderStepper
-        steps={visibleSteps}
-        currentStep={step}
-        onJumpToStep={(targetStep) => {
-          // Backward jumps only — guarded inside the stepper too, but
-          // we double-check here. Forward jumps would skip validation.
-          const targetIdx = visibleSteps.findIndex(s => s.id === targetStep);
-          const currentIdx = visibleSteps.findIndex(s => s.id === step);
-          if (targetIdx >= 0 && targetIdx < currentIdx) {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            setErrors({});
-            setStep(targetStep);
-          }
-        }}
-      />
-
-      <main className="flex-1 max-w-3xl mx-auto w-full p-4 md:p-8">
-        {/* No-content gate banner — until there's an education or experience
-            entry, neither the tailored resume nor its toolkit can be generated
-            (the gate in handleGenerate blocks it). Shown on every step so the
-            user knows before reaching Generate, including the from-scratch path. */}
-        {resumeData.education.length === 0 && resumeData.experience.length === 0 && (
-          <div className="mb-4 bg-accent-50 border border-accent-200 rounded-xl px-4 py-3 flex items-start gap-3">
-            <AlertTriangle size={18} className="text-accent-600 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-charcoal-700">{t('builder.noResumeWarn')}</p>
-          </div>
-        )}
-        <div className="bg-white rounded-xl shadow-sm border border-charcoal-100 p-6 md:p-10 min-h-[500px] relative">
-          {step === AppStep.SECTIONS && (
-            <SectionSelectionStep
-              selected={resumeData.visibleSections || []}
-              update={sections => setResumeData(prev => ({ ...prev, visibleSections: sections }))}
-              userType={resumeData.userType}
-            />
-          )}
-          {step === AppStep.TARGET_JOB && (
-            <TargetJobStep
-              data={resumeData.targetJob}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, targetJob: d }))}
-            />
-          )}
-          {step === AppStep.PERSONAL_INFO && (
-            <PersonalInfoStep
-              data={resumeData.personalInfo}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, personalInfo: d }))}
-            />
-          )}
-          {step === AppStep.EXPERIENCE && (
-            <ExperienceStep
-              data={resumeData.experience}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, experience: d }))}
-            />
-          )}
-          {step === AppStep.PROJECTS && (
-            <ProjectsStep
-              data={resumeData.projects}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, projects: d }))}
-              userType={resumeData.userType}
-            />
-          )}
-          {step === AppStep.EDUCATION && (
-            <EducationStep
-              data={resumeData.education}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, education: d }))}
-            />
-          )}
-          {step === AppStep.SKILLS && (
-            <SkillsStep
-              data={resumeData.skills}
-              update={d => setResumeData(prev => ({ ...prev, skills: d }))}
-              userType={resumeData.userType}
-              jdText={resumeData.targetJob?.description}
-              profilePool={profileSkills}
-              companyName={resumeData.targetJob?.company}
-            />
-          )}
-          {step === AppStep.EXTRACURRICULARS && (
-            <ExtracurricularStep
-              data={resumeData.extracurriculars || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, extracurriculars: d }))}
-            />
-          )}
-          {step === AppStep.AWARDS && (
-            <AwardsStep
-              data={resumeData.awards || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, awards: d }))}
-            />
-          )}
-          {step === AppStep.CERTIFICATIONS && (
-            <CertificationsStep
-              data={resumeData.certifications || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, certifications: d }))}
-            />
-          )}
-          {step === AppStep.AFFILIATIONS && (
-            <AffiliationsStep
-              data={resumeData.affiliations || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, affiliations: d }))}
-            />
-          )}
-          {step === AppStep.PUBLICATIONS && (
-            <PublicationsStep
-              data={resumeData.publications || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, publications: d }))}
-            />
-          )}
-          {step === AppStep.LANGUAGES && (
-            <LanguagesStep
-              data={resumeData.languages || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, languages: d }))}
-            />
-          )}
-          {step === AppStep.REFERENCES && (
-            <ReferencesStep
-              data={resumeData.references || []}
-              errors={errors}
-              update={d => setResumeData(prev => ({ ...prev, references: d }))}
-            />
-          )}
-
-          {isGenerating && (
-            <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-50 flex flex-col items-center justify-center rounded-xl">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-charcoal-200 border-t-brand-700 rounded-full animate-spin"></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Sparkles size={24} className="text-accent-500 animate-pulse" />
-                </div>
-              </div>
-              <h3 className="mt-6 font-display text-xl font-semibold text-brand-700">
-                {t('builder.loadingTitle')}
-              </h3>
-              <p className="text-brand-500 mt-2 text-center max-w-md px-4 leading-relaxed">
-                {t('builder.loadingBody')}
-              </p>
+      <main className="flex flex-1 items-center justify-center px-6 py-16">
+        {generationError && !isGenerating ? (
+          <div className="w-full max-w-md text-center">
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50">
+              <AlertTriangle className="text-red-500" size={26} />
             </div>
-          )}
-        </div>
-      </main>
-
-      <footer
-        className="bg-white border-t border-charcoal-200 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sticky bottom-0 z-10 w-full transition-transform duration-150"
-        style={keyboardInset ? { transform: `translateY(-${keyboardInset}px)` } : undefined}
-      >
-        <div className="max-w-3xl mx-auto flex justify-between items-center px-4 md:px-0">
-          <button
-            type="button"
-            onClick={handleBack}
-            disabled={isFirstStep || isGenerating}
-            className={`flex items-center gap-2 px-6 min-h-11 rounded-lg text-sm font-bold transition-colors ${isFirstStep
-              ? 'opacity-0 cursor-default'
-              : 'text-charcoal-600 hover:bg-charcoal-100'
-              }`}
-          >
-            <ChevronLeft size={18} /> {t('builder.backCta')}
-          </button>
-
-          <div className="flex flex-col items-end">
-            {generationError && (
-              <p className="text-red-500 text-xs mb-2 font-medium">
-                {generationError}
-              </p>
-            )}
-            {isLastStep ? (
-              <>
-                {credits !== null && (
-                  <p
-                    className={`text-xs mb-2 font-medium ${credits === 0 ? 'text-accent-700' : 'text-charcoal-500'}`}
-                  >
-                    {credits === 0
-                      ? t('builder.creditsExhausted')
-                      : credits === 1
-                        ? t('builder.creditsRemainingOne')
-                        : t('builder.creditsRemainingMany', { count: credits })}
-                  </p>
-                )}
-                <button
-                  type="button"
-                  onClick={() => { void handleGenerate(); }}
-                  disabled={isGenerating || !canGenerateContent}
-                  title={!canGenerateContent ? t('builder.noResumeWarn') : undefined}
-                  className="flex items-center gap-2 px-8 min-h-11 bg-brand-700 text-charcoal-50 rounded-lg text-sm font-bold hover:bg-brand-800 transition-colors focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
-                >
-                  {isGenerating
-                    ? t('builder.generating')
-                    : credits === 0
-                      ? t('builder.buyGenerationsCta')
-                      : t('builder.buildToolkitCta')}{' '}
-                  <Sparkles size={18} className="text-accent-400" />
-                </button>
-              </>
-            ) : (
+            <h1 className="font-display text-2xl font-semibold text-brand-700">{t('builder.generationErrorTitle')}</h1>
+            <p className="mt-2 text-[15px] leading-relaxed text-charcoal-500">{t('builder.generationErrorBody')}</p>
+            <div className="mt-6 flex items-center justify-center gap-3">
               <button
                 type="button"
-                onClick={handleNext}
-                className="flex items-center gap-2 px-8 min-h-11 bg-charcoal-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors focus-visible:ring-2 focus-visible:ring-charcoal-900 focus-visible:ring-offset-2 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={onExit}
+                className="rounded-full border border-charcoal-300 px-5 py-3 text-sm font-semibold text-brand-700 transition-colors hover:border-brand-700"
               >
-                {showSkip ? t('builder.skipCta') : t('builder.nextCta')} <ChevronRight size={18} />
+                {t('builder.backToDashboard')}
               </button>
-            )}
+              <button
+                type="button"
+                onClick={() => { void handleGenerate(); }}
+                className="inline-flex items-center gap-2 rounded-full bg-accent-400 px-6 py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
+              >
+                <RefreshCw size={15} /> {t('builder.retryCta')}
+              </button>
+            </div>
           </div>
-        </div>
-      </footer>
+        ) : (
+          <div className="w-full max-w-md text-center">
+            <div className="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center">
+              <span className="absolute inset-0 animate-ping rounded-2xl bg-accent-200 opacity-40" />
+              <span
+                className="relative flex h-16 w-16 items-center justify-center rounded-2xl"
+                style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
+              >
+                <Sparkles size={26} className="text-[#FFF7EA]" fill="#FFF7EA" />
+              </span>
+            </div>
+            <h1 className="font-display text-[26px] font-semibold text-brand-700">{t('builder.generatingTitle')}</h1>
+            <p className="mt-2 text-[15px] leading-relaxed text-charcoal-500">{t('builder.generatingBody')}</p>
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
+              {artifactChips.map((k) => (
+                <span
+                  key={k}
+                  className="rounded-full border border-charcoal-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-charcoal-500"
+                >
+                  {t(`dashboard.${k}` as any)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
 
       <PurchaseModal
         isOpen={purchaseModalOpen}
