@@ -739,10 +739,9 @@ export const PersonalInfoStep: React.FC<{
           eyebrow={t('formSteps.phoneLocEyebrow')}
           title={t('formSteps.phoneLocTitle')}
           hint={t('formSteps.phoneLocHint')}
-          optional
         />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <InputGroup label={t('formSteps.phoneLabel')}>
+          <InputGroup label={t('formSteps.phoneLabel')} required>
             <PhoneInput
               value={data.phone}
               onChange={v => update({ ...data, phone: v })}

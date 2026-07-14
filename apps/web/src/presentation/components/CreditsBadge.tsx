@@ -29,10 +29,11 @@ export const CreditsBadge: React.FC<Props> = ({ credits, onBuy }) => {
         type="button"
         onClick={onBuy}
         title={t('navbar.creditsExhaustedTooltip')}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-full bg-accent-400 border border-accent-500 text-brand-800 text-xs font-semibold hover:bg-accent-300 transition-colors"
+        aria-label={t('navbar.creditsExhaustedShort')}
+        className="inline-flex h-9 w-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-accent-500 bg-accent-400 text-xs font-semibold text-brand-800 transition-colors hover:bg-accent-300 sm:h-auto sm:w-auto sm:px-3 sm:py-1.5"
       >
-        <Sparkles size={13} />
-        <span>{t('navbar.creditsExhaustedShort')}</span>
+        <Sparkles size={14} />
+        <span className="hidden sm:inline">{t('navbar.creditsExhaustedShort')}</span>
       </button>
     );
   }

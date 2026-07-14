@@ -8,10 +8,10 @@
 // App's handleStartFromDashboard, which prefills from the profile and enters
 // the builder past the Target Job step. See App.tsx.
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy } from 'lucide-react';
+import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../infrastructure/auth/AuthContext';
-import { createResumeService } from '../infrastructure/config/dependencies';
+import { createResumeService, profileRepository } from '../infrastructure/config/dependencies';
 import { ResumeService } from '../application/services/ResumeService';
 import type { ResumeListItem } from '../domain/repositories/IResumeRepository';
 import type { NavScreen } from './hooks/useBrowserNav';
@@ -56,6 +56,8 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const [recent, setRecent] = useState<ResumeListItem[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
   const [buildingMaster, setBuildingMaster] = useState(false);
+  // Profile has neither education nor experience → nothing can be generated.
+  const [profileEmpty, setProfileEmpty] = useState(false);
 
   const firstName = (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0]
     ?? user?.email?.split('@')[0]
@@ -73,6 +75,12 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
     svc.getGeneratedResumesPaginated(user.id, { page: 1, pageSize: RECENT_LIMIT })
       .then(({ items, total }) => { if (!cancelled) { setRecent(items); setRecentTotal(total); } })
       .catch((err) => { if (!cancelled) console.warn('recent toolkits failed', err); });
+    // The hard content gate is education OR experience — if both are empty,
+    // no toolkit or general resume can be generated. Surface a banner.
+    Promise.all([
+      profileRepository.getExperiences(user.id).catch(() => []),
+      profileRepository.getEducations(user.id).catch(() => []),
+    ]).then(([exps, edus]) => { if (!cancelled) setProfileEmpty(exps.length === 0 && edus.length === 0); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
@@ -106,6 +114,30 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
   return (
     <div className="flex flex-col gap-[clamp(28px,4vw,40px)]">
+      {/* Incomplete-profile warning — no education/experience means nothing can
+          be generated (no toolkits, no general resume). */}
+      {profileEmpty && (
+        <section>
+          <div className="flex flex-col gap-4 rounded-[18px] border border-accent-200 bg-accent-50 px-[clamp(18px,3vw,28px)] py-5 sm:flex-row sm:items-center">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] bg-accent-400 text-brand-800">
+              <AlertTriangle size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-[18px] font-semibold text-brand-700">{t('dashboard.profileIncompleteTitle')}</p>
+              <p className="mt-1 text-[14px] leading-relaxed text-charcoal-600">{t('dashboard.profileIncompleteBody')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onEditProfile}
+              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 sm:w-auto"
+            >
+              {t('dashboard.profileIncompleteCta')}
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Hero */}
       <section>
         <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.08em] text-accent-600">{today}</div>
