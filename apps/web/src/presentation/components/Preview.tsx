@@ -376,17 +376,58 @@ export const Preview: React.FC<PreviewProps> = ({
     marginTop: `${template.sectionGapBefore}pt`,
   };
 
-  const sectionHeadingStyle: React.CSSProperties = {
+  // Shared heading text styling. 'plain-caps' tracks the caps a touch wider
+  // (mirrors its rule-free, letter-spaced identity). The underline is applied
+  // by the sectionHeading() helper below, per headingStyle.
+  const sectionHeadingTextStyle: React.CSSProperties = {
     fontSize: `${template.sizeHeading}pt`,
     fontWeight: 700,
     textTransform: 'uppercase',
-    letterSpacing: '0.04em',
+    letterSpacing: template.headingStyle === 'plain-caps' ? '0.12em' : '0.04em',
     margin: 0,
-    paddingBottom:
-      template.sectionDivider === 'rule' ? `${template.headingGapAfter / 2}pt` : 0,
-    borderBottom:
-      template.sectionDivider === 'rule' ? '0.6pt solid #000' : 'none',
-    marginBottom: `${template.headingGapAfter}pt`,
+    whiteSpace: 'nowrap',
+  };
+
+  // Renders a section heading in one of three ATS-safe styles, mirroring
+  // PdfResumeExporter.renderSectionHeading:
+  //  - 'rule-under' : caps above a full-width 0.6pt underline
+  //  - 'rule-right' : caps followed by a thin rule filling the width to its right
+  //  - 'plain-caps' : tracked caps, no rule
+  // A render function (not a nested component) to match this file's idiom and
+  // avoid remounting the subtree on every Preview render.
+  const sectionHeading = (title: string) => {
+    if (template.headingStyle === 'rule-right') {
+      return (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6pt',
+            marginBottom: `${template.headingGapAfter}pt`,
+          }}
+        >
+          <h3 style={sectionHeadingTextStyle}>{title}</h3>
+          <span style={{ flex: 1, borderTop: '0.6pt solid #000', height: 0 }} />
+        </div>
+      );
+    }
+    return (
+      <h3
+        style={{
+          ...sectionHeadingTextStyle,
+          whiteSpace: 'normal',
+          paddingBottom:
+            template.headingStyle === 'rule-under'
+              ? `${template.headingGapAfter / 2}pt`
+              : 0,
+          borderBottom:
+            template.headingStyle === 'rule-under' ? '0.6pt solid #000' : 'none',
+          marginBottom: `${template.headingGapAfter}pt`,
+        }}
+      >
+        {title}
+      </h3>
+    );
   };
 
   const itemBlockStyle: React.CSSProperties = {
@@ -525,11 +566,22 @@ export const Preview: React.FC<PreviewProps> = ({
         {contactSegments.length > 0 && (
           <ContactSegmentsLine segments={contactSegments} style={contactLineStyle} />
         )}
+        {/* Optional full-width letterhead rule under the header (mirrors the
+            PDF's headerRule). Block element → spans the content width even when
+            the header text is centered. */}
+        {template.headerRule && (
+          <div
+            style={{
+              borderTop: '0.6pt solid #000',
+              marginTop: `${template.sectionGapBefore * 0.5}pt`,
+            }}
+          />
+        )}
       </header>
 
       {data.summary && (
         <section style={sectionStyle}>
-          <h3 style={sectionHeadingStyle}>Professional Summary</h3>
+          {sectionHeading('Professional Summary')}
           <EditableElement
             as="p"
             multiline
@@ -549,7 +601,7 @@ export const Preview: React.FC<PreviewProps> = ({
 
       {isVisible('experience') && data.experience.length > 0 && (
         <section style={sectionStyle}>
-          <h3 style={sectionHeadingStyle}>Experience</h3>
+          {sectionHeading('Experience')}
           {data.experience.map((exp, expIdx) => (
             <div key={exp.id} style={itemBlockStyle}>
               <div style={itemTitleRowStyle}>
@@ -626,7 +678,7 @@ export const Preview: React.FC<PreviewProps> = ({
 
       {isVisible('projects') && data.projects && data.projects.length > 0 && (
         <section style={sectionStyle}>
-          <h3 style={sectionHeadingStyle}>Projects</h3>
+          {sectionHeading('Projects')}
           {data.projects.map((project, projIdx) => (
             <div key={project.id} style={itemBlockStyle}>
               <div style={itemTitleRowStyle}>
@@ -690,7 +742,7 @@ export const Preview: React.FC<PreviewProps> = ({
 
       {isVisible('education') && data.education.length > 0 && (
         <section style={sectionStyle}>
-          <h3 style={sectionHeadingStyle}>Education</h3>
+          {sectionHeading('Education')}
           {data.education.map((edu) => (
             <div key={edu.id} style={itemBlockStyle}>
               <div style={itemTitleRowStyle}>
@@ -715,7 +767,7 @@ export const Preview: React.FC<PreviewProps> = ({
         data.certifications &&
         data.certifications.length > 0 && (
           <section style={sectionStyle}>
-            <h3 style={sectionHeadingStyle}>Certifications</h3>
+            {sectionHeading('Certifications')}
             {data.certifications.map((cert) => (
               <div key={cert.id} style={itemBlockStyle}>
                 <div style={itemTitleRowStyle}>
@@ -732,7 +784,7 @@ export const Preview: React.FC<PreviewProps> = ({
         data.extracurriculars &&
         data.extracurriculars.length > 0 && (
           <section style={sectionStyle}>
-            <h3 style={sectionHeadingStyle}>Extracurricular Activities</h3>
+            {sectionHeading('Extracurricular Activities')}
             {data.extracurriculars.map((activity) => (
               <div key={activity.id} style={itemBlockStyle}>
                 <div style={itemTitleRowStyle}>
@@ -762,7 +814,7 @@ export const Preview: React.FC<PreviewProps> = ({
 
       {isVisible('awards') && data.awards && data.awards.length > 0 && (
         <section style={sectionStyle}>
-          <h3 style={sectionHeadingStyle}>Awards & Honors</h3>
+          {sectionHeading('Awards & Honors')}
           {data.awards.map((award) => (
             <div key={award.id} style={itemBlockStyle}>
               <div style={itemTitleRowStyle}>
@@ -782,7 +834,7 @@ export const Preview: React.FC<PreviewProps> = ({
         data.publications &&
         data.publications.length > 0 && (
           <section style={sectionStyle}>
-            <h3 style={sectionHeadingStyle}>Publications</h3>
+            {sectionHeading('Publications')}
             {data.publications.map((pub) => (
               <div key={pub.id} style={bodyTextStyle}>
                 {pub.title}
@@ -803,7 +855,7 @@ export const Preview: React.FC<PreviewProps> = ({
         data.affiliations &&
         data.affiliations.length > 0 && (
           <section style={sectionStyle}>
-            <h3 style={sectionHeadingStyle}>Affiliations</h3>
+            {sectionHeading('Affiliations')}
             {data.affiliations.map((aff) => (
               <div key={aff.id} style={bodyTextStyle}>
                 {aff.role}, {aff.organization}
@@ -817,7 +869,7 @@ export const Preview: React.FC<PreviewProps> = ({
 
       {isVisible('skills') && data.skills.length > 0 && (
         <section style={sectionStyle}>
-          <h3 style={sectionHeadingStyle}>Skills</h3>
+          {sectionHeading('Skills')}
           {data.skillCategories && data.skillCategories.length > 0 ? (
             data.skillCategories.map((cat) => (
               <div key={cat.category} style={bodyTextStyle}>
@@ -835,7 +887,7 @@ export const Preview: React.FC<PreviewProps> = ({
         data.languages &&
         data.languages.length > 0 && (
           <section style={sectionStyle}>
-            <h3 style={sectionHeadingStyle}>Languages</h3>
+            {sectionHeading('Languages')}
             <div style={bodyTextStyle}>
               {data.languages
                 .filter((l) => l.name)
@@ -849,7 +901,7 @@ export const Preview: React.FC<PreviewProps> = ({
         data.references &&
         data.references.length > 0 && (
           <section style={sectionStyle}>
-            <h3 style={sectionHeadingStyle}>References</h3>
+            {sectionHeading('References')}
             {data.references.map((ref) => (
               <div key={ref.id} style={{ ...bodyTextStyle, marginBottom: '6pt' }}>
                 <div style={{ fontWeight: 600 }}>{ref.name}</div>
@@ -1011,26 +1063,31 @@ export const Preview: React.FC<PreviewProps> = ({
   // Template option rows — reused by the desktop sidebar disclosure and the
   // mobile bottom sheet. Picking one selects the Resume tab and closes the sheet.
   const renderTemplateOptions = (onPick?: () => void) => (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1">
       {Object.values(templateRegistry).map((tpl) => {
         const active = template.id === tpl.id;
         return (
           <button
             type="button"
             key={tpl.id}
+            title={tpl.description}
             onClick={() => {
               setActiveTab('resume');
               onUpdate({ ...data, template: tpl.id });
               onPick?.();
             }}
-            className={`flex items-start gap-3 text-left px-3 py-2.5 rounded-lg border transition-colors ${
+            className={`flex items-center gap-2.5 text-left px-3 py-2 rounded-lg border transition-colors ${
               active ? 'bg-accent-50 border-accent-200' : 'bg-white border-charcoal-200 hover:bg-charcoal-50'
             }`}
           >
-            <Check size={16} className={`mt-0.5 shrink-0 ${active ? 'text-accent-600' : 'text-transparent'}`} />
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-brand-700">{tpl.displayName}</span>
-              <span className="block text-[11px] text-brand-500 leading-snug mt-0.5">{tpl.description}</span>
+            <Check size={15} className={`shrink-0 ${active ? 'text-accent-600' : 'text-transparent'}`} />
+            {/* Name shown in the template's own typeface — a subtle, wordless
+                cue to how the resume will read (no descriptions). */}
+            <span
+              className="min-w-0 truncate text-sm font-semibold text-brand-700"
+              style={{ fontFamily: tpl.cssFont }}
+            >
+              {tpl.displayName}
             </span>
           </button>
         );

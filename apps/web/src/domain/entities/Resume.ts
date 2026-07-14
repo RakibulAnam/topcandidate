@@ -302,14 +302,16 @@ export interface ResumeData {
 }
 
 // All variants are single-column, real-text, no icons / no tables — i.e.
-// structurally ATS-safe. They differ only in typography, alignment, and
+// structurally ATS-safe. They differ in typography, header treatment
+// (alignment + optional letterhead rule), section-heading style, and
 // density. Legacy IDs from earlier versions are still accepted via
 // `resolveTemplate()` in TemplateRegistry.ts.
 export type ResumeTemplate =
   | 'ats-classic'
   | 'ats-modern'
   | 'ats-serif'
-  | 'ats-compact';
+  | 'ats-compact'
+  | 'ats-executive';
 
 export interface OptimizedResumeData {
   summary: string;

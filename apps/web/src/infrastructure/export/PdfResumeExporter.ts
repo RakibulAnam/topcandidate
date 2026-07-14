@@ -346,12 +346,21 @@ export class PdfResumeExporter {
   ): void {
     doc.setFont(t.pdfFont, 'bold');
     doc.setFontSize(t.sizeName);
-    const name = data.personalInfo.fullName || '';
+    // nameStyle 'uppercase' → tracked all-caps, mirroring the Preview's
+    // textTransform:uppercase + letterSpacing:0.06em. setCharSpace is in pt
+    // (unit is pt), so 0.06 × sizeName echoes 0.06em. Reset afterwards so it
+    // doesn't bleed into the contact line / rest of the document.
+    const uppercaseName = t.nameStyle === 'uppercase';
+    const name = uppercaseName
+      ? (data.personalInfo.fullName || '').toUpperCase()
+      : data.personalInfo.fullName || '';
+    if (uppercaseName) doc.setCharSpace(0.06 * t.sizeName);
     cursor.y += t.sizeName;
     const nameX = t.headerAlignment === 'center' ? PAGE_WIDTH / 2 : t.margin;
     doc.text(name, nameX, cursor.y, {
       align: t.headerAlignment === 'center' ? 'center' : 'left',
     });
+    if (uppercaseName) doc.setCharSpace(0);
     cursor.y += 4;
 
     const segments = buildContactSegments(data.personalInfo);
@@ -363,7 +372,18 @@ export class PdfResumeExporter {
       });
     }
 
-    cursor.y += t.sectionGapBefore;
+    // Optional full-width letterhead rule under the header block. We split the
+    // trailing sectionGapBefore around it (≈55% above / 45% below) so the total
+    // header→first-section rhythm is unchanged whether or not the rule is drawn.
+    if (t.headerRule) {
+      cursor.y += t.sectionGapBefore * 0.55;
+      doc.setLineWidth(0.6);
+      doc.setDrawColor(20);
+      doc.line(t.margin, cursor.y, PAGE_WIDTH - t.margin, cursor.y);
+      cursor.y += t.sectionGapBefore * 0.45;
+    } else {
+      cursor.y += t.sectionGapBefore;
+    }
   }
 
   /**
@@ -439,15 +459,31 @@ export class PdfResumeExporter {
     doc.setFont(t.pdfFont, 'bold');
     doc.setFontSize(t.sizeHeading);
     cursor.y += t.sizeHeading;
-    doc.text(title.toUpperCase(), t.margin, cursor.y);
+    const heading = title.toUpperCase();
+    doc.text(heading, t.margin, cursor.y);
 
-    if (t.sectionDivider === 'rule') {
+    if (t.headingStyle === 'rule-under') {
+      // Full-width underline below the heading text.
       cursor.y += t.headingGapAfter / 2;
       doc.setLineWidth(0.6);
       doc.setDrawColor(20);
       doc.line(t.margin, cursor.y, PAGE_WIDTH - t.margin, cursor.y);
       cursor.y += t.headingGapAfter / 2;
+    } else if (t.headingStyle === 'rule-right') {
+      // Thin rule from just past the heading text to the right margin,
+      // vertically centered against the heading's cap height. No extra
+      // vertical advance beyond the plain gap (the rule is inline).
+      const textWidth = doc.getTextWidth(heading);
+      const ruleY = cursor.y - t.sizeHeading * 0.28;
+      const startX = t.margin + textWidth + 6;
+      if (startX < PAGE_WIDTH - t.margin) {
+        doc.setLineWidth(0.6);
+        doc.setDrawColor(20);
+        doc.line(startX, ruleY, PAGE_WIDTH - t.margin, ruleY);
+      }
+      cursor.y += t.headingGapAfter;
     } else {
+      // 'plain-caps' — no rule.
       cursor.y += t.headingGapAfter;
     }
   }
