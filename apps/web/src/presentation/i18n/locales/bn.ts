@@ -135,6 +135,7 @@ export const bn: Dictionary = {
     backToDashboard: 'ড্যাশবোর্ডে ফিরুন',
     resumeTitleSuffix: 'রিজিউমে',
     resumeTitleFallback: 'রিজিউমে',
+    tailoredFor: '{company}-এর জন্য তৈরি',
     regenerateLocked: 'আবার তৈরি করা লক',
     regenerate: 'আবার তৈরি করুন',
     regenerateLockedTitle: 'সাধারণ রিজিউমে আবার তৈরি করুন',

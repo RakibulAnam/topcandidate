@@ -169,6 +169,11 @@ const ScaledDocument: React.FC<{ zoom: ZoomMode; children: React.ReactNode }> = 
           // visible is clipped. At 100% the box matches the sheet 1:1, so the
           // ancestor pane (overflow-x: auto) provides the horizontal pan.
           overflow: 'hidden',
+          // Decorative sheet framing (chrome only — does NOT touch the pt-locked
+          // document sizing or the PDF exporter). border-radius clips the sheet
+          // corners; the box's own shadow is drawn outside overflow:hidden.
+          borderRadius: 14,
+          boxShadow: '0 12px 40px -18px rgba(25,23,18,0.22)',
         }}
       >
         <div
@@ -995,6 +1000,12 @@ export const Preview: React.FC<PreviewProps> = ({
     { id: 'linkedInMessage', label: t('preview.tabLinkedIn'), icon: Linkedin, status: 'linkedInMessage' },
     { id: 'interviewPrep', label: t('preview.tabQuestionPrep'), icon: MessageSquare, status: 'interviewQuestions' },
   ];
+  // Grouped artifact nav (desktop sidebar). Labels reuse the existing sidebar keys.
+  const TAB_GROUPS: { labelKey: string; ids: PreviewTab[] }[] = [
+    { labelKey: 'preview.sidebarDocs', ids: ['resume', 'coverLetter'] },
+    { labelKey: 'preview.sidebarOutreach', ids: ['outreachEmail', 'linkedInMessage'] },
+    { labelKey: 'preview.sidebarInterview', ids: ['interviewPrep'] },
+  ];
   const isDocTab = activeTab === 'resume' || activeTab === 'coverLetter';
 
   // Template option rows — reused by the desktop sidebar disclosure and the
@@ -1028,10 +1039,10 @@ export const Preview: React.FC<PreviewProps> = ({
   );
 
   return (
-    <div className="flex flex-col h-dvh bg-charcoal-50 overflow-hidden">
+    <div className="flex flex-col h-dvh overflow-hidden" style={{ background: '#F6F4EE' }}>
       {/* ── Mobile app bar — slim identity + overflow menu. The document is the
           hero; chrome stays out of its way. ───────────────────────────────── */}
-      <header className="md:hidden sticky top-0 z-20 flex items-center gap-1 px-3 h-14 bg-white border-b border-charcoal-200 shrink-0">
+      <header className="md:hidden sticky top-0 z-20 flex items-center gap-1 px-3 h-14 bg-[rgba(246,244,238,0.92)] backdrop-blur-[12px] border-b border-charcoal-200 shrink-0">
         <button
           type="button"
           onClick={onGoHome}
@@ -1106,7 +1117,7 @@ export const Preview: React.FC<PreviewProps> = ({
 
       {/* ── Desktop header (unchanged identity + actions; zoom lives only on
           phones, where it earns its place) ────────────────────────────────── */}
-      <header className="hidden md:flex sticky top-0 z-10 items-center justify-between px-6 py-4 bg-white border-b border-charcoal-200 shadow-sm shrink-0 gap-4">
+      <header className="hidden md:flex sticky top-0 z-10 items-center justify-between px-6 py-3.5 bg-[rgba(246,244,238,0.9)] backdrop-blur-[12px] border-b border-charcoal-200 shrink-0 gap-4">
         <div className="flex items-center justify-start gap-6">
           <button
             type="button"
@@ -1116,14 +1127,20 @@ export const Preview: React.FC<PreviewProps> = ({
             <ArrowLeft size={18} /> {t('preview.backToDashboard')}
           </button>
 
-          <div className="h-6 w-px bg-charcoal-300"></div>
+          <div className="h-6 w-px bg-charcoal-200"></div>
 
-          <h1 className="text-lg font-semibold text-charcoal-800">
-            {data.targetJob?.title
-              ? `${data.targetJob.title} ${t('preview.resumeTitleSuffix')} - `
-              : `${t('preview.resumeTitleFallback')} - `}
-            {new Date().getFullYear()}
-          </h1>
+          <div className="min-w-0">
+            {data.targetJob?.company && !isGeneralResume && (
+              <p className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-accent-600">
+                {t('preview.tailoredFor', { company: data.targetJob.company })}
+              </p>
+            )}
+            <h1 className="font-display text-[17px] font-semibold text-brand-700 truncate max-w-[42vw]">
+              {data.targetJob?.title
+                ? `${data.targetJob.title} ${t('preview.resumeTitleSuffix')}`
+                : t('preview.resumeTitleFallback')}
+            </h1>
+          </div>
         </div>
 
         <div className="flex items-center gap-3 md:gap-4 w-full md:w-auto justify-end flex-wrap overflow-x-auto scrollbar-hide">
@@ -1133,10 +1150,10 @@ export const Preview: React.FC<PreviewProps> = ({
             <button
               type="button"
               onClick={() => setEditModeActive(v => !v)}
-              className={`flex items-center gap-2 px-3.5 min-h-11 text-sm font-semibold rounded-md border shadow-sm transition-colors ${
+              className={`flex items-center gap-2 px-4 min-h-10 text-[13.5px] font-semibold rounded-full border transition-colors ${
                 editModeActive
-                  ? 'bg-accent-400 border-accent-500 text-brand-900 hover:bg-accent-500'
-                  : 'bg-white border-charcoal-300 text-charcoal-600 hover:bg-charcoal-50'
+                  ? 'bg-accent-400 border-accent-500 text-brand-900 hover:bg-accent-300'
+                  : 'bg-white border-charcoal-300 text-charcoal-600 hover:border-charcoal-400'
               }`}
               title={editModeActive ? t('preview.editModeOn') : t('preview.editModeOff')}
             >
@@ -1160,7 +1177,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 }
               }}
               disabled={!canRegenerate || isRegenerating}
-              className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold rounded-md border shadow-sm transition-colors disabled:opacity-50 bg-white border-brand-200 text-brand-700 hover:bg-brand-50"
+              className="flex items-center gap-2 px-4 min-h-10 text-[13.5px] font-semibold rounded-full border transition-colors disabled:opacity-50 bg-white border-charcoal-300 text-brand-700 hover:border-brand-700"
               title={cooldownText || t('preview.regenerateLockedTitle')}
             >
               {isRegenerating ? (
@@ -1186,7 +1203,7 @@ export const Preview: React.FC<PreviewProps> = ({
                   (activeTab === 'coverLetter' && (!onExportCoverLetter || getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')) ||
                   (activeTab !== 'resume' && activeTab !== 'coverLetter')
                 }
-                className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-md hover:border-brand-700 shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 min-h-10 text-[13.5px] font-semibold text-brand-700 bg-white border border-charcoal-300 rounded-full hover:border-brand-700 transition-colors disabled:opacity-50"
               >
                 <FileText size={16} />
                 {t('preview.downloadWord')}
@@ -1196,7 +1213,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 type="button"
                 onClick={handlePDFExport}
                 disabled={isPdfGenerating || (activeTab === 'coverLetter' && getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) !== 'success')}
-                className="flex items-center gap-2 px-4 min-h-11 text-sm font-semibold text-charcoal-50 bg-brand-700 rounded-md hover:bg-brand-800 shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center gap-2 px-4 min-h-10 text-[13.5px] font-semibold text-charcoal-50 bg-brand-700 rounded-full hover:bg-brand-800 transition-colors disabled:opacity-50"
               >
                 {isPdfGenerating ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -1234,7 +1251,7 @@ export const Preview: React.FC<PreviewProps> = ({
       {/* ── Mobile artifact rail — the single piece of persistent navigation:
           Resume · Cover Letter · Outreach · LinkedIn · Interview. ─────────── */}
       <nav
-        className="md:hidden shrink-0 bg-white border-b border-charcoal-200 overflow-x-auto scrollbar-hide"
+        className="md:hidden shrink-0 bg-[rgba(246,244,238,0.92)] backdrop-blur-[12px] border-b border-charcoal-200 overflow-x-auto scrollbar-hide"
         aria-label={t('preview.sidebarDocs')}
       >
         <div className="flex items-center gap-1.5 px-3 py-2 min-w-max">
@@ -1263,77 +1280,80 @@ export const Preview: React.FC<PreviewProps> = ({
       <div className="flex flex-1 overflow-hidden">
         {/* ── Desktop sidebar — artifact nav first; the template is a quiet,
             collapsible control nested under the active Resume tab. ───────── */}
-        <aside className="hidden md:flex md:w-[260px] bg-white border-r border-charcoal-200 overflow-y-auto flex-shrink-0 flex-col">
-          <nav className="p-4 flex flex-col gap-1">
-            {TABS.map((tab) => {
-              const active = activeTab === tab.id;
-              const Icon = tab.icon;
-              return (
-                <div key={tab.id}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`w-full relative flex items-center justify-between text-left px-3 py-2.5 rounded-lg transition-colors ${
-                      active
-                        ? 'bg-accent-50 text-brand-700 border border-accent-200'
-                        : 'text-brand-600 border border-transparent hover:bg-charcoal-100'
-                    }`}
-                  >
-                    <span className="flex items-center gap-3 min-w-0">
-                      <Icon size={18} className={active ? 'text-accent-600' : 'text-brand-400'} />
-                      <span className="text-sm font-semibold truncate">
-                        {tab.label}
-                        {tab.id === 'interviewPrep' && data.toolkit?.interviewQuestions?.length ? (
-                          <span className="ml-1.5 text-[11px] font-normal text-brand-500">
-                            · {data.toolkit.interviewQuestions.length}
+        <aside className="hidden md:flex md:w-[264px] border-r border-charcoal-200 overflow-y-auto flex-shrink-0 flex-col">
+          <nav className="p-4 flex flex-col gap-5">
+            {TAB_GROUPS.map((group) => (
+              <div key={group.labelKey}>
+                <p className="mb-1.5 px-3 text-[10.5px] font-bold uppercase tracking-[0.12em] text-charcoal-400">
+                  {t(group.labelKey as any)}
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {group.ids.map((id) => {
+                    const tab = TABS.find((x) => x.id === id)!;
+                    const active = activeTab === id;
+                    const Icon = tab.icon;
+                    return (
+                      <div key={id}>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab(id)}
+                          className={`w-full relative flex items-center justify-between text-left px-3 py-2.5 rounded-xl transition-colors ${
+                            active ? 'bg-accent-50 text-accent-700' : 'text-charcoal-500 hover:bg-white'
+                          }`}
+                        >
+                          <span className="flex items-center gap-3 min-w-0">
+                            <Icon size={17} className={active ? 'text-accent-600' : 'text-charcoal-400'} />
+                            <span className="text-[14px] font-semibold truncate">
+                              {tab.label}
+                              {id === 'interviewPrep' && data.toolkit?.interviewQuestions?.length ? (
+                                <span className="ml-1.5 text-[11px] font-normal text-charcoal-400">
+                                  · {data.toolkit.interviewQuestions.length}
+                                </span>
+                              ) : null}
+                            </span>
                           </span>
-                        ) : null}
-                      </span>
-                    </span>
-                    {tab.status && <StatusDot status={statusOf(tab.status)} />}
-                  </button>
+                          {tab.status && <StatusDot status={statusOf(tab.status)} />}
+                        </button>
 
-                  {tab.id === 'resume' && active && (
-                    <div className="mt-1 ml-3 pl-3 border-l border-charcoal-200">
-                      <button
-                        type="button"
-                        onClick={() => setTemplatesOpen((v) => !v)}
-                        aria-expanded={templatesOpen}
-                        className="w-full flex items-center justify-between gap-2 px-2 py-2 rounded-md text-left hover:bg-charcoal-50"
-                      >
-                        <span className="flex items-center gap-2 min-w-0">
-                          <LayoutTemplate size={15} className="text-brand-400 shrink-0" />
-                          <span className="text-[13px] text-brand-600 truncate">
-                            <span className="text-brand-400">{t('preview.templateLabel')}: </span>
-                            {template.displayName}
-                          </span>
-                        </span>
-                        <ChevronDown
-                          size={15}
-                          className={`text-brand-400 shrink-0 transition-transform ${templatesOpen ? 'rotate-180' : ''}`}
-                        />
-                      </button>
-                      {templatesOpen && <div className="mt-1.5 pb-1">{renderTemplateOptions()}</div>}
-                    </div>
-                  )}
+                        {id === 'resume' && active && (
+                          <div className="mt-1.5 ml-11">
+                            <button
+                              type="button"
+                              onClick={() => setTemplatesOpen((v) => !v)}
+                              aria-expanded={templatesOpen}
+                              className="inline-flex max-w-full items-center gap-2 rounded-full border border-charcoal-200 bg-white px-3 py-1.5 text-[12.5px] text-charcoal-500 transition-colors hover:border-charcoal-300"
+                            >
+                              <LayoutTemplate size={14} className="shrink-0 text-charcoal-400" />
+                              <span className="truncate">
+                                <span className="text-charcoal-400">{t('preview.templateLabel')}: </span>
+                                <b className="font-semibold text-brand-700">{template.displayName}</b>
+                              </span>
+                              <ChevronDown size={13} className={`shrink-0 text-charcoal-400 transition-transform ${templatesOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            {templatesOpen && <div className="mt-2">{renderTemplateOptions()}</div>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </nav>
-          <p className="text-[11px] text-brand-500 leading-snug mt-auto p-4 border-t border-charcoal-200">
+          <p className="mt-auto border-t border-charcoal-200 p-4 text-[11px] leading-snug text-charcoal-400">
             {t('preview.sidebarFootnote')}
           </p>
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 bg-charcoal-50 overflow-auto relative">
+        <main className="flex-1 overflow-auto relative" style={{ background: '#F6F4EE' }}>
           {activeTab === 'resume' && (
-            <div className="p-4 md:py-12">
+            <div className="px-4 py-6 md:px-10 md:py-14">
               <ScaledDocument zoom={zoom}>{resumeContent}</ScaledDocument>
             </div>
           )}
           {activeTab === 'coverLetter' && (
-            <div className="p-4 md:py-12">
+            <div className="px-4 py-6 md:px-10 md:py-14">
               {getItemStatus(data, 'coverLetter', regeneratingItem, toolkitPending) === 'success' ? (
                 <ScaledDocument zoom={zoom}>{coverLetterContent}</ScaledDocument>
               ) : (
@@ -1410,7 +1430,7 @@ export const Preview: React.FC<PreviewProps> = ({
       {/* ── Mobile action dock — primary actions in the thumb zone. Shown only
           for the document tabs (toolkit viewers carry their own Copy actions). */}
       {isDocTab && (
-        <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2.5 bg-white border-t border-charcoal-200">
+        <div className="md:hidden shrink-0 flex items-center gap-2 px-3 py-2.5 bg-[rgba(246,244,238,0.95)] backdrop-blur-[12px] border-t border-charcoal-200">
           {activeTab === 'resume' && (
             <button
               type="button"

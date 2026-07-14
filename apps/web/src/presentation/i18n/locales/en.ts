@@ -133,6 +133,7 @@ export const en = {
     backToDashboard: 'Back to Dashboard',
     resumeTitleSuffix: 'Resume',
     resumeTitleFallback: 'Resume',
+    tailoredFor: 'Tailored for {company}',
     regenerateLocked: 'Regenerate Locked',
     regenerate: 'Regenerate',
     regenerateLockedTitle: 'Regenerate General Resume',
