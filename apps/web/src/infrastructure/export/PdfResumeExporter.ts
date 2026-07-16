@@ -583,6 +583,36 @@ export class PdfResumeExporter {
     }
   }
 
+  // Place already-wrapped lines with widow/orphan control: when a ≥2-line
+  // block would split across a page break, keep at least 2 lines together on
+  // each side (never a lone line stranded at the top or bottom of a page).
+  // Blocks taller than a full page fall back to plain per-line breaking.
+  private placeWrapped(
+    doc: jsPDF,
+    lines: string[],
+    lineHeight: number,
+    margin: number,
+    cursor: Cursor,
+    drawLine: (line: string, index: number) => void
+  ): void {
+    const pageBottom = PAGE_HEIGHT - margin;
+    const avail = Math.max(0, Math.floor((pageBottom - cursor.y) / lineHeight));
+    let breakBefore = -1;
+    if (lines.length >= 2 && avail < lines.length) {
+      // Keep ≥2 lines on the continuation page (no widow) and ≥2 on this page
+      // (no orphan); if neither is possible, move the whole block down.
+      let keep = Math.min(avail, lines.length - 2);
+      if (keep < 2) keep = 0;
+      breakBefore = keep;
+    }
+    for (let i = 0; i < lines.length; i++) {
+      if (i === breakBefore) { doc.addPage(); cursor.y = margin; }
+      this.ensureSpace(doc, cursor, lineHeight, margin);
+      cursor.y += lineHeight;
+      drawLine(lines[i], i);
+    }
+  }
+
   private renderBodyLine(
     doc: jsPDF,
     text: string,
@@ -594,11 +624,9 @@ export class PdfResumeExporter {
     doc.setFont(t.pdfFont, 'normal');
     doc.setFontSize(t.sizeBody);
     const lines = doc.splitTextToSize(text, contentWidth);
-    for (const line of lines) {
-      this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
-      cursor.y += t.sizeBody * t.lineHeight;
+    this.placeWrapped(doc, lines, t.sizeBody * t.lineHeight, t.margin, cursor, (line) => {
       doc.text(line, t.margin, cursor.y);
-    }
+    });
   }
 
   private renderParagraph(
@@ -614,11 +642,9 @@ export class PdfResumeExporter {
     const paragraphs = text.split(/\n\s*\n/);
     paragraphs.forEach((para, idx) => {
       const lines = doc.splitTextToSize(para.trim(), contentWidth);
-      for (const line of lines) {
-        this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
-        cursor.y += t.sizeBody * t.lineHeight;
+      this.placeWrapped(doc, lines, t.sizeBody * t.lineHeight, t.margin, cursor, (line) => {
         doc.text(line, t.margin, cursor.y);
-      }
+      });
       if (idx < paragraphs.length - 1) cursor.y += t.sizeBody * 0.6;
     });
   }
@@ -639,12 +665,10 @@ export class PdfResumeExporter {
     const textWidth = contentWidth - bulletIndent;
     const lines = doc.splitTextToSize(text, textWidth);
 
-    for (let i = 0; i < lines.length; i++) {
-      this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
-      cursor.y += t.sizeBody * t.lineHeight;
+    this.placeWrapped(doc, lines, t.sizeBody * t.lineHeight, t.margin, cursor, (line, i) => {
       if (i === 0) doc.text(BULLET_CHAR, t.margin + 2, cursor.y);
-      doc.text(lines[i], textX, cursor.y);
-    }
+      doc.text(line, textX, cursor.y);
+    });
     cursor.y += t.bulletGap;
   }
 
