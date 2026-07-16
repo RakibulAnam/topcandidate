@@ -141,23 +141,10 @@ export const ExperienceSection = ({ experiences, onRefresh }: Props) => {
         }
     };
 
-    return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-charcoal-800 flex items-center gap-2">
-                    <Briefcase size={20} /> Work Experience
-                </h3>
-                {!isEditing && (
-                    <button
-                        onClick={handleAddNew}
-                        className="flex items-center gap-1 text-sm bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium transition-colors"
-                    >
-                        <Plus size={16} /> Add New
-                    </button>
-                )}
-            </div>
-
-            {isEditing && (
+    // The editor form — rendered in ONE of two places: at the top of the list
+    // when adding a new entry (no card exists yet), or IN-PLACE of the card
+    // being edited (so the fields appear exactly where you tapped Edit).
+    const renderForm = () => (
                 <form onSubmit={handleSave} className="bg-charcoal-50 p-4 rounded-xl border border-charcoal-200 animate-in fade-in slide-in-from-top-2">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                         <div>
@@ -261,13 +248,36 @@ Examples from different fields:
                         )}
                     </div>
                 </form>
-            )}
+    );
+
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-charcoal-800 flex items-center gap-2">
+                    <Briefcase size={20} /> Work Experience
+                </h3>
+                {!isEditing && (
+                    <button
+                        onClick={handleAddNew}
+                        className="flex items-center gap-1 text-sm bg-brand-50 text-brand-600 px-3 py-1.5 rounded-lg hover:bg-brand-100 font-medium transition-colors"
+                    >
+                        <Plus size={16} /> Add New
+                    </button>
+                )}
+            </div>
+
+            {/* Adding a new entry: the form sits at the top (no card exists for it yet). */}
+            {isEditing && editingId === null && renderForm()}
 
             <div className="space-y-3">
                 {experiences.length === 0 && !isEditing && (
                     <p className="text-center text-charcoal-400 py-4 text-sm">No experience added yet.</p>
                 )}
                 {experiences.map(exp => (
+                    editingId === exp.id ? (
+                        // Editing: the form replaces this card, exactly where it sits.
+                        <div key={exp.id}>{renderForm()}</div>
+                    ) : (
                     <div key={exp.id} className="bg-white border border-charcoal-100 p-4 rounded-xl hover:shadow-sm transition-shadow group relative">
                         <div className="flex justify-between items-start">
                             <div>
@@ -304,6 +314,7 @@ Examples from different fields:
 
                         <PolishedPreview normalized={exp.normalized} polishing={polishingIds.has(exp.id)} sourceText={exp.rawDescription} sourceHash={exp.normalizedSourceHash} />
                     </div>
+                    )
                 ))}
             </div>
         </div>
