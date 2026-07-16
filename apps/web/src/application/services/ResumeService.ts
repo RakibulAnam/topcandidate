@@ -1,7 +1,8 @@
 // Application Service - Orchestrates use cases
 
-import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors, inferUserType } from '../../domain/entities/Resume';
+import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors, NormalizedItemContent, inferUserType } from '../../domain/entities/Resume';
 import { OptimizeResumeUseCase, IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase';
+import { NormalizeProfileItemUseCase, IProfileItemNormalizer, ProfileItemContext } from '../../domain/usecases/NormalizeProfileItemUseCase';
 import { ExportResumeUseCase, IResumeExporter } from '../../domain/usecases/ExportResumeUseCase';
 import { GenerateCoverLetterUseCase, ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase';
 import { GenerateOutreachEmailUseCase, IOutreachEmailGenerator } from '../../domain/usecases/GenerateOutreachEmailUseCase';
@@ -12,6 +13,7 @@ import { IResumeRepository } from '../../domain/repositories/IResumeRepository';
 import { IProfileRepository } from '../../domain/repositories/IProfileRepository';
 import { assertNotGibberish, FieldCheck } from '../validation/gibberishDetector';
 import { computeProfileHash } from '../validation/profileHash';
+import { contentHash } from '../validation/contentHash';
 import { track } from '../../infrastructure/analytics/track';
 
 export class ResumeService {
@@ -23,6 +25,9 @@ export class ResumeService {
   private linkedInMessageUseCase: GenerateLinkedInMessageUseCase;
   private interviewQuestionsUseCase: GenerateInterviewQuestionsUseCase;
   private toolkitUseCase: GenerateToolkitUseCase;
+  // Per-item AI polish, reused by the general-resume fallback to convert raw
+  // (possibly Banglish) descriptions into professional bullets on demand.
+  private normalizeItemUseCase?: NormalizeProfileItemUseCase;
 
   constructor(
     resumeOptimizer: IResumeOptimizer,
@@ -34,8 +39,12 @@ export class ResumeService {
     toolkitGenerator: IToolkitGenerator,
     private repository: IResumeRepository,
     private profileRepository?: IProfileRepository,
-    generalResumeOptimizer?: IResumeOptimizer
+    generalResumeOptimizer?: IResumeOptimizer,
+    profileItemNormalizer?: IProfileItemNormalizer
   ) {
+    if (profileItemNormalizer) {
+      this.normalizeItemUseCase = new NormalizeProfileItemUseCase(profileItemNormalizer);
+    }
     this.optimizeUseCase = new OptimizeResumeUseCase(resumeOptimizer);
     // Falls back to the regular optimizer if no dedicated general-resume
     // optimizer is wired (e.g. in local dev without the new endpoint).
@@ -360,44 +369,104 @@ export class ResumeService {
     };
   }
 
-  // Split a raw description into bullet lines: explicit lines/bullets first,
-  // else sentence-split. Used only for the general-resume fallback below.
-  private splitToBullets(text: string): string[] {
-    const t = (text || '').trim();
-    if (!t) return [];
-    const byLines = t.split(/\n+/).map(s => s.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
-    if (byLines.length > 1) return byLines;
-    return t.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+  // Resolve professional bullets for one profile item WITHOUT ever surfacing
+  // the user's raw text. Prefers the item's stored AI-normalized bullets; when
+  // those are missing (seeded/legacy data, or a polish that never landed) it
+  // runs the per-item normalizer on the raw text so the AI extracts and cleans
+  // it (Banglish included), and persists the result so the profile carries the
+  // polished version from then on. If the AI is unavailable or fails, it
+  // returns no bullets rather than leaking raw text — raw input must NEVER
+  // appear in a résumé.
+  private async polishedBulletsFor(
+    raw: string,
+    existing: NormalizedItemContent | undefined,
+    context: ProfileItemContext,
+    persist: (normalized: NormalizedItemContent, sourceHash: string) => Promise<void>,
+  ): Promise<string[]> {
+    const have = existing?.bullets;
+    if (have && have.length > 0) return have;
+
+    const text = (raw ?? '').trim();
+    if (!text || !this.normalizeItemUseCase) return [];
+
+    // Provider failures here are usually transient (the same fast-fail the
+    // optimizer's own retry recovers from), so retry a few times before giving
+    // up. We NEVER fall back to the raw text — empty bullets beat unpolished,
+    // possibly non-English input in a résumé.
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const normalized = await this.normalizeItemUseCase.execute(text, context);
+        const bullets = normalized.bullets ?? [];
+        if (bullets.length > 0) {
+          // Best-effort backfill — don't let a persistence hiccup block the résumé.
+          persist(normalized, contentHash(text)).catch(err =>
+            console.warn('[general-resume] failed to persist on-demand normalization:', err));
+        }
+        return bullets;
+      } catch (err) {
+        if (attempt === MAX_ATTEMPTS) {
+          console.warn(`[general-resume] normalize failed after ${MAX_ATTEMPTS} attempts — omitting raw text for this item:`, err);
+          return [];
+        }
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
+    return [];
   }
 
-  private bulletsFor(item: { normalized?: { bullets?: string[] }; rawDescription?: string }): string[] {
-    const n = item.normalized?.bullets;
-    if (n && n.length > 0) return n;
-    return this.splitToBullets(item.rawDescription ?? '');
-  }
+  // Build a general résumé WITHOUT the full optimizer, from each item's polished
+  // bullets — using stored normalization where present and normalizing raw text
+  // on demand (per-item, far more robust than the all-at-once optimizer) where
+  // it isn't. The reliability backstop for the general resume; still AI-clean.
+  private async assembleGeneralFallback(data: ResumeData, prevSummary = ''): Promise<ResumeData> {
+    const repo = this.profileRepository;
+    const [experience, projects, extracurriculars] = await Promise.all([
+      Promise.all(data.experience.map(async e => ({
+        ...e,
+        refinedBullets: await this.polishedBulletsFor(
+          e.rawDescription ?? '', e.normalized,
+          { kind: 'experience', title: e.role, organization: e.company, guided: e.inputMode === 'guided' },
+          (n, h) => repo?.saveExperienceNormalized(e.id, n, h) ?? Promise.resolve(),
+        ),
+      }))),
+      Promise.all(data.projects.map(async p => ({
+        ...p,
+        refinedBullets: await this.polishedBulletsFor(
+          p.rawDescription ?? '', p.normalized,
+          { kind: 'project', title: p.name, technologies: p.technologies, guided: p.inputMode === 'guided' },
+          (n, h) => repo?.saveProjectNormalized(p.id, n, h) ?? Promise.resolve(),
+        ),
+      }))),
+      Promise.all((data.extracurriculars ?? []).map(async x => ({
+        ...x,
+        refinedBullets: await this.polishedBulletsFor(
+          x.description ?? '', x.normalized,
+          { kind: 'extracurricular', title: x.title, organization: x.organization, guided: x.inputMode === 'guided' },
+          (n, h) => repo?.saveExtracurricularNormalized(x.id, n, h) ?? Promise.resolve(),
+        ),
+      }))),
+    ]);
 
-  // Build a general résumé WITHOUT the AI optimizer, straight from the
-  // profile's already-polished (normalized) per-item bullets. Deterministic
-  // and never fails — the reliability backstop for the general resume.
-  private assembleGeneralFallback(data: ResumeData, prevSummary = ''): ResumeData {
     return {
       ...data,
       summary: prevSummary || data.summary || '',
-      experience: data.experience.map(e => ({ ...e, refinedBullets: this.bulletsFor(e) })),
-      projects: data.projects.map(p => ({ ...p, refinedBullets: this.bulletsFor(p) })),
-      extracurriculars: (data.extracurriculars ?? []).map(x => ({ ...x, refinedBullets: this.bulletsFor(x) })),
+      experience,
+      projects,
+      extracurriculars,
     };
   }
 
   // Try the AI optimizer for the general résumé; if it fails (e.g. strict
   // structured-output validation rejects a large, JD-less profile), fall back
-  // to the deterministic profile-based assembly so generation NEVER hard-fails.
+  // to the per-item polished assembly so generation NEVER hard-fails and NEVER
+  // shows raw text.
   private async optimizeOrAssembleGeneral(data: ResumeData, prevSummary = ''): Promise<ResumeData> {
     try {
       const optimized = await this.generalOptimizeUseCase.execute(data);
       return this.mergeOptimizedData(data, optimized);
     } catch (err) {
-      console.warn('[general-resume] optimizer failed — assembling from profile-normalized content:', err);
+      console.warn('[general-resume] optimizer failed — assembling from per-item polished content:', err);
       track('general_resume_fallback_used');
       return this.assembleGeneralFallback(data, prevSummary);
     }
