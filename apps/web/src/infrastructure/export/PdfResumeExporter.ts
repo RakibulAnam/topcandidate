@@ -453,7 +453,16 @@ export class PdfResumeExporter {
     t: TemplateDefinition,
     cursor: Cursor
   ): void {
-    this.ensureSpace(doc, cursor, t.sizeHeading * 3, t.margin);
+    // Heading-orphan control ("keep with next"): never let a section heading
+    // sit alone at the bottom of a page while its content flows to the next.
+    // We reserve room for the heading block PLUS the first slice of content —
+    // NOT the whole section. `sizeItemTitle * 4` matches the largest per-item
+    // ensureSpace() used below, so if this fits, the heading and its first item
+    // land together; a long section still flows/breaks naturally after that
+    // first item (so a big section never jumps wholesale to the next page and
+    // leaves a large gap behind).
+    const headingBlock = (t.sectionGapBefore - t.itemGap) + t.sizeHeading + t.headingGapAfter;
+    this.ensureSpace(doc, cursor, headingBlock + t.sizeItemTitle * 4, t.margin);
     cursor.y += t.sectionGapBefore - t.itemGap;
 
     doc.setFont(t.pdfFont, 'bold');

@@ -661,6 +661,11 @@ export class WordResumeExporter implements IResumeExporter {
     return new Paragraph({
       text,
       heading: HeadingLevel.HEADING_2,
+      // Keep the heading with the item that follows it, so Word never leaves a
+      // section heading stranded at the bottom of a page. Word keeps it with
+      // just the next paragraph (not the whole section), so a long section
+      // still flows without leaving a large gap.
+      keepNext: true,
       border: ruled
         ? {
             bottom: {
