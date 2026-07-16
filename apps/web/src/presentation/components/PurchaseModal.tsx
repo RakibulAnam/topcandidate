@@ -14,16 +14,19 @@
 //      writePendingPurchase().
 //
 // Design notes:
-//   - Split-sheet checkout: a warm-cream receipt panel on the left tells
-//     the user what they're getting and the price; a clean white action
-//     panel on the right is the only place anything happens.
+//   - DESKTOP (md+): split-sheet checkout — a warm-cream receipt panel on the
+//     left tells the user what they're getting and the price; a clean white
+//     action panel on the right is the only place anything happens.
+//   - MOBILE (<md): a native bottom sheet. The buyer already decided to pay,
+//     so it LEADS WITH THE ACTION: the receipt collapses to a one-line
+//     disclosure ribbon at the top, the bKash number + Copy and the TrxID
+//     field own the viewport, and the sheet is sized to window.visualViewport
+//     so the input and the sticky CTA stay above the soft keyboard.
 //   - bKash magenta (#E2136E) is the action color for THIS component only,
-//     authorised by the user. Saffron is intentionally not used here so
-//     the user feels they are in a bKash-branded surface for the duration
-//     of the payment. See AGENTS.md §10 for the scoped exception.
-//   - Body scroll is locked while open so wheel/swipe events don't move
-//     the page behind. The right panel has its own scrollable middle so
-//     the sticky CTA at the bottom is always visible.
+//     authorised by the user. Saffron is intentionally not used here so the
+//     user feels they are in a bKash-branded surface for the duration of the
+//     payment. See AGENTS.md §10 for the scoped exception.
+//   - Body scroll is locked while open.
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -34,6 +37,7 @@ import {
   ArrowRight,
   ShieldCheck,
   Plus,
+  ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useT } from '../i18n/LocaleContext';
@@ -69,7 +73,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   const [senderMsisdn, setSenderMsisdn] = useState('');
   const [copied, setCopied] = useState(false);
   const [showPhone, setShowPhone] = useState(false);
+  const [featuresOpen, setFeaturesOpen] = useState(false); // mobile receipt disclosure
   const txnInputRef = useRef<HTMLInputElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
 
   // Funnel: one event per open (effect re-fires only when isOpen flips true).
   useEffect(() => {
@@ -85,16 +91,41 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     return () => { document.body.style.overflow = prev; };
   }, [isOpen]);
 
+  // Keyboard-aware sizing (mobile). The positioning wrapper is sized to the
+  // VISUAL viewport so, bottom-anchored, the sheet's footer CTA rides just
+  // above the soft keyboard instead of hiding behind it. Desktop ignores this
+  // entirely via the `md:` height/inset overrides. We only ever set CSS
+  // *variables* (never element.style.height) so desktop can override.
+  useEffect(() => {
+    if (!isOpen) return;
+    const vv = window.visualViewport;
+    const el = overlayRef.current;
+    if (!vv || !el) return;
+    const apply = () => {
+      el.style.setProperty('--sheet-h', `${vv.height}px`);
+      el.style.setProperty('--vv-top', `${vv.offsetTop}px`);
+    };
+    apply();
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    return () => {
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
+    };
+  }, [isOpen]);
+
   useEffect(() => {
     if (!copied) return;
     const id = setTimeout(() => setCopied(false), 2000);
     return () => clearTimeout(id);
   }, [copied]);
 
-  // Auto-focus the TrxID input so users with the code on the clipboard
-  // can paste in one motion.
+  // Auto-focus the TrxID input so users with the code on the clipboard can
+  // paste in one motion — DESKTOP ONLY. On mobile, auto-focusing pops the
+  // keyboard before the user has even seen the bKash number to send to.
   useEffect(() => {
     if (!isOpen) return;
+    if (!window.matchMedia('(min-width: 768px)').matches) return;
     const id = setTimeout(() => txnInputRef.current?.focus(), 140);
     return () => clearTimeout(id);
   }, [isOpen]);
@@ -110,6 +141,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     setTransactionId('');
     setSenderMsisdn('');
     setShowPhone(false);
+    setFeaturesOpen(false);
     setCopied(false);
     setPhase('idle');
   };
@@ -183,100 +215,189 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     t('purchaseModal.feature4'),
   ];
 
+  // Success takeover — reused for the mobile full-sheet overlay and the
+  // desktop right-panel overlay.
+  const confirmedContent = (
+    <div className="flex flex-col items-center justify-center gap-3 px-6 text-center">
+      <div
+        className="flex h-16 w-16 items-center justify-center rounded-full shadow-md motion-safe:animate-in motion-safe:zoom-in-75 motion-safe:duration-300"
+        style={{ backgroundColor: '#10B981' }}
+      >
+        <Check size={32} strokeWidth={3} className="text-white" />
+      </div>
+      <div className="font-display text-2xl font-semibold text-[#1A1812]">
+        {t('purchaseModal.confirmedHeading')}
+      </div>
+      <div className="max-w-xs text-sm text-[#6B6759]">
+        {t('purchaseModal.confirmedSub')}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true">
+    <div
+      ref={overlayRef}
+      className="fixed inset-x-0 top-[var(--vv-top,0px)] z-50 flex h-[var(--sheet-h,100dvh)] items-end justify-center p-0 md:inset-0 md:top-0 md:h-auto md:items-center md:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-[#0E0D09]/65 backdrop-blur-md"
         onClick={busy ? undefined : onClose}
       />
 
-      {/* Sheet — split layout: receipt (left) + action (right). Top-aligned on
-          phones (with dvh height) so the auto-focused TrxID input and the
-          footer CTA stay reachable when the keyboard opens. */}
-      <div className="relative w-full max-w-4xl max-h-[100dvh] sm:max-h-[92vh] flex flex-col md:flex-row bg-white rounded-3xl sm:rounded-[28px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        {/* ─── LEFT: receipt / value panel ─── */}
-        <aside className="md:w-[42%] bg-[#FAF7F0] flex flex-col px-6 py-5 md:px-9 md:py-10 shrink-0 md:border-r border-b md:border-b-0 border-[#E5E1D8]">
-          {/* bKash trust chip */}
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-flex items-center px-2.5 py-1 rounded-full text-[10.5px] font-bold uppercase tracking-[0.22em]"
-              style={{ backgroundColor: `${BKASH}1A`, color: BKASH }}
-            >
-              bKash
-            </span>
-            <span className="text-[10.5px] uppercase tracking-[0.18em] text-[#6B6759] font-semibold">
-              {t('purchaseModal.bkashChipSubtitle')}
-            </span>
-          </div>
+      {/* Sheet — bottom sheet on mobile (slides up), split card on desktop (zooms in). */}
+      <div className="relative flex max-h-full w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-8 motion-safe:duration-300 md:max-h-[92vh] md:max-w-4xl md:flex-row md:rounded-[28px] md:slide-in-from-bottom-0 md:zoom-in-95 md:duration-200">
 
-          {/* Hero — price + what */}
-          <div className="mt-4 md:mt-10">
-            <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
-              {t('purchaseModal.packEyebrow')}
-            </div>
-            <div className="mt-1.5 md:mt-2 font-display text-4xl sm:text-5xl md:text-6xl font-semibold text-[#1A1812] leading-none tracking-tight">
-              {t('purchaseModal.packPrice')}
-            </div>
-            <div className="mt-2 md:mt-3 text-base md:text-lg font-semibold text-[#1A1812] leading-tight">
-              {t('purchaseModal.packName')}
-            </div>
-            <div className="text-[13px] text-[#6B6759] mt-0.5">
-              {t('purchaseModal.packPerUnit')}
-            </div>
+        {/* Mobile-only full-sheet confirmed overlay */}
+        {phase === 'confirmed' && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white md:hidden motion-safe:animate-in motion-safe:fade-in">
+            {confirmedContent}
           </div>
+        )}
 
-          {/* Features — condensed on mobile, full on desktop. */}
-          <ul className="mt-4 md:mt-8 space-y-1.5 md:space-y-2.5">
-            {features.map((f, i) => (
-              <li key={i} className="flex items-center gap-2.5 text-[13px] md:text-[13.5px] text-[#1A1812]">
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 shrink-0">
-                  <Check size={12} strokeWidth={3.5} />
+        {/* ─── LEFT (desktop) / TOP RIBBON (mobile): receipt / value ─── */}
+        <aside className="shrink-0 bg-[#FAF7F0] border-b border-[#E5E1D8] md:w-[42%] md:border-b-0 md:border-r">
+          {/* Mobile receipt ribbon */}
+          <div className="md:hidden px-5">
+            {/* grabber (decorative) */}
+            <div className="flex justify-center pt-2.5 pb-1.5">
+              <span className="h-1 w-9 rounded-full bg-[#EAE6DA]" aria-hidden />
+            </div>
+            {/* chip + secure ........ close X */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className="inline-flex items-center px-2.5 py-1 rounded-full text-[10.5px] font-bold uppercase tracking-[0.22em]"
+                  style={{ backgroundColor: `${BKASH}1A`, color: BKASH }}
+                >
+                  bKash
                 </span>
-                <span>{f}</span>
-              </li>
-            ))}
-          </ul>
+                <span className="truncate text-[10.5px] uppercase tracking-[0.16em] text-[#6B6759] font-semibold">
+                  {t('purchaseModal.bkashChipSubtitle')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={busy}
+                className="-mr-2 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#1A1812] disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={t('common.close')}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {/* price disclosure */}
+            <button
+              type="button"
+              onClick={() => setFeaturesOpen((v) => !v)}
+              aria-expanded={featuresOpen}
+              aria-controls="pm-features"
+              aria-label={t('purchaseModal.packEyebrow')}
+              className="mt-1 flex w-full items-baseline gap-2 pb-3 text-left"
+            >
+              <span className="font-display text-2xl font-semibold leading-none text-[#1A1812] tracking-tight">
+                {t('purchaseModal.packPrice')}
+              </span>
+              <span className="text-[#CFCBBC]">·</span>
+              <span className="min-w-0 truncate text-[13px] font-semibold text-[#1A1812]">
+                {t('purchaseModal.packName')}
+              </span>
+              <span className="hidden text-[12px] text-[#6B6759] xs:inline">{t('purchaseModal.packPerUnit')}</span>
+              <ChevronDown
+                size={16}
+                className={`ml-auto shrink-0 text-[#9F998A] transition-transform duration-200 motion-reduce:transition-none ${featuresOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {/* collapsible features */}
+            <div
+              id="pm-features"
+              className={`grid transition-all duration-200 ease-out motion-reduce:transition-none ${featuresOpen ? 'grid-rows-[1fr] opacity-100 pb-3' : 'grid-rows-[0fr] opacity-0'}`}
+            >
+              <ul className="min-h-0 space-y-1.5 overflow-hidden">
+                {features.map((f, i) => (
+                  <li key={i} className="flex items-center gap-2.5 text-[13px] text-[#1A1812]">
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
+                      <Check size={12} strokeWidth={3.5} />
+                    </span>
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
 
-          {/* Trust line at the bottom of the panel */}
-          <div className="mt-auto pt-6 hidden md:flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed">
-            <ShieldCheck size={14} className="text-emerald-600 mt-0.5 shrink-0" />
-            <span>{t('purchaseModal.trustLine')}</span>
+          {/* Desktop hero panel */}
+          <div className="hidden md:flex md:h-full md:flex-col md:px-9 md:py-10">
+            {/* bKash trust chip */}
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex items-center px-2.5 py-1 rounded-full text-[10.5px] font-bold uppercase tracking-[0.22em]"
+                style={{ backgroundColor: `${BKASH}1A`, color: BKASH }}
+              >
+                bKash
+              </span>
+              <span className="text-[10.5px] uppercase tracking-[0.18em] text-[#6B6759] font-semibold">
+                {t('purchaseModal.bkashChipSubtitle')}
+              </span>
+            </div>
+
+            {/* Hero — price + what */}
+            <div className="mt-10">
+              <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
+                {t('purchaseModal.packEyebrow')}
+              </div>
+              <div className="mt-2 font-display text-6xl font-semibold text-[#1A1812] leading-none tracking-tight">
+                {t('purchaseModal.packPrice')}
+              </div>
+              <div className="mt-3 text-lg font-semibold text-[#1A1812] leading-tight">
+                {t('purchaseModal.packName')}
+              </div>
+              <div className="text-[13px] text-[#6B6759] mt-0.5">
+                {t('purchaseModal.packPerUnit')}
+              </div>
+            </div>
+
+            {/* Features */}
+            <ul className="mt-8 space-y-2.5">
+              {features.map((f, i) => (
+                <li key={i} className="flex items-center gap-2.5 text-[13.5px] text-[#1A1812]">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 shrink-0">
+                    <Check size={12} strokeWidth={3.5} />
+                  </span>
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
+
+            {/* Trust line at the bottom of the panel */}
+            <div className="mt-auto pt-6 flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed">
+              <ShieldCheck size={14} className="text-emerald-600 mt-0.5 shrink-0" />
+              <span>{t('purchaseModal.trustLine')}</span>
+            </div>
           </div>
         </aside>
 
-        {/* ─── RIGHT: action panel ─── */}
-        <div className="md:w-[58%] flex flex-col min-h-0 bg-white relative">
-          {/* Confirmed overlay — covers the whole right panel */}
+        {/* ─── RIGHT (desktop) / MAIN (mobile): action panel ─── */}
+        <div className="relative flex min-h-0 flex-1 flex-col bg-white md:w-[58%] md:flex-none">
+          {/* Confirmed overlay — desktop, covers the right panel only */}
           {phase === 'confirmed' && (
-            <div className="absolute inset-0 z-10 bg-white flex items-center justify-center flex-col gap-3 animate-in fade-in duration-200 px-6 text-center">
-              <div
-                className="w-16 h-16 rounded-full flex items-center justify-center shadow-md"
-                style={{ backgroundColor: '#10B981' }}
-              >
-                <Check size={32} strokeWidth={3} className="text-white" />
-              </div>
-              <div className="font-display text-2xl font-semibold text-[#1A1812]">
-                {t('purchaseModal.confirmedHeading')}
-              </div>
-              <div className="text-sm text-[#6B6759] max-w-xs">
-                {t('purchaseModal.confirmedSub')}
-              </div>
+            <div className="absolute inset-0 z-10 hidden bg-white md:flex md:items-center md:justify-center animate-in fade-in duration-200">
+              {confirmedContent}
             </div>
           )}
 
-          {/* Header */}
-          <header className="flex items-start justify-between px-6 md:px-9 pt-6 pb-3 shrink-0">
-            <div>
-              <h2 className="font-display text-lg font-semibold text-[#1A1812] tracking-tight">
-                {t('purchaseModal.panelTitle')}
-              </h2>
-            </div>
+          {/* Header — desktop only (mobile close X lives in the ribbon) */}
+          <header className="hidden shrink-0 items-start justify-between px-9 pt-6 pb-3 md:flex">
+            <h2 className="font-display text-lg font-semibold text-[#1A1812] tracking-tight">
+              {t('purchaseModal.panelTitle')}
+            </h2>
             <button
               type="button"
               onClick={onClose}
               disabled={busy}
-              className="-mt-1 -mr-2 p-2 text-[#9F998A] hover:text-[#1A1812] hover:bg-[#F2F1EB] rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              className="-mt-1 -mr-2 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#1A1812] disabled:cursor-not-allowed disabled:opacity-40"
               aria-label={t('common.close')}
             >
               <X size={18} />
@@ -284,26 +405,26 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           </header>
 
           {/* Scrollable middle */}
-          <div className="flex-1 overflow-y-auto px-6 md:px-9 pb-2">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-2 md:px-9 md:pt-0">
             {/* Step 1 — Send money */}
-            <section className="pt-2">
+            <section>
               <StepLabel n={1} label={t('purchaseModal.step1Label')} />
               <div
-                className="mt-2.5 rounded-2xl bg-white border-2 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3"
+                className="mt-2.5 flex flex-col gap-2.5 rounded-2xl border-2 bg-white px-4 py-3.5 sm:flex-row sm:items-center sm:gap-3"
                 style={{ borderColor: '#EAE6DA' }}
               >
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[#6B6759] font-bold">
                     {t('purchaseModal.bkashNumberLabel')}
                   </div>
-                  <div className="mt-0.5 font-mono text-2xl text-[#1A1812] font-bold tracking-wide truncate">
+                  <div className="mt-0.5 truncate font-mono text-2xl font-bold tracking-wide text-[#1A1812]">
                     {OWNER_BKASH_NUMBER}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={handleCopyNumber}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full text-[13px] font-bold transition-colors shrink-0 w-full sm:w-auto"
+                  className="inline-flex w-full min-h-[48px] shrink-0 items-center justify-center gap-1.5 rounded-full px-4 py-2.5 text-[13px] font-bold transition-colors sm:w-auto sm:min-h-0"
                   style={{
                     backgroundColor: copied ? '#10B981' : BKASH,
                     color: '#fff',
@@ -334,9 +455,16 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                 <strong className="font-bold" style={{ color: BKASH }}>Send Money</strong>
                 {t('purchaseModal.step1HintAfter')}
               </p>
+
+              {/* Mobile trust line — sits at the end of Step 1 so Step 2 (below)
+                  stays adjacent to the docked CTA above the keyboard. */}
+              <div className="mt-4 flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed md:hidden">
+                <ShieldCheck size={13} className="text-emerald-600 mt-0.5 shrink-0" />
+                <span>{t('purchaseModal.trustLine')}</span>
+              </div>
             </section>
 
-            {/* Step 2 — Paste TrxID */}
+            {/* Step 2 — Paste TrxID (last child → sits above the docked footer) */}
             <section className="mt-6">
               <StepLabel n={2} label={t('purchaseModal.step2Label')} />
               <div className="mt-2.5">
@@ -368,7 +496,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                   />
                   {txnIsValid && (
                     <span
-                      className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded-full shadow-sm"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded-full shadow-sm motion-safe:animate-in motion-safe:zoom-in-50 motion-safe:duration-150"
                       style={{ backgroundColor: '#10B981' }}
                     >
                       <Check size={16} strokeWidth={3} className="text-white" />
@@ -435,21 +563,15 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                 )}
               </div>
             </section>
-
-            {/* Mobile trust line — sits inside the action panel because the left panel hides it on small screens */}
-            <div className="md:hidden mt-5 flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed">
-              <ShieldCheck size={13} className="text-emerald-600 mt-0.5 shrink-0" />
-              <span>{t('purchaseModal.trustLine')}</span>
-            </div>
           </div>
 
-          {/* Sticky footer with the big CTA */}
-          <footer className="px-6 md:px-9 pt-3 pb-5 bg-white shrink-0 border-t border-[#EAE6DA]">
+          {/* Sticky footer with the big CTA — docked above the keyboard on mobile */}
+          <footer className="shrink-0 border-t border-[#EAE6DA] bg-white px-6 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:px-9 md:pb-5">
             <button
               type="button"
               onClick={handleSubmit}
               disabled={busy || !txnIsValid || phase === 'confirmed'}
-              className="w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+              className="w-full inline-flex min-h-[52px] items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               style={{
                 backgroundColor: busy || !txnIsValid || phase === 'confirmed' ? '#CFCBBC' : BKASH,
               }}
@@ -477,7 +599,8 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                 </>
               )}
             </button>
-            <div className="mt-2 text-center">
+            {/* Cancel — desktop only; mobile uses the ribbon X + backdrop tap. */}
+            <div className="mt-2 hidden text-center md:block">
               <button
                 type="button"
                 onClick={onClose}

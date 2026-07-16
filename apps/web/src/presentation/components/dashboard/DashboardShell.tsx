@@ -39,8 +39,8 @@ export const useDashboardShell = (): ShellCtx => {
 
 const Wordmark = () => (
   <div className="flex items-baseline gap-1 select-none">
-    <span className="font-display text-lg font-semibold text-brand-700">TOP</span>
-    <span className="font-display text-lg font-semibold text-accent-500">CANDIDATE</span>
+    <span className="font-display text-base font-semibold text-brand-700 sm:text-lg">TOP</span>
+    <span className="font-display text-base font-semibold text-accent-500 sm:text-lg">CANDIDATE</span>
   </div>
 );
 
@@ -137,7 +137,7 @@ export const DashboardShell: React.FC<Props> = ({
       <div className="flex min-h-screen flex-col" style={{ background: '#F6F4EE' }}>
         {/* Top bar */}
         <header className="sticky top-0 z-40 border-b border-charcoal-200 bg-[rgba(246,244,238,0.88)] backdrop-blur-[12px]">
-          <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-2 px-[clamp(12px,4vw,32px)] sm:gap-4">
+          <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-1.5 px-[clamp(10px,3vw,32px)] sm:gap-4">
             <a href="#" onClick={(e) => { e.preventDefault(); onNavigate('DASHBOARD'); }} className="shrink-0">
               <Wordmark />
             </a>
@@ -172,6 +172,7 @@ export const DashboardShell: React.FC<Props> = ({
             <VerifyingPurchasePill onResubmit={openPurchase} onCredited={() => { void refreshCredits(); }} />
             <CreditsBadge credits={credits} onBuy={openPurchase} />
             <div className="hidden sm:block"><LanguageToggle /></div>
+            <div className="sm:hidden"><LanguageToggle variant="mini" /></div>
 
             {/* Account */}
             <div className="relative shrink-0">
@@ -190,9 +191,6 @@ export const DashboardShell: React.FC<Props> = ({
                     <div className="border-b border-charcoal-100 px-4 py-3">
                       <p className="text-xs text-charcoal-500">{t('dashboard.signedInAs')}</p>
                       <p className="truncate text-sm font-medium text-brand-700">{user?.email}</p>
-                    </div>
-                    <div className="border-b border-charcoal-100 px-4 py-2.5 sm:hidden">
-                      <LanguageToggle />
                     </div>
                     <button
                       type="button"

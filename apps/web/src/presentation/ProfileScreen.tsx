@@ -171,10 +171,14 @@ export const ProfileScreen = () => {
     const handleSavePersonal = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user) return;
-        // Phone is optional on the profile, but if filled it must parse as a
-        // valid international number — otherwise downstream resume renders
-        // will emit a broken `tel:` link.
-        if (personalInfo.phone && !isValidPhone(personalInfo.phone)) {
+        // Phone is required (recruiters call) and must parse as a valid
+        // international number — otherwise downstream resume renders would emit
+        // a broken `tel:` link.
+        if (!(personalInfo.phone || '').trim()) {
+            toast.error(t('profileSetup.valPhoneRequired'));
+            return;
+        }
+        if (!isValidPhone(personalInfo.phone)) {
             toast.error(t('builder.errPhoneInvalid'));
             return;
         }
@@ -209,7 +213,7 @@ export const ProfileScreen = () => {
 
     return (
         <div className="max-w-6xl mx-auto p-4 md:p-8">
-            <h1 className="text-3xl font-bold mb-2 text-charcoal-900">{t('profile.pageTitle')}</h1>
+            <h1 className="mb-2 font-display text-3xl font-semibold text-brand-700 sm:text-4xl">{t('profile.pageTitle')}</h1>
             <p className="text-charcoal-500 mb-6">
                 {t('profile.pageSubtitle')}
             </p>
@@ -224,7 +228,7 @@ export const ProfileScreen = () => {
                             <AlertTriangle size={20} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-charcoal-900">{t('profile.noContentWarnTitle')}</h3>
+                            <h3 className="font-display text-lg font-semibold text-brand-700">{t('profile.noContentWarnTitle')}</h3>
                             <p className="text-sm text-charcoal-600 mt-0.5">
                                 {t('profile.noContentWarnBody')}
                             </p>
@@ -249,7 +253,7 @@ export const ProfileScreen = () => {
                             <Sparkles size={20} />
                         </div>
                         <div>
-                            <h3 className="font-bold text-charcoal-900">{t('profile.bannerTitle')}</h3>
+                            <h3 className="font-display text-lg font-semibold text-brand-700">{t('profile.bannerTitle')}</h3>
                             <p className="text-sm text-charcoal-500 mt-0.5">
                                 {t('profile.bannerBody')}
                             </p>
@@ -312,7 +316,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.fullName}
                                     onChange={e => setPersonalInfo({ ...personalInfo, fullName: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
+                                    className="w-full rounded-xl border border-charcoal-200 px-3.5 py-2.5 text-brand-700 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent-400"
                                 />
                             </div>
                             <div>
@@ -325,7 +329,7 @@ export const ProfileScreen = () => {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-charcoal-700 mb-1">{t('profile.fieldPhone')}</label>
+                                <label className="block text-sm font-medium text-charcoal-700 mb-1">{t('profile.fieldPhone')} <span className="text-accent-500">*</span></label>
                                 <PhoneInput
                                     value={personalInfo.phone}
                                     onChange={v => setPersonalInfo({ ...personalInfo, phone: v })}
@@ -338,7 +342,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.location}
                                     onChange={e => setPersonalInfo({ ...personalInfo, location: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
+                                    className="w-full rounded-xl border border-charcoal-200 px-3.5 py-2.5 text-brand-700 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent-400"
                                 />
                             </div>
                             <div>
@@ -347,7 +351,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.linkedin || ''}
                                     onChange={e => setPersonalInfo({ ...personalInfo, linkedin: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
+                                    className="w-full rounded-xl border border-charcoal-200 px-3.5 py-2.5 text-brand-700 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent-400"
                                     placeholder={t('profile.placeholderLinkedin')}
                                 />
                             </div>
@@ -357,7 +361,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.github || ''}
                                     onChange={e => setPersonalInfo({ ...personalInfo, github: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
+                                    className="w-full rounded-xl border border-charcoal-200 px-3.5 py-2.5 text-brand-700 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent-400"
                                     placeholder={t('profile.placeholderGithub')}
                                 />
                             </div>
@@ -367,7 +371,7 @@ export const ProfileScreen = () => {
                                     type="text"
                                     value={personalInfo.website || ''}
                                     onChange={e => setPersonalInfo({ ...personalInfo, website: e.target.value })}
-                                    className="w-full p-2 border rounded-lg focus-visible:ring-2 focus-visible:ring-accent-400"
+                                    className="w-full rounded-xl border border-charcoal-200 px-3.5 py-2.5 text-brand-700 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent-400"
                                     placeholder={t('profile.placeholderWebsite')}
                                 />
                             </div>
@@ -376,7 +380,7 @@ export const ProfileScreen = () => {
                             <button
                                 type="submit"
                                 disabled={saving || deleting}
-                                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-brand-600 text-white px-6 py-3 min-h-11 rounded-lg font-medium hover:bg-brand-700 disabled:opacity-50"
+                                className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-brand-700 px-6 py-3 min-h-11 font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 disabled:opacity-50 sm:w-auto"
                             >
                                 {saving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
                                 {t('profile.saveCta')}

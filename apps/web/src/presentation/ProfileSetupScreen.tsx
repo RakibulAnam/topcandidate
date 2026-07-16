@@ -47,6 +47,8 @@ import {
     LogOut,
     Sparkles,
     AlertCircle,
+    AlertTriangle,
+    ArrowRight,
     FileText,
 } from 'lucide-react';
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
@@ -119,6 +121,13 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     // Shown at finish when the user skipped BOTH education and experience — no
     // resume/toolkit can be generated until they add one.
     const [showNoResumeWarn, setShowNoResumeWarn] = useState(false);
+    // Bold "Important!" primer shown once when the builder opens.
+    const [showIntro, setShowIntro] = useState(true);
+    // Confirmation when skipping past both essentials (education + experience).
+    const [skipWarnOpen, setSkipWarnOpen] = useState(false);
+    // Field-level errors for the contact step (keyed "personalInfo.<field>") so
+    // required/invalid inputs turn red, not just a toast.
+    const [personalErrors, setPersonalErrors] = useState<Record<string, string>>({});
 
     const [personalInfo, setPersonalInfo] = useState<PersonalInfo>({
         fullName: '',
@@ -218,7 +227,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         switch (step) {
             case SetupStep.IMPORT_RESUME: return true; // never blocks
             case SetupStep.PERSONAL_INFO:
-                return !!(personalInfo.fullName || '').trim() && !!(personalInfo.email || '').trim();
+                return !!(personalInfo.fullName || '').trim() && !!(personalInfo.email || '').trim() && !!(personalInfo.phone || '').trim();
             case SetupStep.EDUCATION: return education.length > 0;
             case SetupStep.EXPERIENCE: return experiences.length > 0;
             case SetupStep.PROJECTS: return projects.length > 0;
@@ -255,14 +264,19 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         switch (currentStep) {
             case SetupStep.IMPORT_RESUME:
                 return true;
-            case SetupStep.PERSONAL_INFO:
-                if (!(personalInfo.fullName || '').trim()) { showError(t('profileSetup.valFullName')); return false; }
-                if (!(personalInfo.email || '').trim()) { showError(t('profileSetup.valEmail')); return false; }
-                if (!isValidEmail(personalInfo.email)) { showError(t('profileSetup.valEmailInvalid')); return false; }
-                if ((personalInfo.phone || '').trim() && !isValidPhone(personalInfo.phone)) {
-                    showError(t('profileSetup.valPhoneInvalid')); return false;
-                }
+            case SetupStep.PERSONAL_INFO: {
+                // Collect every problem so all offending fields light up red at
+                // once (not just the first), then toast the first message.
+                const errs: Record<string, string> = {};
+                if (!(personalInfo.fullName || '').trim()) errs['personalInfo.fullName'] = t('profileSetup.valFullName');
+                if (!(personalInfo.email || '').trim()) errs['personalInfo.email'] = t('profileSetup.valEmail');
+                else if (!isValidEmail(personalInfo.email)) errs['personalInfo.email'] = t('profileSetup.valEmailInvalid');
+                if (!(personalInfo.phone || '').trim()) errs['personalInfo.phone'] = t('profileSetup.valPhoneRequired');
+                else if (!isValidPhone(personalInfo.phone)) errs['personalInfo.phone'] = t('profileSetup.valPhoneInvalid');
+                setPersonalErrors(errs);
+                if (Object.keys(errs).length > 0) { showError(Object.values(errs)[0]); return false; }
                 return true;
+            }
             case SetupStep.EDUCATION:
                 // Education is optional/skippable; validate only the entries the
                 // user actually added.
@@ -505,7 +519,13 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             case SetupStep.IMPORT_RESUME:
                 return <ResumeUploadStep onExtracted={handleExtracted} onSkip={handleSkipImport} />;
             case SetupStep.PERSONAL_INFO:
-                return <PersonalInfoStep data={personalInfo} update={setPersonalInfo} />;
+                return (
+                    <PersonalInfoStep
+                        data={personalInfo}
+                        errors={personalErrors}
+                        update={(d) => { setPersonalInfo(d); if (Object.keys(personalErrors).length) setPersonalErrors({}); }}
+                    />
+                );
             case SetupStep.EDUCATION:
                 return <EducationStep data={education} update={setEducation} />;
             case SetupStep.EXPERIENCE:
@@ -584,8 +604,14 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         onComplete();
     };
 
-    const handleNext = async () => {
+    const handleNext = async (opts?: { forceSkip?: boolean }) => {
         if (!validateCurrentStep()) return;
+        // Skipping past BOTH education and experience with neither filled means
+        // nothing can be generated — warn before letting them move on.
+        const skippingEssential =
+            (currentStep === SetupStep.EDUCATION || currentStep === SetupStep.EXPERIENCE)
+            && education.length === 0 && experiences.length === 0;
+        if (skippingEssential && !opts?.forceSkip) { setSkipWarnOpen(true); return; }
         const saved = await saveCurrentStep();
         if (!saved) return;
 
@@ -635,6 +661,53 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         return (
             <div className="min-h-screen bg-charcoal-50 flex items-center justify-center">
                 <Loader2 className="animate-spin text-brand-700" size={32} />
+            </div>
+        );
+    }
+
+    // -------------------- Importance primer (before the builder) --------------------
+    if (showIntro) {
+        return (
+            <div className="bg-paper flex min-h-screen items-center justify-center px-5 py-10">
+                <div className="w-full max-w-lg rounded-[24px] border border-charcoal-200 bg-white p-8 shadow-[0_28px_70px_-28px_rgba(25,23,18,0.4)] sm:p-10">
+                    <div className="mb-6 flex items-center gap-3">
+                        <span
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
+                            style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
+                        >
+                            <AlertTriangle size={22} className="text-[#FFF7EA]" />
+                        </span>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent-600">
+                            {t('profileSetup.introEyebrow')}
+                        </p>
+                        {/* Let the user read this primer in either language. */}
+                        <div className="ml-auto shrink-0">
+                            <LanguageToggle variant="compact" />
+                        </div>
+                    </div>
+                    <h1 className="mb-5 font-display text-[clamp(40px,10vw,64px)] font-semibold leading-none text-brand-700">
+                        {t('profileSetup.introTitle')}
+                    </h1>
+                    <p className="mb-6 text-[17px] leading-relaxed text-brand-600">
+                        {t('profileSetup.introLead')}
+                    </p>
+                    <ul className="mb-8 flex flex-col gap-3">
+                        {[t('profileSetup.introPoint1'), t('profileSetup.introPoint2'), t('profileSetup.introPoint3')].map((p, i) => (
+                            <li key={i} className="flex items-start gap-3 text-[15px] leading-snug text-brand-600">
+                                <Check size={18} className="mt-0.5 shrink-0 text-accent-500" />
+                                <span>{p}</span>
+                            </li>
+                        ))}
+                    </ul>
+                    <button
+                        type="button"
+                        onClick={() => setShowIntro(false)}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-brand-700 px-6 py-4 text-[15px] font-semibold text-charcoal-50 transition-colors hover:bg-brand-800"
+                    >
+                        {t('profileSetup.introCta')}
+                        <ArrowRight size={17} />
+                    </button>
+                </div>
             </div>
         );
     }
@@ -935,7 +1008,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
 
                         <button
                             type="button"
-                            onClick={handleNext}
+                            onClick={() => handleNext()}
                             disabled={saving}
                             className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-700 text-charcoal-50 rounded-full font-semibold text-sm hover:bg-brand-800 disabled:bg-charcoal-400 disabled:cursor-not-allowed transition-colors"
                         >
@@ -956,6 +1029,43 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                                 </>
                             )}
                         </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Skip-essentials confirmation */}
+            {skipWarnOpen && (
+                <div
+                    className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(25,23,18,0.45)] px-5 backdrop-blur-[3px]"
+                    onClick={() => setSkipWarnOpen(false)}
+                    role="dialog"
+                    aria-modal="true"
+                >
+                    <div
+                        className="w-full max-w-md rounded-[20px] border border-charcoal-200 bg-white p-7 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-accent-100 bg-accent-50">
+                            <AlertTriangle size={22} className="text-accent-600" />
+                        </div>
+                        <h3 className="mb-2 font-display text-2xl font-semibold text-brand-700">{t('profileSetup.skipWarnTitle')}</h3>
+                        <p className="mb-6 text-[15px] leading-relaxed text-brand-500">{t('profileSetup.skipWarnBody')}</p>
+                        <div className="flex flex-col gap-2.5 sm:flex-row-reverse">
+                            <button
+                                type="button"
+                                onClick={() => setSkipWarnOpen(false)}
+                                className="inline-flex flex-1 items-center justify-center rounded-full bg-brand-700 px-5 py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800"
+                            >
+                                {t('profileSetup.skipWarnStayCta')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setSkipWarnOpen(false); void handleNext({ forceSkip: true }); }}
+                                className="inline-flex flex-1 items-center justify-center rounded-full border border-charcoal-300 px-5 py-3 text-sm font-semibold text-brand-600 transition-colors hover:bg-charcoal-100"
+                            >
+                                {t('profileSetup.skipWarnSkipCta')}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

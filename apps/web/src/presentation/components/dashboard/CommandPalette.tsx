@@ -6,7 +6,7 @@
 // already excluded by getGeneratedResumesPaginated). Keyboard: ↑/↓ move, ↵
 // opens, Esc closes.
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, ChevronRight } from 'lucide-react';
+import { Search, ChevronRight, X } from 'lucide-react';
 import { useT } from '../../i18n/LocaleContext';
 import { useRelativeTime } from './relativeTime';
 import { monogramOf, roleFromTitle } from './ToolkitCard';
@@ -32,6 +32,11 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, resumeService, 
   const [total, setTotal] = useState(0);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Visible-viewport height. On mobile the soft keyboard shrinks the visual
+  // viewport (not the layout viewport), so we size the sheet to it — the input
+  // stays put at the top and the results scroll in the space above the keyboard
+  // instead of hiding behind it.
+  const [vvh, setVvh] = useState<number | null>(null);
 
   // Reset + focus when opened.
   useEffect(() => {
@@ -42,6 +47,21 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, resumeService, 
       const id = window.setTimeout(() => inputRef.current?.focus(), 20);
       return () => window.clearTimeout(id);
     }
+  }, [open]);
+
+  // Track the visual viewport while open (keyboard show/hide, rotate).
+  useEffect(() => {
+    if (!open) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setVvh(vv.height);
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
   }, [open]);
 
   // Debounced search whenever the query changes while open.
@@ -81,14 +101,15 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, resumeService, 
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-[100] flex items-start justify-center bg-[rgba(25,23,18,0.4)] px-4 pt-[12vh] backdrop-blur-[4px]"
+      className="fixed inset-x-0 top-0 z-[100] flex items-stretch justify-center bg-[rgba(25,23,18,0.4)] backdrop-blur-[4px] sm:items-start sm:px-4 sm:pt-[12vh]"
+      style={{ height: vvh ? `${vvh}px` : '100dvh' }}
       role="dialog"
       aria-modal="true"
     >
       <div
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
-        className="w-full max-w-[620px] overflow-hidden rounded-[18px] bg-white shadow-[0_32px_80px_-16px_rgba(25,23,18,0.45)]"
+        className="flex h-full w-full flex-col overflow-hidden bg-white shadow-[0_32px_80px_-16px_rgba(25,23,18,0.45)] sm:h-auto sm:max-h-[76vh] sm:max-w-[620px] sm:rounded-[18px]"
       >
         {/* Input row */}
         <div className="flex items-center gap-3 border-b border-charcoal-100 px-5 py-4">
@@ -104,14 +125,15 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, resumeService, 
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-charcoal-300 px-2 py-0.5 text-[11px] text-charcoal-400"
+            aria-label={t('dashboard.search.close')}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-charcoal-400 transition-colors hover:bg-charcoal-100 hover:text-charcoal-600"
           >
-            {t('dashboard.search.esc')}
+            <X size={18} />
           </button>
         </div>
 
         {results.length > 0 ? (
-          <div className="max-h-[46vh] overflow-y-auto p-2">
+          <div className="flex-1 overflow-y-auto p-2 sm:max-h-[46vh] sm:flex-none">
             <div className="px-3 pt-2.5 pb-1.5 text-[11.5px] font-bold uppercase tracking-[0.07em] text-charcoal-400">
               {countLabel}
             </div>
@@ -138,7 +160,7 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, resumeService, 
             ))}
           </div>
         ) : (
-          <div className="px-6 py-10 text-center">
+          <div className="flex-1 overflow-y-auto px-6 py-10 text-center sm:flex-none">
             <div className="mb-1 font-display text-[17px] font-semibold text-brand-700">
               {t('dashboard.search.emptyTitle', { query: query.trim() })}
             </div>
@@ -153,8 +175,8 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, resumeService, 
           </div>
         )}
 
-        {/* Footer hints */}
-        <div className="flex items-center gap-3.5 border-t border-charcoal-100 bg-charcoal-50 px-5 py-2.5 text-[11.5px] text-charcoal-400">
+        {/* Footer hints — keyboard shortcuts only make sense with a keyboard. */}
+        <div className="hidden items-center gap-3.5 border-t border-charcoal-100 bg-charcoal-50 px-5 py-2.5 text-[11.5px] text-charcoal-400 sm:flex">
           <span className="whitespace-nowrap"><strong className="text-charcoal-500">↑↓</strong> {t('dashboard.search.hintNav')}</span>
           <span className="whitespace-nowrap"><strong className="text-charcoal-500">↵</strong> {t('dashboard.search.hintOpen')}</span>
           <span className="whitespace-nowrap"><strong className="text-charcoal-500">esc</strong> {t('dashboard.search.hintClose')}</span>
