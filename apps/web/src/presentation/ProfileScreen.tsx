@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { profileRepository, createResumeService } from '../infrastructure/config/dependencies';
+import { computeProfileHash } from '../application/validation/profileHash';
 import {
     PersonalInfo, WorkExperience, Education, Project,
     Extracurricular, Award, Certification, Affiliation, Publication,
     Language, Reference, UserType
 } from '../domain/entities/Resume';
 import { toast } from 'sonner';
-import { Loader2, Save, Trash2, AlertTriangle, Sparkles, ChevronRight } from 'lucide-react';
+import { Loader2, Save, Trash2, AlertTriangle, Sparkles, ChevronRight, RefreshCw } from 'lucide-react';
 import { ExperienceSection } from './components/profile/ExperienceSection';
 import { ProjectSection } from './components/profile/ProjectSection';
 import { EducationSection } from './components/profile/EducationSection';
@@ -79,9 +80,25 @@ export const ProfileScreen = () => {
     const [languages, setLanguages] = useState<Language[]>([]);
     const [references, setReferences] = useState<Reference[]>([]);
 
-    // General resume states
-    const [hasGeneralResume, setHasGeneralResume] = useState(true); // default true to hide banner until checked
+    // General resume state: null = none yet; else the existing resume's id, the
+    // profile-hash it was built from, and its 24h-cooldown status.
+    const [generalResume, setGeneralResume] = useState<{ id: string; storedHash?: string } | null>(null);
+    const [generalChecked, setGeneralChecked] = useState(false);
     const [generatingGeneral, setGeneratingGeneral] = useState(false);
+    const [regeneratingGeneral, setRegeneratingGeneral] = useState(false);
+
+    // Hash of the profile AS SAVED — set on load and after each successful save,
+    // never from live edit state. Compared against the hash the general resume
+    // was generated from so the regenerate nudge reflects *saved* changes and
+    // doesn't flicker while the user is mid-edit in the Personal tab.
+    const [savedProfileHash, setSavedProfileHash] = useState('');
+
+    const computeSavedHash = () => computeProfileHash({
+        personalInfo, experiences, projects, educations, skills, extracurriculars,
+        awards, certifications, affiliations, publications, languages, references,
+    });
+
+    const generalResumeStale = !!generalResume && !!savedProfileHash && generalResume.storedHash !== savedProfileHash;
 
     useEffect(() => {
         if (user?.id) {
@@ -128,6 +145,16 @@ export const ProfileScreen = () => {
             setLanguages(langs);
             setReferences(refs);
 
+            // Snapshot the persisted profile so staleness compares against saved
+            // data. personalInfo default mirrors the service's general-resume path
+            // so the hashes align exactly (see ResumeService.profileHashOf).
+            setSavedProfileHash(computeProfileHash({
+                personalInfo: pInfo ?? { fullName: '', email: '', phone: '', location: '' },
+                experiences: exps, projects: projs, educations: edus, skills: skls,
+                extracurriculars: extras, awards: awds, certifications: certs,
+                affiliations: affs, publications: pubs, languages: langs, references: refs,
+            }));
+
         } catch (error) {
             console.error(error);
             toast.error(t('common.profileLoadFailed'));
@@ -136,19 +163,24 @@ export const ProfileScreen = () => {
         }
     };
 
-    // Check if general resume exists
+    // Load the general resume's id + the profile-hash it was built from (to
+    // detect staleness) and its cooldown status.
     useEffect(() => {
-        const checkGeneralResume = async () => {
+        const check = async () => {
             if (!user) return;
             try {
                 const service = createResumeService();
-                const exists = await service.hasGeneralResume(user.id);
-                setHasGeneralResume(exists);
+                const info = await service.getGeneralResumeInfo(user.id);
+                if (!info) { setGeneralResume(null); return; }
+                const data = await service.getGeneratedResume(info.id);
+                setGeneralResume({ id: info.id, storedHash: data?.sourceProfileHash });
             } catch {
-                // Silently fail, keep banner hidden
+                // Silently fail — leave state as-is (banner stays hidden).
+            } finally {
+                setGeneralChecked(true);
             }
         };
-        checkGeneralResume();
+        check();
     }, [user]);
 
     const handleGenerateGeneralResume = async () => {
@@ -156,8 +188,8 @@ export const ProfileScreen = () => {
         setGeneratingGeneral(true);
         try {
             const service = createResumeService();
-            await service.generateGeneralResume(user.id);
-            setHasGeneralResume(true);
+            const id = await service.generateGeneralResume(user.id);
+            setGeneralResume({ id, storedHash: savedProfileHash });
             toast.success(t('profile.generalResumeReady'));
         } catch (error) {
             console.error('General resume generation failed:', error);
@@ -165,6 +197,23 @@ export const ProfileScreen = () => {
             toast.error(message);
         } finally {
             setGeneratingGeneral(false);
+        }
+    };
+
+    const handleRegenerateGeneralResume = async () => {
+        if (!user || !generalResume) return;
+        setRegeneratingGeneral(true);
+        try {
+            const service = createResumeService();
+            await service.regenerateGeneralResume(user.id, generalResume.id);
+            setGeneralResume({ ...generalResume, storedHash: savedProfileHash });
+            toast.success(t('profile.regenSuccess'));
+        } catch (error) {
+            console.error('General resume regeneration failed:', error);
+            const message = error instanceof Error ? error.message : t('profile.generalResumeFailed');
+            toast.error(message);
+        } finally {
+            setRegeneratingGeneral(false);
         }
     };
 
@@ -185,6 +234,9 @@ export const ProfileScreen = () => {
         setSaving(true);
         try {
             await profileRepository.saveProfile(user.id, personalInfo);
+            // Refresh the saved snapshot so the regenerate nudge appears now that
+            // the persisted profile differs from the general resume.
+            setSavedProfileHash(computeSavedHash());
             toast.success(t('profile.savedSuccess'));
         } catch (error) {
             toast.error(t('profile.saveError'));
@@ -245,8 +297,8 @@ export const ProfileScreen = () => {
                 </div>
             )}
 
-            {/* General Resume Banner — only once there's content to generate from. */}
-            {!hasGeneralResume && (experiences.length > 0 || educations.length > 0) && (
+            {/* General Resume — offer to generate (none yet) once there's content. */}
+            {generalChecked && !generalResume && (experiences.length > 0 || educations.length > 0) && (
                 <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
                         <div className="w-10 h-10 bg-brand-600 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">
@@ -263,7 +315,7 @@ export const ProfileScreen = () => {
                         type="button"
                         onClick={handleGenerateGeneralResume}
                         disabled={generatingGeneral}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0"
+                        className="flex items-center justify-center gap-2 px-5 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0 w-full sm:w-auto"
                     >
                         {generatingGeneral ? (
                             <>
@@ -274,6 +326,39 @@ export const ProfileScreen = () => {
                             <>
                                 <Sparkles size={18} />
                                 {t('profile.bannerCta')}
+                            </>
+                        )}
+                    </button>
+                </div>
+            )}
+
+            {/* General Resume — profile changed since it was generated: nudge to regenerate. */}
+            {generalChecked && generalResume && generalResumeStale && (
+                <div className="mb-6 bg-accent-50 border border-accent-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">
+                            <RefreshCw size={18} />
+                        </div>
+                        <div>
+                            <h3 className="font-display text-lg font-semibold text-brand-700">{t('profile.regenTitle')}</h3>
+                            <p className="text-sm text-charcoal-600 mt-0.5">{t('profile.regenBody')}</p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        onClick={handleRegenerateGeneralResume}
+                        disabled={regeneratingGeneral}
+                        className="flex items-center justify-center gap-2 px-5 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed flex-shrink-0 w-full sm:w-auto"
+                    >
+                        {regeneratingGeneral ? (
+                            <>
+                                <Loader2 className="animate-spin" size={18} />
+                                {t('profile.regenerating')}
+                            </>
+                        ) : (
+                            <>
+                                <RefreshCw size={18} />
+                                {t('profile.regenCta')}
                             </>
                         )}
                     </button>

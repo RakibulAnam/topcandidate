@@ -26,8 +26,6 @@ import {
   FileText,
   ArrowLeft,
   FileCheck,
-  RefreshCw,
-  Lock,
   Loader2,
   Mail,
   Linkedin,
@@ -252,9 +250,6 @@ interface PreviewProps {
   onGoHome: () => void;
   readOnly?: boolean;
   isGeneralResume?: boolean;
-  onRegenerate?: () => Promise<void>;
-  canRegenerate?: boolean;
-  cooldownEndsAt?: Date | null;
   onRegenerateItem?: (item: ToolkitItem) => Promise<void>;
   regeneratingItem?: ToolkitItem | null;
   // True while the initial toolkit bundle (/api/toolkit) is still in flight —
@@ -272,9 +267,6 @@ export const Preview: React.FC<PreviewProps> = ({
   onGoHome,
   readOnly = false,
   isGeneralResume = false,
-  onRegenerate,
-  canRegenerate = true,
-  cooldownEndsAt,
   onRegenerateItem,
   regeneratingItem = null,
   toolkitPending = false,
@@ -282,8 +274,6 @@ export const Preview: React.FC<PreviewProps> = ({
   const t = useT();
   const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<PreviewTab>('resume');
-  const [isRegenerating, setIsRegenerating] = useState(false);
-  const [cooldownText, setCooldownText] = useState<string | null>(null);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
   // Document zoom for the resume / cover-letter sheet. 'fit' scales the pt
   // sheet to the viewport width (default — the right call on phones; clamps to
@@ -305,29 +295,6 @@ export const Preview: React.FC<PreviewProps> = ({
   // Actual read-only state fed to EditableElement instances — driven purely by
   // the edit toggle now, not the (initial) readOnly prop.
   const isReadOnly = !editModeActive;
-
-  useEffect(() => {
-    if (!cooldownEndsAt || canRegenerate) {
-      setCooldownText(null);
-      return;
-    }
-
-    const updateCooldownText = () => {
-      const now = new Date();
-      const diffStr = cooldownEndsAt.getTime() - now.getTime();
-      if (diffStr <= 0) {
-        setCooldownText(null);
-        return;
-      }
-      const hours = Math.floor(diffStr / (1000 * 60 * 60));
-      const minutes = Math.floor((diffStr % (1000 * 60 * 60)) / (1000 * 60));
-      setCooldownText(t('preview.cooldownText', { h: hours, m: minutes }));
-    };
-
-    updateCooldownText();
-    const interval = setInterval(updateCooldownText, 60000);
-    return () => clearInterval(interval);
-  }, [cooldownEndsAt, canRegenerate]);
 
   const template: TemplateDefinition = resolveTemplate(data.template);
 
@@ -1045,19 +1012,25 @@ export const Preview: React.FC<PreviewProps> = ({
   // is a separate, opt-in control) — so the document, not the template grid, is
   // the start of the show. Used by both the mobile tab rail and desktop sidebar.
   const statusOf = (item: ToolkitItem) => getItemStatus(data, item, regeneratingItem, toolkitPending);
-  const TABS: { id: PreviewTab; label: string; icon: typeof FileText; status?: ToolkitItem }[] = [
+  const ALL_TABS: { id: PreviewTab; label: string; icon: typeof FileText; status?: ToolkitItem }[] = [
     { id: 'resume', label: t('preview.tabResume'), icon: FileText },
     { id: 'coverLetter', label: t('preview.tabCoverLetter'), icon: FileCheck, status: 'coverLetter' },
     { id: 'outreachEmail', label: t('preview.tabOutreachEmail'), icon: Mail, status: 'outreachEmail' },
     { id: 'linkedInMessage', label: t('preview.tabLinkedIn'), icon: Linkedin, status: 'linkedInMessage' },
     { id: 'interviewPrep', label: t('preview.tabQuestionPrep'), icon: MessageSquare, status: 'interviewQuestions' },
   ];
+  // The General Resume has no target job, so only the résumé itself is
+  // meaningful — cover letter, recruiter email, LinkedIn note, and interview
+  // prep are all JD-specific and are hidden for it.
+  const TABS = isGeneralResume ? ALL_TABS.filter((tab) => tab.id === 'resume') : ALL_TABS;
   // Grouped artifact nav (desktop sidebar). Labels reuse the existing sidebar keys.
-  const TAB_GROUPS: { labelKey: string; ids: PreviewTab[] }[] = [
-    { labelKey: 'preview.sidebarDocs', ids: ['resume', 'coverLetter'] },
-    { labelKey: 'preview.sidebarOutreach', ids: ['outreachEmail', 'linkedInMessage'] },
-    { labelKey: 'preview.sidebarInterview', ids: ['interviewPrep'] },
-  ];
+  const TAB_GROUPS: { labelKey: string; ids: PreviewTab[] }[] = isGeneralResume
+    ? [{ labelKey: 'preview.sidebarDocs', ids: ['resume'] }]
+    : [
+        { labelKey: 'preview.sidebarDocs', ids: ['resume', 'coverLetter'] },
+        { labelKey: 'preview.sidebarOutreach', ids: ['outreachEmail', 'linkedInMessage'] },
+        { labelKey: 'preview.sidebarInterview', ids: ['interviewPrep'] },
+      ];
   const isDocTab = activeTab === 'resume' || activeTab === 'coverLetter';
 
   // Template option rows — reused by the desktop sidebar disclosure and the
@@ -1138,23 +1111,6 @@ export const Preview: React.FC<PreviewProps> = ({
                       {editModeActive ? t('preview.editModeOn') : t('preview.editModeOff')}
                     </button>
                   )}
-                  {isGeneralResume && (
-                    <button
-                      type="button"
-                      disabled={!canRegenerate || isRegenerating}
-                      onClick={async () => {
-                        setShowMenu(false);
-                        if (onRegenerate) {
-                          setIsRegenerating(true);
-                          try { await onRegenerate(); } finally { setIsRegenerating(false); }
-                        }
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-charcoal-700 hover:bg-charcoal-50 text-left disabled:opacity-50"
-                    >
-                      {isRegenerating ? <Loader2 size={16} className="animate-spin" /> : !canRegenerate ? <Lock size={16} /> : <RefreshCw size={16} />}
-                      {!canRegenerate ? t('preview.regenerateLocked') : t('preview.regenerate')}
-                    </button>
-                  )}
                   {isDocTab && (
                     <button
                       type="button"
@@ -1220,34 +1176,6 @@ export const Preview: React.FC<PreviewProps> = ({
               {editModeActive ? t('preview.editModeOn') : t('preview.editModeOff')}
             </button>
           )}
-          {isGeneralResume && (
-            <button
-              type="button"
-              onClick={async () => {
-                if (onRegenerate) {
-                  setIsRegenerating(true);
-                  try {
-                    await onRegenerate();
-                  } finally {
-                    setIsRegenerating(false);
-                  }
-                }
-              }}
-              disabled={!canRegenerate || isRegenerating}
-              className="flex items-center gap-2 px-4 min-h-10 text-[13.5px] font-semibold rounded-full border transition-colors disabled:opacity-50 bg-white border-charcoal-300 text-brand-700 hover:border-brand-700"
-              title={cooldownText || t('preview.regenerateLockedTitle')}
-            >
-              {isRegenerating ? (
-                <Loader2 size={16} className="animate-spin" />
-              ) : !canRegenerate ? (
-                <Lock size={16} className="text-brand-400" />
-              ) : (
-                <RefreshCw size={16} />
-              )}
-              {!canRegenerate ? t('preview.regenerateLocked') : t('preview.regenerate')}
-            </button>
-          )}
-
           {(activeTab === 'resume' || activeTab === 'coverLetter') && (
             <>
               <button

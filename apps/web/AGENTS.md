@@ -88,7 +88,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 | **Outreach email** generation + viewer | `src/infrastructure/ai/GeminiOutreachEmailGenerator.ts`, `src/presentation/components/Builder/ToolkitViewers.tsx` | shipped |
 | **LinkedIn note** generation + viewer | `src/infrastructure/ai/GeminiLinkedInMessageGenerator.ts`, `ToolkitViewers.tsx` | shipped |
 | **Interview Q prep** generation + viewer | `src/infrastructure/ai/GeminiInterviewQuestionsGenerator.ts`, `ToolkitViewers.tsx` | shipped |
-| General Resume (profile-based, 24h regen cooldown) | `ResumeService.generateGeneralResume()` | shipped |
+| General Resume (profile-based, regenerate-on-change) | `ResumeService.generateGeneralResume()` / `regenerateGeneralResume()` | shipped — **never hard-fails**: `optimizeOrAssembleGeneral()` tries the optimizer and, on any error, falls back to assembling the résumé from the profile's normalized bullets (tracks `general_resume_fallback_used`; falls back to raw item descriptions when an item has no normalized bullets). Stamps `ResumeData.sourceProfileHash` (`application/validation/profileHash.ts` — hashes user-entered profile content, excludes AI-derived keys) at generation. `ProfileScreen` compares it against a **saved-profile snapshot** (not live edit state) to show a regenerate nudge + button only when the persisted profile changed. **No per-user regen cooldown** — the profile-change gate + the free-tier daily cap on `/api/optimize-general` are the controls. Preview renders **résumé-only** for the General Resume (`isGeneralResume` → no toolkit tabs) and has **no regenerate button** (regeneration lives only on the profile page). |
 | Export (Word + PDF) for resume & cover letter | `src/infrastructure/export/` | shipped |
 | Resume extract (from uploaded PDF/Word) | active: `OpenRouterResumeExtractor.ts` (legacy: `GeminiResumeExtractor.ts`), prompt+schema in `prompts/extractorPrompts.ts`, in-browser text via `utils/pdfText.ts`, UI `components/profile/ResumeUploadStep.tsx` | shipped — extracts ALL sections incl. certifications / affiliations / publications via **strict `json_schema`** (`EXTRACTOR_SCHEMA`, `max_tokens` 8000) so trailing sections can't truncate. **Transport:** the client extracts PDF **text** with pdf.js and sends only that (`mimeType: 'text/plain'`, a few KB) — so text PDFs of any size work. Scanned/image PDFs (no text layer) fall back to base64 file-send, which IS bounded by Vercel's 4.5 MB body limit → that fallback caps at **3 MB raw**; the overall picker cap is 10 MB. The extractor branches on `mimeType` (text message vs `file` part); both extractors handle both modes. |
 | **Toolkit credits + bKash purchase** — paid tier gating tailored generations | `profiles.toolkit_credits`, `api/optimize.ts` (gate), `api/purchase.ts` (records a real pending row via `initiate_purchase`), `PurchaseModal.tsx` | shipped — `api/purchase.ts` inserts a real `pending` purchase; credits are granted out-of-band by the HMAC `confirm-purchase` webhook, not here |
@@ -318,7 +318,7 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
 
 ## 6. Application flow (happy path for a new tailored application)
 
-**Paid vs. free.** The tailored Builder flow below consumes 1 toolkit credit (server-enforced in `/api/optimize`). The General Resume — built from the user's saved profile via `DashboardScreen` "Build my master resume" — is the free path: it goes through `/api/optimize-general` (optimizer only, no toolkit, no credit) and is bounded by the existing 24h regeneration cooldown. See §4 for the credit-gate detail.
+**Paid vs. free.** The tailored Builder flow below consumes 1 toolkit credit (server-enforced in `/api/optimize`). The General Resume — built from the user's saved profile via `DashboardScreen` "Build my master resume" — is the free path: it goes through `/api/optimize-general` (optimizer only, no toolkit, no credit) and is bounded by the free-tier daily cap on that endpoint (`KIND_DAILY_CAPS.optimize_general`). There is no per-user regeneration cooldown — regeneration is offered only when the profile actually changed. See §4 for the credit-gate detail.
 
 ```
  User signs in ──► profileRepository.isProfileComplete() ──► ProfileSetupScreen (if incomplete)
@@ -364,7 +364,7 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
    ├── Sidebar groups: Documents (Resume templates + Cover Letter) │ Outreach (Email, LinkedIn) │ Interview (Q prep)
    ├── Main area: resume/CL = paginated A4-in-pt render (mirrors PDF exporter)
    │              outreach email / LinkedIn note / interview prep = ToolkitViewers w/ copy-to-clipboard
-   └── Top bar: Download Word / Download PDF (document tabs only), Regenerate (General Resume only)
+   └── Top bar: Download Word / Download PDF (document tabs only). No Regenerate button — General Resume regeneration lives on the profile page.
 ```
 
 ---

@@ -79,8 +79,6 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   }, [resumeService, resumeData, activeResumeId]);
 
   const [isGeneralResume, setIsGeneralResume] = useState(false);
-  const [canRegenerate, setCanRegenerate] = useState(true);
-  const [cooldownEndsAt, setCooldownEndsAt] = useState<Date | null>(null);
   const [regeneratingItem, setRegeneratingItem] = useState<ToolkitItem | null>(null);
   // True while the initial toolkit bundle (/api/toolkit) is in flight. The
   // resume preview is already visible at that point; toolkit tabs show
@@ -193,46 +191,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
 
       const isGeneral = current?.title === ResumeService.GENERAL_RESUME_TITLE;
       setIsGeneralResume(isGeneral);
-
-      if (isGeneral) {
-        const info = await resumeService.getGeneralResumeInfo(user.id);
-        if (info) {
-          setCanRegenerate(info.canRegenerate);
-          setCooldownEndsAt(info.cooldownEndsAt);
-        }
-      }
     };
     checkResumeStatus();
   }, [user, resumeService, activeResumeId]);
-
-  const handleRegenerateGeneralResume = async () => {
-      if (!user || !resumeService || !activeResumeId) return;
-      try {
-        const newData = await resumeService.regenerateGeneralResume(user.id, activeResumeId);
-        setResumeData(newData);
-        toast.success(t('builder.generalRegenSuccess'));
-
-        // update cooldown logic
-        const info = await resumeService.getGeneralResumeInfo(user.id);
-        if (info) {
-          setCanRegenerate(info.canRegenerate);
-          setCooldownEndsAt(info.cooldownEndsAt);
-        }
-      } catch (error) {
-        console.error('General resume regeneration failed:', error);
-        // The 24-hour cooldown message IS user-actionable and worth showing
-        // verbatim; everything else (quota, network, validation) should stay
-        // behind a friendly fallback so we don't leak model-provider language.
-        const msg = error instanceof Error ? error.message : '';
-        const isCooldown = msg.includes('24 hours');
-        const isGibberish = error instanceof Error && error.name === 'GibberishContentError';
-        toast.error(
-          isCooldown || isGibberish
-            ? msg
-            : t('builder.generalRegenFailGeneric')
-        );
-      }
-  };
 
   const ITEM_LABELS: Record<ToolkitItem, string> = {
     coverLetter: t('builder.itemCoverLetter'),
@@ -559,9 +520,6 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onExportCoverLetterPDF={handleExportCoverLetterPDF}
         readOnly={!!currentResumeId && step === AppStep.PREVIEW}
         isGeneralResume={isGeneralResume}
-        canRegenerate={canRegenerate}
-        cooldownEndsAt={cooldownEndsAt}
-        onRegenerate={handleRegenerateGeneralResume}
         onRegenerateItem={handleRegenerateItem}
         regeneratingItem={regeneratingItem}
         toolkitPending={toolkitPending}

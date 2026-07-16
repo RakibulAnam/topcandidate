@@ -11,6 +11,7 @@ import { GenerateToolkitUseCase, IToolkitGenerator } from '../../domain/usecases
 import { IResumeRepository } from '../../domain/repositories/IResumeRepository';
 import { IProfileRepository } from '../../domain/repositories/IProfileRepository';
 import { assertNotGibberish, FieldCheck } from '../validation/gibberishDetector';
+import { computeProfileHash } from '../validation/profileHash';
 import { track } from '../../infrastructure/analytics/track';
 
 export class ResumeService {
@@ -359,6 +360,66 @@ export class ResumeService {
     };
   }
 
+  // Split a raw description into bullet lines: explicit lines/bullets first,
+  // else sentence-split. Used only for the general-resume fallback below.
+  private splitToBullets(text: string): string[] {
+    const t = (text || '').trim();
+    if (!t) return [];
+    const byLines = t.split(/\n+/).map(s => s.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
+    if (byLines.length > 1) return byLines;
+    return t.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+  }
+
+  private bulletsFor(item: { normalized?: { bullets?: string[] }; rawDescription?: string }): string[] {
+    const n = item.normalized?.bullets;
+    if (n && n.length > 0) return n;
+    return this.splitToBullets(item.rawDescription ?? '');
+  }
+
+  // Build a general résumé WITHOUT the AI optimizer, straight from the
+  // profile's already-polished (normalized) per-item bullets. Deterministic
+  // and never fails — the reliability backstop for the general resume.
+  private assembleGeneralFallback(data: ResumeData, prevSummary = ''): ResumeData {
+    return {
+      ...data,
+      summary: prevSummary || data.summary || '',
+      experience: data.experience.map(e => ({ ...e, refinedBullets: this.bulletsFor(e) })),
+      projects: data.projects.map(p => ({ ...p, refinedBullets: this.bulletsFor(p) })),
+      extracurriculars: (data.extracurriculars ?? []).map(x => ({ ...x, refinedBullets: this.bulletsFor(x) })),
+    };
+  }
+
+  // Try the AI optimizer for the general résumé; if it fails (e.g. strict
+  // structured-output validation rejects a large, JD-less profile), fall back
+  // to the deterministic profile-based assembly so generation NEVER hard-fails.
+  private async optimizeOrAssembleGeneral(data: ResumeData, prevSummary = ''): Promise<ResumeData> {
+    try {
+      const optimized = await this.generalOptimizeUseCase.execute(data);
+      return this.mergeOptimizedData(data, optimized);
+    } catch (err) {
+      console.warn('[general-resume] optimizer failed — assembling from profile-normalized content:', err);
+      track('general_resume_fallback_used');
+      return this.assembleGeneralFallback(data, prevSummary);
+    }
+  }
+
+  private profileHashOf(d: ResumeData): string {
+    return computeProfileHash({
+      personalInfo: d.personalInfo,
+      experiences: d.experience,
+      projects: d.projects,
+      educations: d.education,
+      skills: d.skills,
+      extracurriculars: d.extracurriculars,
+      awards: d.awards,
+      certifications: d.certifications,
+      affiliations: d.affiliations,
+      publications: d.publications,
+      languages: d.languages,
+      references: d.references,
+    });
+  }
+
   // ================================
   // General Resume Generation
   // ================================
@@ -374,21 +435,15 @@ export class ResumeService {
    * Returns info about the general resume including cooldown status.
    * Returns null if no general resume exists.
    */
-  async getGeneralResumeInfo(userId: string): Promise<{ id: string; canRegenerate: boolean; cooldownEndsAt: Date | null } | null> {
+  // Returns the id of the user's General Resume (or null if none). There is no
+  // regeneration cooldown: regeneration is gated by an actual profile change
+  // (surfaced as the ProfileScreen nudge) and bounded by the free-tier daily cap
+  // on /api/optimize-general (KIND_DAILY_CAPS.optimize_general) for cost control.
+  async getGeneralResumeInfo(userId: string): Promise<{ id: string } | null> {
     const resumes = await this.repository.getGeneratedResumes(userId);
     const generalResume = resumes.find(r => r.title === ResumeService.GENERAL_RESUME_TITLE);
     if (!generalResume) return null;
-
-    const lastUpdated = new Date(generalResume.updatedAt || generalResume.date);
-    const cooldownEnd = new Date(lastUpdated.getTime() + 24 * 60 * 60 * 1000);
-    const now = new Date();
-    const canRegenerate = now >= cooldownEnd;
-
-    return {
-      id: generalResume.id,
-      canRegenerate,
-      cooldownEndsAt: canRegenerate ? null : cooldownEnd,
-    };
+    return { id: generalResume.id };
   }
 
   async generateGeneralResume(userId: string): Promise<string> {
@@ -465,15 +520,10 @@ export class ResumeService {
 
     track('resume_generation_started', { type: 'free_general' });
 
-    // Optimize via the free general-resume path (no credit gate, no toolkit).
-    let optimizedData;
-    try {
-      optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
-    } catch (err) {
-      track('resume_generation_completed', { type: 'free_general', success: false });
-      throw err;
-    }
-    const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
+    // Optimize via the free general-resume path; fall back to profile-based
+    // assembly if the optimizer fails, so this never hard-fails.
+    const mergedData = await this.optimizeOrAssembleGeneral(resumeData);
+    mergedData.sourceProfileHash = this.profileHashOf(resumeData);
 
     // Save and return ID
     const id = await this.saveGeneratedResume(userId, mergedData, ResumeService.GENERAL_RESUME_TITLE);
@@ -482,20 +532,17 @@ export class ResumeService {
   }
 
   /**
-   * Regenerate the General Resume from updated profile data.
-   * Enforces a 24-hour cooldown between regenerations.
+   * Regenerate the General Resume from updated profile data. No cooldown — it's
+   * offered only when the profile actually changed, and the free-tier daily cap
+   * on /api/optimize-general is the cost backstop.
    */
   async regenerateGeneralResume(userId: string, existingResumeId: string): Promise<ResumeData> {
     if (!this.profileRepository) {
       throw new Error('Profile repository is required for general resume regeneration');
     }
 
-    // Check cooldown
-    const info = await this.getGeneralResumeInfo(userId);
-    if (info && !info.canRegenerate && info.cooldownEndsAt) {
-      const hoursLeft = Math.ceil((info.cooldownEndsAt.getTime() - Date.now()) / (1000 * 60 * 60));
-      throw new Error(`General Resume can only be regenerated once every 24 hours. Try again in ~${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''}.`);
-    }
+    // No cooldown: regeneration is gated by an actual profile change and bounded
+    // by the free-tier daily cap on /api/optimize-general for cost control.
 
     // Load fresh profile data
     const [profile, uType, exps, projs, skls, edus, extras, awds, certs, affs, pubs, langs, refs] = await Promise.all([
@@ -555,9 +602,10 @@ export class ResumeService {
     // Pre-flight gibberish gate — same as the initial general-resume path.
     this.assertContentIsReal(resumeData);
 
-    // Optimize via the free general-resume path (no credit gate, no toolkit).
-    const optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
-    const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
+    // Optimize via the free general-resume path; fall back to profile-based
+    // assembly if the optimizer fails, so regenerate never hard-fails.
+    const mergedData = await this.optimizeOrAssembleGeneral(resumeData);
+    mergedData.sourceProfileHash = this.profileHashOf(resumeData);
 
     // Update existing resume
     await this.updateGeneratedResume(existingResumeId, mergedData, ResumeService.GENERAL_RESUME_TITLE);
