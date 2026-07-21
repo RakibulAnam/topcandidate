@@ -19,7 +19,7 @@ import {
 import {
   ContactSegment,
   buildContactSegments,
-  normalizeWebUrl,
+  webSegment,
   toMailto,
   toTel,
   CONTACT_SEPARATOR,
@@ -110,8 +110,10 @@ export class PdfResumeExporter {
           contentWidth,
           { rightItalic: true }
         );
-        if (proj.link)
-          this.renderMetaLine(doc, proj.link, t, cursor, contentWidth, normalizeWebUrl(proj.link));
+        if (proj.link) {
+          const seg = webSegment(proj.link);
+          this.renderMetaLine(doc, seg.text, t, cursor, contentWidth, seg.href);
+        }
         const bullets =
           proj.refinedBullets && proj.refinedBullets.length > 0
             ? proj.refinedBullets
@@ -196,13 +198,14 @@ export class PdfResumeExporter {
       for (const pub of data.publications) {
         this.ensureSpace(doc, cursor, t.sizeBody * 2, t.margin);
         const prefix = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}`;
-        const pubHref = pub.link ? normalizeWebUrl(pub.link) : undefined;
-        if (pub.link && pubHref) {
+        // Shortened visible text (full URL stays the link target); raw when unlinkable.
+        const pubSeg = pub.link ? webSegment(pub.link) : undefined;
+        if (pub.link && pubSeg?.href) {
           doc.setFont(t.pdfFont, 'normal');
           doc.setFontSize(t.sizeBody);
           const open = ' [';
           const close = ']';
-          const total = doc.getTextWidth(prefix + open + pub.link + close);
+          const total = doc.getTextWidth(prefix + open + pubSeg.text + close);
           if (total <= contentWidth) {
             // Fits one line — render inline with the bracketed URL clickable.
             this.ensureSpace(doc, cursor, t.sizeBody * t.lineHeight, t.margin);
@@ -210,16 +213,16 @@ export class PdfResumeExporter {
             let x = t.margin;
             doc.text(prefix + open, x, cursor.y);
             x += doc.getTextWidth(prefix + open);
-            doc.textWithLink(pub.link, x, cursor.y, { url: pubHref });
-            x += doc.getTextWidth(pub.link);
+            doc.textWithLink(pubSeg.text, x, cursor.y, { url: pubSeg.href });
+            x += doc.getTextWidth(pubSeg.text);
             doc.text(close, x, cursor.y);
           } else {
             // Too long for one line — text wraps, URL gets its own clickable line.
             this.renderBodyLine(doc, prefix, t, cursor, contentWidth);
-            this.renderMetaLine(doc, pub.link, t, cursor, contentWidth, pubHref);
+            this.renderMetaLine(doc, pubSeg.text, t, cursor, contentWidth, pubSeg.href);
           }
         } else {
-          const line = `${prefix}${pub.link ? ` [${pub.link}]` : ''}`;
+          const line = `${prefix}${pub.link ? ` [${pubSeg?.text ?? pub.link}]` : ''}`;
           this.renderBodyLine(doc, line, t, cursor, contentWidth);
         }
         cursor.y += 2;
@@ -701,7 +704,7 @@ export class PdfResumeExporter {
     if (data.personalInfo.location)
       senderSegs.push({ text: data.personalInfo.location });
     if (data.personalInfo.linkedin)
-      senderSegs.push({ text: data.personalInfo.linkedin, href: normalizeWebUrl(data.personalInfo.linkedin) });
+      senderSegs.push(webSegment(data.personalInfo.linkedin));
     for (const seg of senderSegs) {
       cursor.y += t.sizeBody * t.lineHeight;
       if (seg.href) {

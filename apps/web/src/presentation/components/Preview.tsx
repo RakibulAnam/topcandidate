@@ -16,6 +16,7 @@ import {
 import {
   buildContactSegments,
   normalizeWebUrl,
+  webLabel,
   toMailto,
   toTel,
   CONTACT_SEPARATOR,
@@ -657,7 +658,7 @@ export const Preview: React.FC<PreviewProps> = ({
               {project.link && (
                 <div style={{ ...italicLineStyle, fontStyle: 'normal' }}>
                   <LinkableText href={normalizeWebUrl(project.link)}>
-                    {project.link}
+                    {webLabel(project.link)}
                   </LinkableText>
                 </div>
               )}
@@ -809,7 +810,7 @@ export const Preview: React.FC<PreviewProps> = ({
                 {pub.link ? (
                   <>
                     {' ['}
-                    <LinkableText href={normalizeWebUrl(pub.link)}>{pub.link}</LinkableText>
+                    <LinkableText href={normalizeWebUrl(pub.link)}>{webLabel(pub.link)}</LinkableText>
                     {']'}
                   </>
                 ) : ''}
@@ -930,7 +931,7 @@ export const Preview: React.FC<PreviewProps> = ({
           {data.personalInfo.linkedin && (
             <div>
               <LinkableText href={normalizeWebUrl(data.personalInfo.linkedin)}>
-                {data.personalInfo.linkedin}
+                {webLabel(data.personalInfo.linkedin)}
               </LinkableText>
             </div>
           )}
