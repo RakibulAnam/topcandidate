@@ -40,6 +40,7 @@ RULES:
 
 5. SKILLS — Emit BOTH a flat JD-ordered list ("skills") AND a grouped view ("skillCategories").
    FLAT: Clean, deduped (case-insensitive). JD-matched FIRST in JD casing, then remainder. Canonical forms ("CI/CD", "REST API", "PostgreSQL"). 1–3 words each, no soft skills.
+   PLATFORM/DOMAIN: when the candidate's evidence (canonicalBullets, normalized skills, or raw description) establishes a platform or domain the JD targets — e.g. iOS, Android, Data Engineering, Fintech — surface that exact platform/domain term in the flat list and its bucket (Domain, or Tools & Platforms). It is proven by the concrete stack (Swift/SwiftUI/Objective-C ⇒ iOS), not a new claim, so do NOT drop it as unmatched.
    CATEGORIES: Group the same items into role-appropriate buckets so a recruiter scanning by topic finds them fast. Pick category names from this taxonomy where they fit, but use only the categories the candidate actually has items for — never fabricate empty buckets:
      • Languages (programming or natural — e.g. "Python", "TypeScript", "Bengali" only if language proficiencies exist)
      • Frameworks & Libraries
@@ -440,6 +441,13 @@ const SKILL_ALIASES: Record<string, string[]> = {
   'node.js': ['nodejs', 'node js'],
   'websockets': ['websocket'],
   'websocket': ['websockets'],
+  // Platform/domain umbrella terms — grounded by the concrete stack, so a
+  // resume for an iOS/Android JD can surface the platform even for profile
+  // items normalized BEFORE the normalizer learned to emit it (sourceHash-
+  // cached items keep their old skills until re-saved). Not fabrication: the
+  // term is only kept when the candidate's evidence contains the stack.
+  'ios': ['swift', 'swiftui', 'objective-c', 'objective c', 'cocoapods', 'xcode', 'uikit'],
+  'android': ['kotlin', 'jetpack compose', 'android studio'],
 };
 
 function buildEvidenceText(c: ResumeData): string {

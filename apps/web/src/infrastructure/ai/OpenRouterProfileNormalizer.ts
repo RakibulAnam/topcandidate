@@ -50,7 +50,13 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
           ],
           response_format: { type: 'json_schema', json_schema: { name: 'normalized_item', strict: true, schema: NORMALIZER_SCHEMA } },
           temperature: 0,
-          max_tokens: 1500,
+          // Headroom for a rich multi-project entry to serialize fully — the
+          // prompt now scales bullets/skills to the input, so a dense native
+          // entry can run ~1500-2000 completion tokens; 4000 keeps strict
+          // json_schema output from truncating mid-object (which trips
+          // JSON.parse → the no-bullets retry path). Runs once on profile SAVE
+          // on cheap Flash-Lite, off the 2-call generation hot path.
+          max_tokens: 4000,
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
@@ -70,9 +76,13 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
       }
       // Defensive trims — tiny payload, cheap to sanitize. Awards belong on a
       // resume as a single tight line, not a multi-bullet block.
+      // Awards render as ONE tight resume line. For everything else the prompt
+      // scales bullet/skill count to the input's richness (faithful expansion —
+      // pre-trimming here is permanent loss); the 20-caps are defensive
+      // anti-runaway ceilings, NOT targets — real single items never approach them.
       const isAward = context.kind === 'award';
-      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, isAward ? 1 : 5);
-      parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 10);
+      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, isAward ? 1 : 20);
+      parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 20);
       // Subtle coaching only: a single hint at most — the polish itself is
       // the product; we never pile instructions on the user.
       let gaps = (parsed.gaps ?? []).map(g => g.trim()).filter(Boolean);
