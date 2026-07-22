@@ -153,8 +153,11 @@ export const PolishedPreview: React.FC<{
   const stale = !!sourceText?.trim() && !!sourceHash && contentHash(sourceText.trim()) !== sourceHash;
   return (
     <div className="mt-3 bg-charcoal-50 border border-charcoal-200 rounded-lg px-3 py-2.5">
-      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] font-semibold text-brand-600 mb-1.5">
-        <Sparkles size={11} className="text-accent-500" /> Polished by AI — how resumes will present this
+      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] font-semibold text-brand-600 mb-1">
+        <Sparkles size={11} className="text-accent-500" /> Polished by AI — what it understood about your work
+      </p>
+      <p className="text-xs text-charcoal-400 mb-2">
+        The notes AI reasons from to tailor your resume and cover letter to each job — not the final wording.
       </p>
       {stale && (
         <p className="text-xs text-charcoal-400 italic mb-1.5">
