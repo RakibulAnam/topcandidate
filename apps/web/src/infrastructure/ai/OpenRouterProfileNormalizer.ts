@@ -21,14 +21,22 @@ import {
 } from './prompts/normalizerPrompts.js';
 
 // VERIFY slugs at https://openrouter.ai/models before each release.
+// Both primaries are Google models, so a Google-side outage or free-tier
+// rate-limit fails BOTH on one round trip — the recurring 0-token error we saw.
+// A non-Google last resort (Llama) lets OpenRouter route around Google entirely
+// on the same request; it handles the strict json_schema fine (it's the
+// optimizer's fallback too) and is only reached when both Gemini models fail.
 const NORMALIZER_MODELS = [
   'google/gemini-2.5-flash-lite',
   'google/gemini-2.5-flash',
+  'meta-llama/llama-3.3-70b-instruct',
 ];
 
 export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
   private readonly client: OpenRouterClient;
-  private readonly deadlineMs = 20_000;
+  // 30s (was 20s) gives room for 3 attempts of the now-richer output before
+  // giving up — still a background save, well under the 60s function cap.
+  private readonly deadlineMs = 30_000;
 
   constructor(apiKey: string) {
     this.client = new OpenRouterClient(apiKey);
@@ -94,6 +102,9 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
       }
       parsed.gaps = gaps.slice(0, 1);
       return parsed;
-    }, this.deadlineMs);
+      // 3 attempts (was the default 2): the transient 0-token provider failure
+      // has bitten twice-in-a-row before, so one more retry within the 30s
+      // budget meaningfully raises the chance a save's polish lands.
+    }, this.deadlineMs, 3);
   }
 }
