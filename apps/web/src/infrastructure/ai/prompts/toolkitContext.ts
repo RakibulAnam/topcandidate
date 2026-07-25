@@ -68,11 +68,18 @@ export function buildCandidateContext(
     lines.push('');
     lines.push('Work experience:');
     for (const e of data.experience) {
-      // Evidence quality ladder: this generation's JD-tailored bullets →
-      // the stable AI-polished profile bullets → the raw brain dump.
-      const bullets = (e.refinedBullets && e.refinedBullets.length > 0)
-        ? e.refinedBullets
-        : (e.normalized?.bullets?.length ? e.normalized.bullets
+      // Evidence union: this generation's JD-tailored bullets PLUS the
+      // stable AI-polished profile bullets (deduped), falling back to the
+      // raw brain dump. refinedBullets are a JD-compressed subset (density-
+      // capped at 2–5) — and on a reopened saved resume they were tailored
+      // to a PREVIOUS JD — so they must supplement, never shadow, the full
+      // normalized evidence.
+      const refined = e.refinedBullets ?? [];
+      const norm = e.normalized?.bullets ?? [];
+      const seenB = new Set(refined.map(b => b.trim().toLowerCase()));
+      const bullets = refined.length > 0
+        ? [...refined, ...norm.filter(b => !seenB.has(b.trim().toLowerCase()))]
+        : (norm.length ? norm
           : e.rawDescription ? [e.rawDescription] : []);
       const tenure = e.startDate
         ? ` (${e.startDate} – ${e.isCurrent ? 'Present' : (e.endDate || 'present')})`
@@ -86,9 +93,13 @@ export function buildCandidateContext(
     lines.push('');
     lines.push('Projects:');
     for (const p of data.projects) {
-      const bullets = (p.refinedBullets && p.refinedBullets.length > 0)
-        ? p.refinedBullets
-        : (p.normalized?.bullets?.length ? p.normalized.bullets
+      // Union, not ladder — see the experience block above for why.
+      const refinedP = p.refinedBullets ?? [];
+      const normP = p.normalized?.bullets ?? [];
+      const seenP = new Set(refinedP.map(b => b.trim().toLowerCase()));
+      const bullets = refinedP.length > 0
+        ? [...refinedP, ...normP.filter(b => !seenP.has(b.trim().toLowerCase()))]
+        : (normP.length ? normP
           : p.rawDescription ? [p.rawDescription] : []);
       const tech = p.technologies ? ` (${p.technologies})` : '';
       lines.push(`- ${p.name}${tech}`);
@@ -144,9 +155,8 @@ export function buildCandidateContext(
       lines.push(`- ${x.title || 'Activity'} at ${x.organization || 'organization'}${tenure}`);
       const bullets = (x.refinedBullets && x.refinedBullets.length > 0)
         ? x.refinedBullets
-        : x.description
-          ? [x.description]
-          : [];
+        : (x.normalized?.bullets?.length ? x.normalized.bullets
+          : x.description ? [x.description] : []);
       for (const b of bullets) lines.push(`    • ${b}`);
     }
   }
@@ -168,7 +178,21 @@ export function buildCandidateContext(
   }
 
   lines.push('');
-  lines.push(`Skills: ${data.skills.join(', ') || '(none provided)'}`);
+  // Union of the top-level skills and the per-item normalized skills — the
+  // normalizer surfaces proven platform/domain competencies ("Native iOS
+  // Development") that often never make it into the flat skills field.
+  const skillMap = new Map<string, string>();
+  const addSkills = (skills?: string[]) => {
+    for (const s of skills ?? []) {
+      const k = s.trim().toLowerCase();
+      if (k && !skillMap.has(k)) skillMap.set(k, s.trim());
+    }
+  };
+  addSkills(data.skills);
+  for (const e of data.experience) addSkills(e.normalized?.skills);
+  for (const p of data.projects) addSkills(p.normalized?.skills);
+  for (const x of data.extracurriculars ?? []) addSkills(x.normalized?.skills);
+  lines.push(`Skills: ${[...skillMap.values()].join(', ') || '(none provided)'}`);
 
   if (data.skillCategories && data.skillCategories.length > 0) {
     lines.push('Skill groupings:');
@@ -273,9 +297,10 @@ export function buildToolkitEvidenceCorpus(data: ResumeData): string {
 //
 // Detection is a token-overlap heuristic between JD vocabulary and the
 // candidate's evidence corpus. Below the threshold = stretch. We intentionally
-// pick a low threshold (~20%) because even modest overlap means at least
-// some skill transfer; "stretch" should be reserved for genuine pivots
-// where almost nothing in the evidence speaks to the JD.
+// pick a low threshold (10% — see FIT_STRETCH_THRESHOLD and its calibration
+// note) because even modest overlap means at least some skill transfer;
+// "stretch" should be reserved for genuine pivots where almost nothing in
+// the evidence speaks to the JD.
 
 export type FitMode = 'match' | 'stretch';
 
@@ -396,6 +421,24 @@ export function buildCandidateAnchors(data: ResumeData): string[] {
   for (const x of data.extracurriculars ?? []) {
     if (x.organization && x.organization.trim().length >= 3) anchors.push(x.organization.trim());
   }
+  // Product / module proper nouns living inside normalized bullets
+  // ("Ditio Core", "Batch Camera Module") — the candidate's most natural
+  // anchors. Without these, output that leads with the candidate's actual
+  // product names fails the specificity guard while legal-name boilerplate
+  // passes. Heuristic: runs of 2+ Capitalized words. False extras only make
+  // the guard more permissive, never stricter.
+  const properNoun = /\b[A-Z][A-Za-z0-9&.+-]*(?:\s+[A-Z][A-Za-z0-9&.+-]*)+\b/g;
+  const harvest = (bullets?: string[]) => {
+    for (const b of bullets ?? []) {
+      for (const m of b.matchAll(properNoun)) {
+        const noun = m[0].trim();
+        if (noun.length >= 6) anchors.push(noun);
+      }
+    }
+  };
+  for (const e of data.experience ?? []) harvest(e.normalized?.bullets);
+  for (const p of data.projects ?? []) harvest(p.normalized?.bullets);
+  for (const x of data.extracurriculars ?? []) harvest(x.normalized?.bullets);
   return anchors;
 }
 
@@ -698,6 +741,18 @@ const TECH_TOKEN_ALIASES: Record<string, string[]> = {
   'kubernetes': ['k8s'],
   'postgres': ['postgresql'],
   'postgresql': ['postgres'],
+  // Platform umbrella terms — grounded by the concrete stack (mirrors the
+  // optimizer's SKILL_ALIASES): shipping to the Play Store IS Android work,
+  // Swift/SwiftUI/Xcode work IS iOS work. Naming the platform is labeling
+  // evidenced work, not fabrication.
+  'android': ['play store', 'google play', 'kotlin', 'jetpack compose', 'android studio'],
+  'ios': ['swift', 'swiftui', 'objective-c', 'objective c', 'cocoapods', 'xcode', 'uikit', 'app store'],
+  // Canonical-spelling variants — evidence written as "Power BI" must not
+  // kill an artifact whose output says "PowerBI".
+  'powerbi': ['power bi'],
+  'express.js': ['expressjs', 'express js'],
+  'expressjs': ['express.js', 'express js'],
+  'github actions': ['gh actions'],
   'golang': ['go'],
   'rails': ['ruby on rails'],
   'ruby on rails': ['rails'],
@@ -832,19 +887,27 @@ export function assertOutreachSpecificity(
   const company = data.targetJob.company?.trim();
   const anchors = buildCandidateAnchors(data);
 
-  const hasCompany = !!company && lc.includes(company.toLowerCase());
+  // Accept the full stored company name OR its first significant token —
+  // users store "NordPay Fintech Ltd" while natural prose says "NordPay";
+  // requiring the full legal string forced boilerplate into otherwise-
+  // specific output.
+  const companyLc = (company ?? '').toLowerCase();
+  const companyHead = companyLc.split(/\s+/)[0] ?? '';
+  const hasCompany = !!company && (lc.includes(companyLc) || (companyHead.length >= 4 && lc.includes(companyHead)));
   const hasAnchor = anchors.some(a => isLatinRepresentable(a) && lc.includes(a.toLowerCase()));
 
   if (mode === 'both') {
     if (!hasCompany && !!company) {
       throw new ToolkitSpecificityError(`output never names target company "${company}"`);
     }
-    // Only enforce the candidate-anchor check when:
-    //   1. The target company was NOT already found (company presence alone is sufficient
-    //      specificity — enforcing both is too strict and breaks for non-Latin anchor names).
-    //   2. There are Latin-representable anchors the AI could plausibly reproduce.
+    // Enforce the candidate-anchor half whenever Latin-representable anchors
+    // exist — the prompt promises company AND anchor, and a mail that names
+    // the company but zero candidate evidence is exactly the JD-shaped
+    // generic output this guard exists to catch. Bengali-script-only
+    // profiles stay exempt (their anchors cannot substring-match English
+    // output).
     const latinAnchors = anchors.filter(isLatinRepresentable);
-    if (!hasCompany && latinAnchors.length > 0 && !hasAnchor) {
+    if (latinAnchors.length > 0 && !hasAnchor) {
       throw new ToolkitSpecificityError('output never references a candidate proper noun (company / role / project / cert / school)');
     }
   } else {

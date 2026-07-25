@@ -102,7 +102,7 @@ SHAPE —
 
 GROUNDING (enforced): the note must reference EITHER the target company by name OR at least one candidate proper noun. Within 280 chars you usually need both.
 
-TONE — Direct, human, low-pressure. Mirror at most ONE JD keyword. Never invent employers, tools, or metrics.
+TONE — Direct, human, low-pressure. Mirror at most ONE JD keyword that is not already an evidenced candidate skill — the candidate's own evidenced tools and skills never count against this cap (naming your own stack is specificity, not stuffing). Never invent employers, tools, or metrics.
 
 ═══════════════════════════════════════════════
 ARTIFACT 4 — INTERVIEW QUESTIONS (array, interviewQuestions)
@@ -154,6 +154,7 @@ ${data.targetJob.description}
 ═══════════════════════════════════════════════
 RULES
 ═══════════════════════════════════════════════
+- THINK FIRST (silently — not in the output): extract the JD's top 3–5 hard-skill / tool keywords and top 2 responsibility themes. For each, find the single candidate-evidence item above that maps best. Build all four artifacts from those mappings — lead with the strongest mapping, not with the first item listed.
 - Strict JSON matching the schema. Every field non-empty.
 - Each artifact follows its own rules from the system instruction.
 - ${mode === 'stretch'
@@ -380,7 +381,7 @@ HARD RULES
 ═══════════════════════════════════════════════
 - ${LINKEDIN_MAX} character cap. Count spaces.
 - No greeting. No signoff. No emojis. No quotes. No hashtags.
-- Mirror at most ONE JD keyword.
+- Mirror at most ONE JD keyword that is not already an evidenced candidate skill; the candidate's own evidenced tools may appear as needed.
 - Reference at least one specific candidate proper noun OR the target company name (preferably both).
 - Never invent employers, metrics, or tools.
 `;
