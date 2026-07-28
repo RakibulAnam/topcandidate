@@ -152,6 +152,20 @@ export async function withRetry<T>(
   throw lastErr;
 }
 
+/**
+ * Rotate a models[] fallback chain by retry attempt. Google's shared-pool
+ * rate-limit arrives as HTTP 200 + finish_reason='error', which OpenRouter's
+ * own models[] fallback does NOT route around — so a retry that re-sends the
+ * same Gemini-first chain just hits the same throttled pool. Leading each
+ * retry with the next model in the chain makes the retry actually escape the
+ * failing provider (attempt 0 keeps the intended primary).
+ */
+export function rotateModels(models: string[], attempt: number): string[] {
+  if (models.length < 2 || attempt <= 0) return models;
+  const k = attempt % models.length;
+  return [...models.slice(k), ...models.slice(0, k)];
+}
+
 export class OpenRouterClient {
   constructor(private readonly apiKey: string) {
     if (!apiKey) {
@@ -190,7 +204,11 @@ export class OpenRouterClient {
       }
 
       const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
+        choices?: Array<{
+          message?: { content?: unknown };
+          finish_reason?: string;
+          error?: { code?: number; message?: string };
+        }>;
         model?: string;
         usage?: OpenRouterUsage;
         // OpenRouter surfaces upstream provider errors in the 200 body too.
@@ -201,8 +219,22 @@ export class OpenRouterClient {
         throw new Error(`OpenRouter upstream error: ${data.error.message}`);
       }
 
-      const content = data.choices?.[0]?.message?.content;
-      if (typeof content !== 'string') {
+      // OpenRouter can return HTTP 200 while the UPSTREAM provider errored
+      // mid-generation — most commonly Google Gemini "temporarily rate-limited
+      // upstream" (a shared-pool 429), which arrives as choices[0].finish_reason
+      // === 'error' + a choices[0].error, usually alongside partial/invalid
+      // content. OpenRouter's models[] fallback does NOT trigger on this, and a
+      // naive reader would treat the partial text as success. Detect it and
+      // throw so withRetry retries (the shared-pool limit is transient) and the
+      // failure is never silently returned as bad content.
+      const choice = data.choices?.[0];
+      if (choice?.finish_reason === 'error' || choice?.error) {
+        const code = typeof choice?.error?.code === 'number' ? choice.error.code : 502;
+        throw new OpenRouterError(code, choice?.error?.message ?? 'upstream generation error (finish_reason=error)');
+      }
+
+      const content = choice?.message?.content;
+      if (typeof content !== 'string' || content.trim() === '') {
         throw new Error('OpenRouter returned no text content');
       }
 

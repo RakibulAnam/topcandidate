@@ -35,8 +35,8 @@ const resumeRepository = new SupabaseResumeRepository();
 export const resumeExtractor = new ProxyResumeExtractor();
 
 // Profile-item normalizer ("polished profile") — fired in the background on
-// profile save by the profile sections; not part of ResumeService's
-// generation flow.
+// profile save by the profile sections, and reused by ResumeService's
+// general-resume fallback to polish raw items on demand.
 export const profileNormalizer = new ProxyProfileNormalizer();
 
 // Supabase Repositories
@@ -55,6 +55,7 @@ export const createResumeService = () => {
     toolkitGenerator,
     resumeRepository,
     profileRepository,
-    generalResumeOptimizer
+    generalResumeOptimizer,
+    profileNormalizer
   );
 };

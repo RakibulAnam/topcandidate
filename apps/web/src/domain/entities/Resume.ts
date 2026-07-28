@@ -299,6 +299,10 @@ export interface ResumeData {
   customSections?: { title: string; items: string[] }[];
   visibleSections?: string[]; // User selected sections
   template?: ResumeTemplate; // ATS Template selection
+  // Content hash of the profile at the time this resume was generated. Used
+  // for the General Resume to detect whether the profile changed since (and
+  // thus whether to offer a regenerate). See application/validation/profileHash.
+  sourceProfileHash?: string;
 }
 
 // All variants are single-column, real-text, no icons / no tables — i.e.

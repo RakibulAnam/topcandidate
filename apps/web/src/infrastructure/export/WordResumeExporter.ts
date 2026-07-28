@@ -28,7 +28,7 @@ import {
 import {
   ContactSegment,
   buildContactSegments,
-  normalizeWebUrl,
+  webSegment,
   toMailto,
   toTel,
   CONTACT_SEPARATOR,
@@ -329,16 +329,16 @@ export class WordResumeExporter implements IResumeExporter {
           })
         );
         if (proj.link) {
-          const projHref = normalizeWebUrl(proj.link);
+          const projSeg = webSegment(proj.link);
           sections.push(
             new Paragraph({
               children: [
-                projHref
+                projSeg.href
                   ? new ExternalHyperlink({
-                      link: projHref,
-                      children: [new TextRun({ text: proj.link, size: pt(t.sizeMeta) })],
+                      link: projSeg.href,
+                      children: [new TextRun({ text: projSeg.text, size: pt(t.sizeMeta) })],
                     })
-                  : new TextRun({ text: proj.link, size: pt(t.sizeMeta) }),
+                  : new TextRun({ text: projSeg.text, size: pt(t.sizeMeta) }),
               ],
               spacing: { after: twips(t.bulletGap) },
             })
@@ -505,20 +505,21 @@ export class WordResumeExporter implements IResumeExporter {
       sections.push(this.createSectionHeading('Publications', t));
       for (const pub of data.publications) {
         const pubPrefix = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}`;
-        const pubHref = pub.link ? normalizeWebUrl(pub.link) : undefined;
+        // Shortened visible text (full URL stays the link target); raw when unlinkable.
+        const pubSeg = pub.link ? webSegment(pub.link) : undefined;
         const pubChildren: (TextRun | ExternalHyperlink)[] =
-          pub.link && pubHref
+          pub.link && pubSeg?.href
             ? [
                 new TextRun({ text: `${pubPrefix} [`, size: pt(t.sizeBody) }),
                 new ExternalHyperlink({
-                  link: pubHref,
-                  children: [new TextRun({ text: pub.link, size: pt(t.sizeBody) })],
+                  link: pubSeg.href,
+                  children: [new TextRun({ text: pubSeg.text, size: pt(t.sizeBody) })],
                 }),
                 new TextRun({ text: ']', size: pt(t.sizeBody) }),
               ]
             : [
                 new TextRun({
-                  text: `${pubPrefix}${pub.link ? ` [${pub.link}]` : ''}`,
+                  text: `${pubPrefix}${pub.link ? ` [${pubSeg?.text ?? pub.link}]` : ''}`,
                   size: pt(t.sizeBody),
                 }),
               ];
@@ -661,6 +662,11 @@ export class WordResumeExporter implements IResumeExporter {
     return new Paragraph({
       text,
       heading: HeadingLevel.HEADING_2,
+      // Keep the heading with the item that follows it, so Word never leaves a
+      // section heading stranded at the bottom of a page. Word keeps it with
+      // just the next paragraph (not the whole section), so a long section
+      // still flows without leaving a large gap.
+      keepNext: true,
       border: ruled
         ? {
             bottom: {
@@ -720,7 +726,7 @@ export class WordResumeExporter implements IResumeExporter {
     if (data.personalInfo.location)
       senderSegs.push({ text: data.personalInfo.location });
     if (data.personalInfo.linkedin)
-      senderSegs.push({ text: data.personalInfo.linkedin, href: normalizeWebUrl(data.personalInfo.linkedin) });
+      senderSegs.push(webSegment(data.personalInfo.linkedin));
     for (const seg of senderSegs) {
       paragraphs.push(
         new Paragraph({

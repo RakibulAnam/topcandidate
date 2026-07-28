@@ -31,7 +31,7 @@ RULES:
    SKILL HONESTY: a skill may appear in 'skills' ONLY IF it is in the candidate's input skills, an experience description, a project description, or a project 'technologies' field. If the JD demands a tool the candidate never evidenced, DO NOT add it.
    Bullets: never name a tool unless the candidate evidenced it.
 
-3. BULLETS — Start with a strong past-tense action verb (present for current role). Use Led, Owned, Drove, Architected, Built, Designed, Shipped, Launched, Deployed, Refactored, Migrated, Automated, Scaled, Reduced, Increased, Improved, Cut, Accelerated, Established, Standardized, Mentored, Resolved, Eliminated.
+3. BULLETS — Start with a strong past-tense action verb. Present tense is ONLY for ongoing duties in the current role; completed, shipped deliverables keep past tense ("Migrated", "Shipped", "Redesigned") even inside the current role — finished wins must read as finished. Use Led, Owned, Drove, Architected, Built, Designed, Shipped, Launched, Deployed, Refactored, Migrated, Automated, Scaled, Reduced, Increased, Improved, Cut, Accelerated, Established, Standardized, Mentored, Resolved, Eliminated.
    Banned starts (instant reject): "Responsible for", "Worked on", "Helped with/to", "Duties included", "Tasked with", "In charge of", "Assisted with/in", "Involved in", "Participated in", first-person.
    Avoid weak openers (Assisted/Contributed/Utilized/Helped/Worked/Handled) — replace with strong verbs naming the concrete contribution.
    1–2 lines (~14–26 words). Diversify opening verbs within an item — never repeat a verb in the same role's bullets.
@@ -40,6 +40,7 @@ RULES:
 
 5. SKILLS — Emit BOTH a flat JD-ordered list ("skills") AND a grouped view ("skillCategories").
    FLAT: Clean, deduped (case-insensitive). JD-matched FIRST in JD casing, then remainder. Canonical forms ("CI/CD", "REST API", "PostgreSQL"). 1–3 words each, no soft skills.
+   PLATFORM/DOMAIN: when the candidate's evidence (canonicalBullets, normalized skills, or raw description) establishes a platform or domain the JD targets — e.g. iOS, Android, Data Engineering, Fintech — surface that exact platform/domain term in the flat list and its bucket (Domain, or Tools & Platforms). It is proven by the concrete stack (Swift/SwiftUI/Objective-C ⇒ iOS), not a new claim, so do NOT drop it as unmatched.
    CATEGORIES: Group the same items into role-appropriate buckets so a recruiter scanning by topic finds them fast. Pick category names from this taxonomy where they fit, but use only the categories the candidate actually has items for — never fabricate empty buckets:
      • Languages (programming or natural — e.g. "Python", "TypeScript", "Bengali" only if language proficiencies exist)
      • Frameworks & Libraries
@@ -68,7 +69,7 @@ RULES:
       Good: "Hands-on with React + TypeScript on the front and Node.js + PostgreSQL on the back, comfortable owning CI/CD on AWS."
 
    HARD BANS (instant reject, applies to every output):
-   - METRIC DUPLICATION — Do not lift any specific number, %, $, named outcome, or unique phrase that appears in any refined bullet. The same number in summary AND a bullet flags as filler in both human and AI screens. Tenure ("7 years"), generic scope ("multi-region", "cross-team"), and aggregate counts that summarise across roles are fine.
+   - METRIC DUPLICATION — Do not lift any specific number, %, $, or metric-bearing outcome that appears in any refined bullet. The same number in summary AND a bullet flags as filler in both human and AI screens. Tenure ("7 years"), generic scope ("multi-region", "cross-team"), and aggregate counts that summarise across roles are fine. You MAY name the candidate's single most JD-relevant proof point (a named migration, module, system, or product) WITHOUT its metric — one concrete noun in the summary is differentiation, not filler; just never repeat its number.
    - CLICHÉS — "results-driven", "passionate", "team player", "go-getter", "innovative", "proven track record", "dynamic", "self-starter", "synergy", "value-add", "thought leader", "highly motivated", "detail-oriented", "strong communication skills".
    - VAGUE HEDGES — "various", "diverse", "multiple", "extensive", "wide range".
    - GENERIC OPENERS — Do not begin with "Highly", "Experienced", "Skilled" + adjective. Lead with role + specifics.
@@ -79,7 +80,7 @@ RULES:
 
 8. BULLET COUNT — Match signal density: rich (3+ accomplishments) → 4–5 bullets, moderate → 3–4, thin → 2–3. Never pad.
 
-9. SENIORITY ALIGNMENT — Match tone, scope language, and verb choice to the candidate's actual seniority (provided as SENIORITY in the prompt). Junior / entry-level: emphasize execution, shipping features, technical foundations, learning velocity, collaboration. Use verbs like Built, Implemented, Shipped, Contributed, Resolved. Avoid claiming architectural ownership or strategy. Mid: emphasize ownership, cross-team collaboration, problem decomposition, architectural contributions. Use Owned, Led, Drove, Designed, Refactored. Senior+: emphasize system design, technical strategy, mentoring, scalability, organizational impact. Use Architected, Established, Scaled, Mentored, Standardized. Never inflate seniority through verb choice.`;
+9. SENIORITY ALIGNMENT — Match tone, scope language, and verb choice to the candidate's actual seniority (provided as SENIORITY in the prompt). Junior / entry-level: emphasize execution, shipping features, technical foundations, learning velocity, collaboration. Use verbs like Built, Implemented, Shipped, Contributed, Resolved. Avoid claiming architectural ownership or strategy. Mid: emphasize ownership, cross-team collaboration, problem decomposition, architectural contributions. Use Owned, Led, Drove, Designed, Refactored. Senior+: emphasize system design, technical strategy, mentoring, scalability, organizational impact. Use Architected, Established, Scaled, Mentored, Standardized. Never inflate seniority through verb choice. Never DEFLATE evidenced ownership either: when the input or canonicalBullets state the candidate led, owned, or solo-built something, keep that verb regardless of the seniority bucket — the evidence outranks the bucket.`;
 }
 
 // ────────────────────────────────────────────────
@@ -109,6 +110,9 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     // the NOTE in the prompt tells the model to use them as primary
     // evidence — stabler output than re-interpreting Banglish per generation.
     ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
+    // Normalizer-surfaced competencies ("Native iOS Development") — the
+    // pre-computed platform/domain signal RULE 5 tells the model to use.
+    ...(e.normalized?.skills?.length ? { canonicalSkills: e.normalized.skills } : {}),
   }));
 
   const cleanProjects = data.projects.map(p => ({
@@ -118,6 +122,7 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     technologies: p.technologies,
     link: p.link,
     ...(p.normalized?.bullets?.length ? { canonicalBullets: p.normalized.bullets } : {}),
+    ...(p.normalized?.skills?.length ? { canonicalSkills: p.normalized.skills } : {}),
   }));
 
   const cleanExtracurriculars = (data.extracurriculars || []).map(e => ({
@@ -128,6 +133,7 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     endDate: e.endDate,
     description: e.description,
     ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
+    ...(e.normalized?.skills?.length ? { canonicalSkills: e.normalized.skills } : {}),
   }));
 
   const hasCanonical =
@@ -151,7 +157,7 @@ Total experience: ${totalExperience}
 SENIORITY: ${seniority} — calibrate verb choice, ownership claims, and scope language accordingly (see RULE 9).
 Skills (input): ${data.skills.join(', ') || '(none)'}
 
-${hasCanonical ? 'NOTE: items below with "canonicalBullets" carry a pre-cleaned professional rendering of their raw description. Treat canonicalBullets as the PRIMARY evidence and the raw description as backup detail; still reorder, reword, and emphasize for THIS JD.\n\n' : ''}EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
+${hasCanonical ? 'NOTE: items below with "canonicalBullets" carry a pre-cleaned professional rendering of their raw description — often MORE bullets than your output budget. Treat canonicalBullets as the PRIMARY evidence and the raw description as backup detail. Your job is to SELECT: keep the most JD-relevant subset within the RULE 8 bullet budget and DROP the off-JD rest — never blend two distinct projects or artifacts into one vague line. You MAY merge two canonical facts about the SAME artifact into one denser bullet when that preserves both specifics. Still reorder, reword, and emphasize for THIS JD.\n\n' : ''}EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
 ${JSON.stringify(cleanExperience)}
 
 PROJECTS (${cleanProjects.length} items — each MUST produce refinedBullets):
@@ -162,6 +168,7 @@ ${JSON.stringify(cleanExtracurriculars)}
 
 EDUCATION:
 ${JSON.stringify(data.education)}
+${data.certifications?.length ? `CERTIFICATIONS: ${data.certifications.map(c => c.issuer ? `${c.name} — ${c.issuer}` : c.name).join('; ')}\n` : ''}${data.languages?.length ? `LANGUAGES: ${data.languages.filter(l => l.name).map(l => `${l.name} (${l.proficiency})`).join(', ')}\n` : ''}
 
 THINK FIRST (silently — do NOT include this analysis in the output):
 - Identify the JD's top 5 hard requirements (technologies, domains, scope, seniority signals).
@@ -173,7 +180,7 @@ Then emit JSON only.
 TASK
 1. summary — Per the SUMMARY rule. SYNTHESIS, not duplication: surface the *pattern* across roles, never restate a single bullet. Aim for differentiation — what about this candidate would make a recruiter (or an LLM ranker) move them past the first cut for THIS specific JD? If the only metric available is a single bullet's number, do NOT use it in the summary; rely on tenure, domain, and stack instead.
 2. skills — JD-matched first (in JD casing), then candidate's. SKILL HONESTY: include only what the candidate evidenced. If you want to add a JD-required skill the candidate doesn't have, DO NOT.
-3. experience — Convert each "description" into refinedBullets. Preserve every number. Reorder so the first bullet under each role is the most JD-aligned achievement. Strong verbs only.
+3. experience — Build each item's refinedBullets from its canonicalBullets (fall back to "description" when absent): SELECT the most JD-relevant subset, preserve every number. Reorder so the first bullet under each role is the most JD-aligned achievement. Strong verbs only.
 4. projects — Same rules. Integrate "technologies" naturally.
 5. extracurriculars — Same rules.${schemaSpec}`;
 }
@@ -242,7 +249,10 @@ const BANNED_CLICHE_PATTERNS: Array<[RegExp, string]> = [
   [/\bteam player\b/gi, 'collaborative contributor'],
   [/\bgo-getter\b/gi, ''],
   [/\binnovative\s+/gi, ''],
-  [/\bdynamic\s+/gi, ''],
+  // "dynamic" is banned as a persona adjective ("dynamic professional") but
+  // legitimate as a technical modifier — don't mangle "dynamic pricing",
+  // "dynamic programming", etc.
+  [/\bdynamic\s+(?!pricing|programming|routing|content|linking|analysis|dashboards?\b)/gi, ''],
   [/\bself-starter\b/gi, ''],
   [/\bsynergy\b/gi, ''],
   [/\bvalue-add\b/gi, ''],
@@ -415,6 +425,17 @@ function skillEvidenced(skill: string, evidence: string): boolean {
   if (expansions) {
     for (const alias of expansions) if (evidence.includes(alias)) return true;
   }
+  // Leading-phrase fallback for 3+-word skills: an honest longer phrasing of
+  // an evidenced fact ("App Store Releases" when the raw text says
+  // "currently in the app store") must not be false-flagged. Accept when the
+  // skill's leading noun phrase (all words minus trailing ones, down to two
+  // words) appears in evidence. NEVER applied to credential-shaped skills —
+  // "Kubernetes Certification" must not pass on "Kubernetes" alone.
+  if (/certif|licen|diploma|degree|award/.test(lc)) return false;
+  const words = lc.split(/\s+/);
+  for (let n = words.length - 1; n >= 2; n--) {
+    if (evidence.includes(words.slice(0, n).join(' '))) return true;
+  }
   return false;
 }
 
@@ -440,6 +461,24 @@ const SKILL_ALIASES: Record<string, string[]> = {
   'node.js': ['nodejs', 'node js'],
   'websockets': ['websocket'],
   'websocket': ['websockets'],
+  // Platform/domain umbrella terms — grounded by the concrete stack, so a
+  // resume for an iOS/Android JD can surface the platform even for profile
+  // items normalized BEFORE the normalizer learned to emit it (sourceHash-
+  // cached items keep their old skills until re-saved). Not fabrication: the
+  // term is only kept when the candidate's evidence contains the stack.
+  'ios': ['swift', 'swiftui', 'objective-c', 'objective c', 'cocoapods', 'xcode', 'uikit', 'app store'],
+  'android': ['kotlin', 'jetpack compose', 'android studio', 'google play', 'play store'],
+  // Stack ⇒ domain umbrella families beyond mobile — same grounded-inference
+  // contract as ios/android above: the umbrella term is kept only when the
+  // candidate's evidence contains the concrete stack that proves it. This is
+  // labeling evidenced work (the normalizer's RULE 5 philosophy), never a
+  // new claim.
+  'data engineering': ['spark', 'airflow', 'kafka', 'etl', 'dbt', 'data pipeline', 'data warehouse', 'bigquery', 'redshift'],
+  'fintech': ['payment gateway', 'payment processing', 'bkash', 'nagad', 'sslcommerz', 'core banking', 'mobile banking', 'mobile financial services'],
+  'devops': ['docker', 'kubernetes', 'terraform', 'ci/cd', 'jenkins', 'github actions', 'gitlab ci', 'ansible'],
+  'machine learning': ['tensorflow', 'pytorch', 'scikit-learn', 'xgboost', 'keras'],
+  'data analysis': ['power bi', 'tableau', 'pandas', 'pivot table'],
+  'e-commerce': ['shopify', 'woocommerce', 'daraz', 'magento'],
 };
 
 function buildEvidenceText(c: ResumeData): string {
@@ -462,6 +501,13 @@ function buildEvidenceText(c: ResumeData): string {
   }
   for (const ed of c.education ?? []) parts.push(ed.school ?? '', ed.degree ?? '', ed.field ?? '');
   for (const cert of c.certifications ?? []) parts.push(cert.name ?? '', cert.issuer ?? '');
+  // Languages, awards, publications, and affiliations are real candidate
+  // evidence too — without languages here, RULE 5's own "Bengali" example
+  // would be stripped as fabricated even when the profile lists it.
+  for (const lang of c.languages ?? []) parts.push(lang.name ?? '');
+  for (const a of c.awards ?? []) parts.push(a.title ?? '', a.issuer ?? '', a.description ?? '');
+  for (const p of c.publications ?? []) parts.push(p.title ?? '', p.publisher ?? '');
+  for (const af of c.affiliations ?? []) parts.push(af.role ?? '', af.organization ?? '');
   return parts.join(' ');
 }
 
@@ -593,7 +639,13 @@ function trimGroup(
 
   items.forEach((item, idx) => {
     if (!item.refinedBullets || item.refinedBullets.length <= 2) return;
-    const isWeak = scores[idx] < median;
+    // Trim to 2 only when the item is BOTH relatively weak (below the
+    // resume's median JD fit) AND absolutely weak (≤1 JD-vocab hits across
+    // all its bullets). Relative rank alone guaranteed that with two items
+    // of unequal scores the lower one ALWAYS lost bullets 3+ — deleting
+    // honest, JD-relevant evidence the normalizer was built to preserve
+    // and orphaning summary claims the deleted bullets supported.
+    const isWeak = scores[idx] < median && scores[idx] <= 1;
     const cap = isWeak ? 2 : 5;
     if (item.refinedBullets.length > cap) {
       item.refinedBullets = item.refinedBullets.slice(0, cap);
@@ -616,6 +668,13 @@ function tokenizeForScoring(s: string): string[] {
     .toLowerCase()
     .replace(/[^a-z0-9+./#-]/g, ' ')
     .split(/\s+/)
+    // Sentence-final punctuation sticks to the last word ("codebase." never
+    // matches JD token "codebase") and slash-joined pairs hide both halves
+    // ("objective-c/swift" matches neither). Keep the original token AND its
+    // slash-split halves; strip trailing periods/hyphens (interior ones —
+    // "node.js", "objective-c", "c++" — are untouched).
+    .flatMap(t => t.includes('/') ? [t, ...t.split('/')] : [t])
+    .map(t => t.replace(/[.-]+$/, ''))
     .filter(Boolean);
 }
 

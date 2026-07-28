@@ -12,11 +12,16 @@
  * surfaces stay WYSIWYG-identical (web app CLAUDE.md rule 7).
  *
  * Design rules:
- *   - The VISIBLE text is always the full URL / address (never a label like
- *     "LinkedIn"). ATS parsers that ignore the link annotation still read the
- *     URL as plain text — keep it that way.
+ *   - The VISIBLE text is a SHORTENED URL — scheme, a leading "www.", and a
+ *     trailing slash stripped (e.g. "linkedin.com/in/name") — while the href
+ *     keeps the full "https://…" target. This reads cleanly AND stays ATS-safe:
+ *     parsers that ignore the link annotation still read a real URL from the
+ *     plain-text layer, and a printed copy still shows a typeable address. A
+ *     bare word label ("LinkedIn") is deliberately NOT used — it would strip
+ *     the destination for annotation-blind ATS parsers and on paper.
  *   - href derivation is defensive: malformed / non-URL-ish input yields NO
- *     href, so the segment renders as plain text instead of a broken link.
+ *     href, so the segment renders as plain (un-shortened) text, not a broken
+ *     link.
  */
 
 import type { PersonalInfo } from '../../domain/entities/Resume';
@@ -61,7 +66,13 @@ export function normalizeWebUrl(raw: string | undefined | null): string | undefi
   if (!v) return undefined;
   // Reject anything with internal whitespace — almost certainly free text.
   if (/\s/.test(v)) return undefined;
-  if (/^https?:\/\//i.test(v)) return v;
+  if (/^https?:\/\//i.test(v)) {
+    // Require a real dotted host after the scheme, so a bare "https://" (or
+    // "https://www.") is NOT treated as linkable — it would otherwise pair a
+    // truthy href with an empty shortened label (see prettyUrlLabel).
+    const host = v.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+    return /^[^\s/]+\.[^\s/]+/.test(host) ? v : undefined;
+  }
   // Strip a leading "@" handle marker and any leading slashes.
   v = v.replace(/^@/, '').replace(/^\/+/, '');
   // Must contain a dot (a domain) to be worth linkifying.
@@ -70,22 +81,62 @@ export function normalizeWebUrl(raw: string | undefined | null): string | undefi
 }
 
 /**
+ * Shorten a web URL for DISPLAY ONLY: strip the scheme, a leading "www.", and
+ * any trailing slash so "https://www.linkedin.com/in/name/" reads as
+ * "linkedin.com/in/name". The link target (href) is derived separately and
+ * always keeps the full "https://…" URL. Input without a scheme (already clean,
+ * or free text) is returned trimmed and otherwise untouched, so nothing gets
+ * mangled — callers only apply this when the value is a genuine linkable URL.
+ */
+export function prettyUrlLabel(raw: string | undefined | null): string {
+  const v = (raw ?? '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '');
+  // Strip a trailing slash only when it's a real path slash — never when a
+  // query/fragment follows (e.g. "x.com/p?next=/" must keep its tail).
+  return /[?#]/.test(v) ? v : v.replace(/\/+$/, '');
+}
+
+/**
+ * The visible text for a web link: the shortened URL when the value is safely
+ * linkable, otherwise the raw text (un-shortened) so a malformed entry renders
+ * as plain text rather than a mangled/empty label. The `|| value` floor guards
+ * the degenerate case where shortening would leave nothing.
+ *
+ * Use this (or `webSegment`) at EVERY web-link render site — header, project,
+ * publication, cover-letter sender — so all three surfaces (preview / PDF /
+ * Word) derive identical display text and stay WYSIWYG (web CLAUDE.md rule 7).
+ */
+export function webLabel(value: string): string {
+  const href = normalizeWebUrl(value);
+  return href ? (prettyUrlLabel(value) || value) : value;
+}
+
+/** A web-link contact segment: shortened visible text (`webLabel`) + full-URL
+ * href. Exported so the cover-letter sender blocks and the exporters reuse the
+ * exact same derivation as the résumé header. */
+export function webSegment(value: string): ContactSegment {
+  return { text: webLabel(value), href: normalizeWebUrl(value) };
+}
+
+/**
  * The contact line, as ordered segments. Order matches the legacy
  * `contactParts` arrays in all three surfaces: email · phone · location ·
  * linkedin · github · website. `location` is intentionally never linked.
  *
- * Falsy fields are skipped (same as the old `.filter(Boolean)`), so
- * `segments.map(s => s.text).join('  |  ')` reproduces the previous plain line
- * exactly.
+ * Falsy fields are skipped (same as the old `.filter(Boolean)`). Web links show
+ * a shortened URL as visible text (see `prettyUrlLabel`) with the full URL as
+ * the href; email/phone/location display as-is.
  */
 export function buildContactSegments(p: PersonalInfo): ContactSegment[] {
   const segs: ContactSegment[] = [];
   if (p.email) segs.push({ text: p.email, href: toMailto(p.email) });
   if (p.phone) segs.push({ text: p.phone, href: toTel(p.phone) });
   if (p.location) segs.push({ text: p.location });
-  if (p.linkedin) segs.push({ text: p.linkedin, href: normalizeWebUrl(p.linkedin) });
-  if (p.github) segs.push({ text: p.github, href: normalizeWebUrl(p.github) });
-  if (p.website) segs.push({ text: p.website, href: normalizeWebUrl(p.website) });
+  if (p.linkedin) segs.push(webSegment(p.linkedin));
+  if (p.github) segs.push(webSegment(p.github));
+  if (p.website) segs.push(webSegment(p.website));
   return segs;
 }
 

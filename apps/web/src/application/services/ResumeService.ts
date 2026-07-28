@@ -1,7 +1,8 @@
 // Application Service - Orchestrates use cases
 
-import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors, inferUserType } from '../../domain/entities/Resume';
+import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors, NormalizedItemContent, inferUserType } from '../../domain/entities/Resume';
 import { OptimizeResumeUseCase, IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase';
+import { NormalizeProfileItemUseCase, IProfileItemNormalizer, ProfileItemContext } from '../../domain/usecases/NormalizeProfileItemUseCase';
 import { ExportResumeUseCase, IResumeExporter } from '../../domain/usecases/ExportResumeUseCase';
 import { GenerateCoverLetterUseCase, ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase';
 import { GenerateOutreachEmailUseCase, IOutreachEmailGenerator } from '../../domain/usecases/GenerateOutreachEmailUseCase';
@@ -11,6 +12,8 @@ import { GenerateToolkitUseCase, IToolkitGenerator } from '../../domain/usecases
 import { IResumeRepository } from '../../domain/repositories/IResumeRepository';
 import { IProfileRepository } from '../../domain/repositories/IProfileRepository';
 import { assertNotGibberish, FieldCheck } from '../validation/gibberishDetector';
+import { computeProfileHash } from '../validation/profileHash';
+import { contentHash } from '../validation/contentHash';
 import { track } from '../../infrastructure/analytics/track';
 
 export class ResumeService {
@@ -22,6 +25,9 @@ export class ResumeService {
   private linkedInMessageUseCase: GenerateLinkedInMessageUseCase;
   private interviewQuestionsUseCase: GenerateInterviewQuestionsUseCase;
   private toolkitUseCase: GenerateToolkitUseCase;
+  // Per-item AI polish, reused by the general-resume fallback to convert raw
+  // (possibly Banglish) descriptions into professional bullets on demand.
+  private normalizeItemUseCase?: NormalizeProfileItemUseCase;
 
   constructor(
     resumeOptimizer: IResumeOptimizer,
@@ -33,8 +39,12 @@ export class ResumeService {
     toolkitGenerator: IToolkitGenerator,
     private repository: IResumeRepository,
     private profileRepository?: IProfileRepository,
-    generalResumeOptimizer?: IResumeOptimizer
+    generalResumeOptimizer?: IResumeOptimizer,
+    profileItemNormalizer?: IProfileItemNormalizer
   ) {
+    if (profileItemNormalizer) {
+      this.normalizeItemUseCase = new NormalizeProfileItemUseCase(profileItemNormalizer);
+    }
     this.optimizeUseCase = new OptimizeResumeUseCase(resumeOptimizer);
     // Falls back to the regular optimizer if no dedicated general-resume
     // optimizer is wired (e.g. in local dev without the new endpoint).
@@ -359,6 +369,126 @@ export class ResumeService {
     };
   }
 
+  // Resolve professional bullets for one profile item WITHOUT ever surfacing
+  // the user's raw text. Prefers the item's stored AI-normalized bullets; when
+  // those are missing (seeded/legacy data, or a polish that never landed) it
+  // runs the per-item normalizer on the raw text so the AI extracts and cleans
+  // it (Banglish included), and persists the result so the profile carries the
+  // polished version from then on. If the AI is unavailable or fails, it
+  // returns no bullets rather than leaking raw text — raw input must NEVER
+  // appear in a résumé.
+  private async polishedBulletsFor(
+    raw: string,
+    existing: NormalizedItemContent | undefined,
+    context: ProfileItemContext,
+    persist: (normalized: NormalizedItemContent, sourceHash: string) => Promise<void>,
+  ): Promise<string[]> {
+    const have = existing?.bullets;
+    if (have && have.length > 0) return have;
+
+    const text = (raw ?? '').trim();
+    if (!text || !this.normalizeItemUseCase) return [];
+
+    // Provider failures here are usually transient (the same fast-fail the
+    // optimizer's own retry recovers from), so retry a few times before giving
+    // up. We NEVER fall back to the raw text — empty bullets beat unpolished,
+    // possibly non-English input in a résumé.
+    const MAX_ATTEMPTS = 3;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const normalized = await this.normalizeItemUseCase.execute(text, context);
+        const bullets = normalized.bullets ?? [];
+        if (bullets.length > 0) {
+          // Best-effort backfill — don't let a persistence hiccup block the résumé.
+          persist(normalized, contentHash(text)).catch(err =>
+            console.warn('[general-resume] failed to persist on-demand normalization:', err));
+        }
+        return bullets;
+      } catch (err) {
+        if (attempt === MAX_ATTEMPTS) {
+          console.warn(`[general-resume] normalize failed after ${MAX_ATTEMPTS} attempts — omitting raw text for this item:`, err);
+          return [];
+        }
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
+    return [];
+  }
+
+  // Build a general résumé WITHOUT the full optimizer, from each item's polished
+  // bullets — using stored normalization where present and normalizing raw text
+  // on demand (per-item, far more robust than the all-at-once optimizer) where
+  // it isn't. The reliability backstop for the general resume; still AI-clean.
+  private async assembleGeneralFallback(data: ResumeData, prevSummary = ''): Promise<ResumeData> {
+    const repo = this.profileRepository;
+    const [experience, projects, extracurriculars] = await Promise.all([
+      Promise.all(data.experience.map(async e => ({
+        ...e,
+        refinedBullets: await this.polishedBulletsFor(
+          e.rawDescription ?? '', e.normalized,
+          { kind: 'experience', title: e.role, organization: e.company, guided: e.inputMode === 'guided' },
+          (n, h) => repo?.saveExperienceNormalized(e.id, n, h) ?? Promise.resolve(),
+        ),
+      }))),
+      Promise.all(data.projects.map(async p => ({
+        ...p,
+        refinedBullets: await this.polishedBulletsFor(
+          p.rawDescription ?? '', p.normalized,
+          { kind: 'project', title: p.name, technologies: p.technologies, guided: p.inputMode === 'guided' },
+          (n, h) => repo?.saveProjectNormalized(p.id, n, h) ?? Promise.resolve(),
+        ),
+      }))),
+      Promise.all((data.extracurriculars ?? []).map(async x => ({
+        ...x,
+        refinedBullets: await this.polishedBulletsFor(
+          x.description ?? '', x.normalized,
+          { kind: 'extracurricular', title: x.title, organization: x.organization, guided: x.inputMode === 'guided' },
+          (n, h) => repo?.saveExtracurricularNormalized(x.id, n, h) ?? Promise.resolve(),
+        ),
+      }))),
+    ]);
+
+    return {
+      ...data,
+      summary: prevSummary || data.summary || '',
+      experience,
+      projects,
+      extracurriculars,
+    };
+  }
+
+  // Try the AI optimizer for the general résumé; if it fails (e.g. strict
+  // structured-output validation rejects a large, JD-less profile), fall back
+  // to the per-item polished assembly so generation NEVER hard-fails and NEVER
+  // shows raw text.
+  private async optimizeOrAssembleGeneral(data: ResumeData, prevSummary = ''): Promise<ResumeData> {
+    try {
+      const optimized = await this.generalOptimizeUseCase.execute(data);
+      return this.mergeOptimizedData(data, optimized);
+    } catch (err) {
+      console.warn('[general-resume] optimizer failed — assembling from per-item polished content:', err);
+      track('general_resume_fallback_used');
+      return this.assembleGeneralFallback(data, prevSummary);
+    }
+  }
+
+  private profileHashOf(d: ResumeData): string {
+    return computeProfileHash({
+      personalInfo: d.personalInfo,
+      experiences: d.experience,
+      projects: d.projects,
+      educations: d.education,
+      skills: d.skills,
+      extracurriculars: d.extracurriculars,
+      awards: d.awards,
+      certifications: d.certifications,
+      affiliations: d.affiliations,
+      publications: d.publications,
+      languages: d.languages,
+      references: d.references,
+    });
+  }
+
   // ================================
   // General Resume Generation
   // ================================
@@ -374,21 +504,15 @@ export class ResumeService {
    * Returns info about the general resume including cooldown status.
    * Returns null if no general resume exists.
    */
-  async getGeneralResumeInfo(userId: string): Promise<{ id: string; canRegenerate: boolean; cooldownEndsAt: Date | null } | null> {
+  // Returns the id of the user's General Resume (or null if none). There is no
+  // regeneration cooldown: regeneration is gated by an actual profile change
+  // (surfaced as the ProfileScreen nudge) and bounded by the free-tier daily cap
+  // on /api/optimize-general (KIND_DAILY_CAPS.optimize_general) for cost control.
+  async getGeneralResumeInfo(userId: string): Promise<{ id: string } | null> {
     const resumes = await this.repository.getGeneratedResumes(userId);
     const generalResume = resumes.find(r => r.title === ResumeService.GENERAL_RESUME_TITLE);
     if (!generalResume) return null;
-
-    const lastUpdated = new Date(generalResume.updatedAt || generalResume.date);
-    const cooldownEnd = new Date(lastUpdated.getTime() + 24 * 60 * 60 * 1000);
-    const now = new Date();
-    const canRegenerate = now >= cooldownEnd;
-
-    return {
-      id: generalResume.id,
-      canRegenerate,
-      cooldownEndsAt: canRegenerate ? null : cooldownEnd,
-    };
+    return { id: generalResume.id };
   }
 
   async generateGeneralResume(userId: string): Promise<string> {
@@ -465,15 +589,10 @@ export class ResumeService {
 
     track('resume_generation_started', { type: 'free_general' });
 
-    // Optimize via the free general-resume path (no credit gate, no toolkit).
-    let optimizedData;
-    try {
-      optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
-    } catch (err) {
-      track('resume_generation_completed', { type: 'free_general', success: false });
-      throw err;
-    }
-    const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
+    // Optimize via the free general-resume path; fall back to profile-based
+    // assembly if the optimizer fails, so this never hard-fails.
+    const mergedData = await this.optimizeOrAssembleGeneral(resumeData);
+    mergedData.sourceProfileHash = this.profileHashOf(resumeData);
 
     // Save and return ID
     const id = await this.saveGeneratedResume(userId, mergedData, ResumeService.GENERAL_RESUME_TITLE);
@@ -482,20 +601,17 @@ export class ResumeService {
   }
 
   /**
-   * Regenerate the General Resume from updated profile data.
-   * Enforces a 24-hour cooldown between regenerations.
+   * Regenerate the General Resume from updated profile data. No cooldown — it's
+   * offered only when the profile actually changed, and the free-tier daily cap
+   * on /api/optimize-general is the cost backstop.
    */
   async regenerateGeneralResume(userId: string, existingResumeId: string): Promise<ResumeData> {
     if (!this.profileRepository) {
       throw new Error('Profile repository is required for general resume regeneration');
     }
 
-    // Check cooldown
-    const info = await this.getGeneralResumeInfo(userId);
-    if (info && !info.canRegenerate && info.cooldownEndsAt) {
-      const hoursLeft = Math.ceil((info.cooldownEndsAt.getTime() - Date.now()) / (1000 * 60 * 60));
-      throw new Error(`General Resume can only be regenerated once every 24 hours. Try again in ~${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''}.`);
-    }
+    // No cooldown: regeneration is gated by an actual profile change and bounded
+    // by the free-tier daily cap on /api/optimize-general for cost control.
 
     // Load fresh profile data
     const [profile, uType, exps, projs, skls, edus, extras, awds, certs, affs, pubs, langs, refs] = await Promise.all([
@@ -555,9 +671,10 @@ export class ResumeService {
     // Pre-flight gibberish gate — same as the initial general-resume path.
     this.assertContentIsReal(resumeData);
 
-    // Optimize via the free general-resume path (no credit gate, no toolkit).
-    const optimizedData = await this.generalOptimizeUseCase.execute(resumeData);
-    const mergedData = this.mergeOptimizedData(resumeData, optimizedData);
+    // Optimize via the free general-resume path; fall back to profile-based
+    // assembly if the optimizer fails, so regenerate never hard-fails.
+    const mergedData = await this.optimizeOrAssembleGeneral(resumeData);
+    mergedData.sourceProfileHash = this.profileHashOf(resumeData);
 
     // Update existing resume
     await this.updateGeneratedResume(existingResumeId, mergedData, ResumeService.GENERAL_RESUME_TITLE);

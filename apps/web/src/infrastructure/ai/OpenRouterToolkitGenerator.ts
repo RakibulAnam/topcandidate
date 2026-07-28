@@ -32,7 +32,7 @@ import {
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
 import type { UsageSink } from './usage.js';
-import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
+import { OpenRouterClient, withRetry, rotateModels } from './OpenRouterClient.js';
 import {
   buildToolkitSystemInstruction,
   buildToolkitUserPrompt,
@@ -44,6 +44,7 @@ import {
   ToolkitFabricationError,
   assertOutreachSpecificity,
   classifyFitMode,
+  countAnchoredStrategies,
 } from './prompts/toolkitContext.js';
 
 // VERIFY slugs at https://openrouter.ai/models before each release.
@@ -135,11 +136,14 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
     // enforces shape but the round trip can still fail transiently). The
     // per-artifact validation below is NOT retried — a
     // weak single artifact is expected and lands in the errors map, not a regen.
-    const parsed: RawToolkitResponse = await withRetry(async (remainingMs) => {
+    const parsed: RawToolkitResponse = await withRetry(async (remainingMs, attempt) => {
+      // Retries lead with the next model (rotateModels): a Google shared-pool
+      // 429 arrives as a 200 that OpenRouter's fallback won't route around.
+      const chain = rotateModels(TOOLKIT_MODELS, attempt);
       const result = await this.client.chat(
         {
-          model: TOOLKIT_MODELS[0],
-          models: TOOLKIT_MODELS,
+          model: chain[0],
+          models: chain,
           messages: [
             { role: 'system', content: buildToolkitSystemInstruction(fit.mode) },
             { role: 'user', content: buildToolkitUserPrompt(data, fit.mode) },
@@ -269,6 +273,10 @@ export class OpenRouterToolkitGenerator implements IToolkitGenerator {
       // quality (draw from JD + résumé; anchor answers in real experience where it
       // exists; coach honest preparation for gaps; never fake experience). Empty
       // output is still a failure (handled by the length check above).
+      // Telemetry only (never throws): watch whether prompt-steered anchoring
+      // actually holds now that the hard gate is retired.
+      const anchored = countAnchoredStrategies(interviewQuestions.map(q => q.answerStrategy), data);
+      console.info(`[or-toolkit-gen] interview anchor coverage ${anchored}/${interviewQuestions.length}`);
       out.interviewQuestions = interviewQuestions;
     } catch (err) {
       errors.interviewQuestions = this.errorMessage(err);

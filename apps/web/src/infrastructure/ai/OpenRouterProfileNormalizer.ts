@@ -13,7 +13,7 @@ import {
   ProfileItemContext,
 } from '../../domain/usecases/NormalizeProfileItemUseCase.js';
 import type { UsageSink } from './usage.js';
-import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
+import { OpenRouterClient, withRetry, rotateModels } from './OpenRouterClient.js';
 import {
   NORMALIZER_SYSTEM_INSTRUCTION,
   buildNormalizerUserPrompt,
@@ -21,14 +21,22 @@ import {
 } from './prompts/normalizerPrompts.js';
 
 // VERIFY slugs at https://openrouter.ai/models before each release.
+// Both primaries are Google models, so a Google-side outage or free-tier
+// rate-limit fails BOTH on one round trip — the recurring 0-token error we saw.
+// A non-Google last resort (Llama) lets OpenRouter route around Google entirely
+// on the same request; it handles the strict json_schema fine (it's the
+// optimizer's fallback too) and is only reached when both Gemini models fail.
 const NORMALIZER_MODELS = [
   'google/gemini-2.5-flash-lite',
   'google/gemini-2.5-flash',
+  'meta-llama/llama-3.3-70b-instruct',
 ];
 
 export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
   private readonly client: OpenRouterClient;
-  private readonly deadlineMs = 20_000;
+  // 30s (was 20s) gives room for 3 attempts of the now-richer output before
+  // giving up — still a background save, well under the 60s function cap.
+  private readonly deadlineMs = 30_000;
 
   constructor(apiKey: string) {
     this.client = new OpenRouterClient(apiKey);
@@ -39,18 +47,27 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
     context: ProfileItemContext,
     usage?: UsageSink,
   ): Promise<NormalizedItemContent> {
-    return withRetry(async (remainingMs) => {
+    return withRetry(async (remainingMs, attempt) => {
+      // Retries lead with the next model (rotateModels): a Google shared-pool
+      // 429 arrives as a 200 that OpenRouter's fallback won't route around.
+      const chain = rotateModels(NORMALIZER_MODELS, attempt);
       const result = await this.client.chat(
         {
-          model: NORMALIZER_MODELS[0],
-          models: NORMALIZER_MODELS,
+          model: chain[0],
+          models: chain,
           messages: [
             { role: 'system', content: NORMALIZER_SYSTEM_INSTRUCTION },
             { role: 'user', content: buildNormalizerUserPrompt(text, context) },
           ],
           response_format: { type: 'json_schema', json_schema: { name: 'normalized_item', strict: true, schema: NORMALIZER_SCHEMA } },
           temperature: 0,
-          max_tokens: 1500,
+          // Headroom for a rich multi-project entry to serialize fully — the
+          // prompt now scales bullets/skills to the input, so a dense native
+          // entry can run ~1500-2000 completion tokens; 4000 keeps strict
+          // json_schema output from truncating mid-object (which trips
+          // JSON.parse → the no-bullets retry path). Runs once on profile SAVE
+          // on cheap Flash-Lite, off the 2-call generation hot path.
+          max_tokens: 4000,
           reasoning: { enabled: false },
           provider: { data_collection: 'deny', allow_fallbacks: true },
         },
@@ -70,9 +87,13 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
       }
       // Defensive trims — tiny payload, cheap to sanitize. Awards belong on a
       // resume as a single tight line, not a multi-bullet block.
+      // Awards render as ONE tight resume line. For everything else the prompt
+      // scales bullet/skill count to the input's richness (faithful expansion —
+      // pre-trimming here is permanent loss); the 20-caps are defensive
+      // anti-runaway ceilings, NOT targets — real single items never approach them.
       const isAward = context.kind === 'award';
-      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, isAward ? 1 : 5);
-      parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 10);
+      parsed.bullets = parsed.bullets.map(b => b.trim()).filter(Boolean).slice(0, isAward ? 1 : 20);
+      parsed.skills = (parsed.skills ?? []).map(s => s.trim()).filter(Boolean).slice(0, 20);
       // Subtle coaching only: a single hint at most — the polish itself is
       // the product; we never pile instructions on the user.
       let gaps = (parsed.gaps ?? []).map(g => g.trim()).filter(Boolean);
@@ -84,6 +105,9 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
       }
       parsed.gaps = gaps.slice(0, 1);
       return parsed;
-    }, this.deadlineMs);
+      // 3 attempts (was the default 2): the transient 0-token provider failure
+      // has bitten twice-in-a-row before, so one more retry within the 30s
+      // budget meaningfully raises the chance a save's polish lands.
+    }, this.deadlineMs, 3);
   }
 }
