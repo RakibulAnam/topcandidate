@@ -152,6 +152,20 @@ export async function withRetry<T>(
   throw lastErr;
 }
 
+/**
+ * Rotate a models[] fallback chain by retry attempt. Google's shared-pool
+ * rate-limit arrives as HTTP 200 + finish_reason='error', which OpenRouter's
+ * own models[] fallback does NOT route around — so a retry that re-sends the
+ * same Gemini-first chain just hits the same throttled pool. Leading each
+ * retry with the next model in the chain makes the retry actually escape the
+ * failing provider (attempt 0 keeps the intended primary).
+ */
+export function rotateModels(models: string[], attempt: number): string[] {
+  if (models.length < 2 || attempt <= 0) return models;
+  const k = attempt % models.length;
+  return [...models.slice(k), ...models.slice(0, k)];
+}
+
 export class OpenRouterClient {
   constructor(private readonly apiKey: string) {
     if (!apiKey) {

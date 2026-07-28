@@ -20,7 +20,7 @@
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
 import type { UsageSink } from './usage.js';
-import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
+import { OpenRouterClient, withRetry, rotateModels } from './OpenRouterClient.js';
 import {
   buildSystemInstruction,
   buildUserPrompt,
@@ -112,11 +112,15 @@ export class OpenRouterResumeOptimizer implements IResumeOptimizer {
     const userPrompt = buildUserPrompt(data, { embedSchemaSpec: true });
 
     try {
-      return await withRetry(async (remainingMs) => {
+      return await withRetry(async (remainingMs, attempt) => {
+        // Retries lead with the next model in the chain (rotateModels) so a
+        // Google shared-pool 429 — invisible to OpenRouter's own fallback —
+        // is actually routed around instead of re-hit.
+        const chain = rotateModels(OPTIMIZER_MODELS, attempt);
         const result = await this.client.chat(
           {
-            model: OPTIMIZER_MODELS[0],
-            models: OPTIMIZER_MODELS,
+            model: chain[0],
+            models: chain,
             messages: [
               { role: 'system', content: systemInstruction },
               { role: 'user', content: userPrompt },

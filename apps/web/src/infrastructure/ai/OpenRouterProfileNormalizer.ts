@@ -13,7 +13,7 @@ import {
   ProfileItemContext,
 } from '../../domain/usecases/NormalizeProfileItemUseCase.js';
 import type { UsageSink } from './usage.js';
-import { OpenRouterClient, withRetry } from './OpenRouterClient.js';
+import { OpenRouterClient, withRetry, rotateModels } from './OpenRouterClient.js';
 import {
   NORMALIZER_SYSTEM_INSTRUCTION,
   buildNormalizerUserPrompt,
@@ -47,11 +47,14 @@ export class OpenRouterProfileNormalizer implements IProfileItemNormalizer {
     context: ProfileItemContext,
     usage?: UsageSink,
   ): Promise<NormalizedItemContent> {
-    return withRetry(async (remainingMs) => {
+    return withRetry(async (remainingMs, attempt) => {
+      // Retries lead with the next model (rotateModels): a Google shared-pool
+      // 429 arrives as a 200 that OpenRouter's fallback won't route around.
+      const chain = rotateModels(NORMALIZER_MODELS, attempt);
       const result = await this.client.chat(
         {
-          model: NORMALIZER_MODELS[0],
-          models: NORMALIZER_MODELS,
+          model: chain[0],
+          models: chain,
           messages: [
             { role: 'system', content: NORMALIZER_SYSTEM_INSTRUCTION },
             { role: 'user', content: buildNormalizerUserPrompt(text, context) },
