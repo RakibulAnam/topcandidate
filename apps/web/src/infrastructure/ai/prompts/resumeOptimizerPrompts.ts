@@ -439,7 +439,45 @@ function skillEvidenced(skill: string, evidence: string): boolean {
   for (let n = words.length - 1; n >= 2; n--) {
     if (evidence.includes(words.slice(0, n).join(' '))) return true;
   }
+  // Order- and inflection-tolerant fallback for MULTI-WORD skills.
+  //
+  // Everything above is order-sensitive and exact, which systematically deletes
+  // accurate skills from non-tech résumés. Tech skills are single verbatim tokens
+  // ("Kafka", "Go"), so they always match; professional skills are noun phrases
+  // the model naturally re-orders into idiomatic labels. Measured on a garments
+  // merchandiser profile (2026-08-04), the filter stripped "Shipment
+  // documentation" purely because the evidence said "documentation for shipment
+  // clearance", and "Pricing negotiation" because the evidence said
+  // "negotiated ... yarn pricing". Both are the candidate's real experience, and
+  // the user had paid a credit for that résumé.
+  //
+  // So: accept when EVERY significant word is evidenced, ignoring order and light
+  // inflection. This deliberately does NOT accept synonym leaps — "WIP monitoring"
+  // against "tracked WIP", or "BGMEA liaison" against "coordinated BGMEA
+  // documentation", still fail, because those are embellishments of the stated
+  // fact rather than re-phrasings of it. The credential guard above still runs
+  // first, so "Kubernetes Certification" cannot sneak in on "Kubernetes".
+  if (words.length >= 2) {
+    const significant = words.filter((w) => w.length >= 3 && !SKILL_STOPWORDS.has(w));
+    if (significant.length >= 2 && significant.every((w) => evidence.includes(stemForEvidence(w)))) {
+      return true;
+    }
+  }
   return false;
+}
+
+const SKILL_STOPWORDS = new Set(['and', 'the', 'for', 'with', 'of', 'in', 'on', 'to', 'a', 'an']);
+
+/**
+ * Crude single-pass suffix strip so a noun/verb pair of the SAME word matches:
+ * "negotiation" and "negotiated" both reduce to "negotiat". Intentionally
+ * conservative — it must not collapse two genuinely different words together,
+ * so only the endings that mark an inflection of one stem are removed, and the
+ * result is never shortened below 4 characters.
+ */
+function stemForEvidence(word: string): string {
+  const stripped = word.replace(/(ations|ation|ings|ing|ers|er|ed|es|s)$/, '');
+  return stripped.length >= 4 ? stripped : word;
 }
 
 const SKILL_ALIASES: Record<string, string[]> = {
