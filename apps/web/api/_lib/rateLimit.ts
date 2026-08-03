@@ -33,6 +33,19 @@ export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_it
 export const KIND_DAILY_CAPS: Partial<Record<CallKind, number>> = {
   optimize_general: 5,
   normalize: 40,
+  // Per-item toolkit regeneration is FREE to the user and the most expensive
+  // single call we make (~$0.0089 for the bilingual interview block — measured
+  // 2026-08-04). Previously it was bounded only by the overall 20/day cap, so an
+  // account with zero credits could still burn ~15 x $0.0089 = $0.13/day of our
+  // money indefinitely, having paid nothing. Over a month that exceeds the entire
+  // margin on a ৳200 pack — a bigger drain on profit than any model choice.
+  //
+  // 8/day is deliberately generous for legitimate use: it is two retries for each
+  // of the four artifact types in a single day, and a guard failure is the only
+  // reason to retry at all. Residual exposure is ~$0.07/day, bounded but not zero
+  // — the cap is per-DAY, not per-generation, which is the shape the rate limiter
+  // supports. Tighten if abuse shows up in v_ai_failures_daily.
+  toolkit_item: 8,
 };
 
 // Kinds excluded from the OVERALL daily cap (they still hit their own
