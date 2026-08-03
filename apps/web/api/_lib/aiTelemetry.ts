@@ -87,12 +87,23 @@ export function buildCallMeta(input: TelemetryInput): CallMeta {
     // errors, so they classify as 'unknown' too — see below.
     const { code } = classifyGeminiError(error);
     const raw = error instanceof Error ? error.message : String(error);
-    // The fabrication/specificity guards throw plain Errors with recognizable
-    // text. Reclassify them so a content-quality rejection is never confused
-    // with a provider fault — they need completely different responses.
-    meta.errorCode = /fabricat|not specific enough|no interview questions|is empty/i.test(raw)
-      ? 'guard_rejected'
-      : code;
+    // Our own content guards must never be confused with a provider fault — they
+    // need a completely different response (regenerate vs retry vs give up).
+    //
+    // Classify on the ERROR CLASS, not the message. An earlier version matched
+    // prose (/fabricat|not specific enough|.../) and silently missed every
+    // ToolkitSpecificityError, because those read "output never names target
+    // company ..." and "output is generic — ...". That is the same trap as
+    // matching Google's 429 prose: the wording is not the contract, the type is.
+    const name = error instanceof Error ? error.name : '';
+    const isGuard =
+      name === 'ToolkitFabricationError' ||
+      name === 'ToolkitSpecificityError' ||
+      name === 'ToolkitAnchorError' ||
+      /^Toolkit\w*Error$/.test(name) ||
+      // Plain-Error guards raised inline by the generators for an empty slot.
+      /\bis empty\b|no interview questions/i.test(raw);
+    meta.errorCode = isGuard ? 'guard_rejected' : code;
     meta.errorMessage = raw;
   }
 

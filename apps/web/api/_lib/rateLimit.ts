@@ -139,6 +139,19 @@ export async function assertWithinLimit(
   }
 }
 
+/**
+ * Strip credential-shaped tokens from anything bound for ai_call_log. That table
+ * has a "Users can view own" SELECT policy, so every column here is readable by
+ * the user, and provider errors sometimes echo the request — including a key in a
+ * URL. Applies to BOTH error_message and model_attempts[].message.
+ */
+function redactSecrets(text: string): string {
+  return text
+    .replace(/AIza[0-9A-Za-z_-]{10,}/g, 'AIza[REDACTED]')
+    .replace(/\bkey=[\w.-]+/gi, 'key=[REDACTED]')
+    .replace(/\bBearer\s+[\w.\-]{16,}/gi, 'Bearer [REDACTED]');
+}
+
 export async function logCall(
   userId: string,
   jwt: string,
@@ -172,12 +185,18 @@ export async function logCall(
       // key-shaped tokens before insert — both Google's AIza… form and the
       // longer opaque form this project's key uses.
       if (meta.errorMessage !== undefined) {
-        row.error_message = meta.errorMessage
-          .replace(/AIza[0-9A-Za-z_-]{10,}/g, 'AIza[REDACTED]')
-          .replace(/\bkey=[\w.-]+/gi, 'key=[REDACTED]')
-          .slice(0, 500);
+        row.error_message = redactSecrets(meta.errorMessage).slice(0, 500);
       }
-      if (meta.modelAttempts !== undefined) row.model_attempts = meta.modelAttempts;
+      if (meta.modelAttempts !== undefined) {
+        // model_attempts[].message carries the SAME raw provider text as
+        // error_message, in the SAME user-readable row — redacting only one of
+        // them left the leak fully open via the other.
+        row.model_attempts = meta.modelAttempts.map((a) =>
+          a && typeof a === 'object' && typeof (a as { message?: unknown }).message === 'string'
+            ? { ...(a as object), message: redactSecrets((a as { message: string }).message) }
+            : a,
+        );
+      }
       if (meta.thoughtTokens !== undefined) row.thought_tokens = meta.thoughtTokens;
       if (meta.attemptCount !== undefined) row.attempt_count = meta.attemptCount;
     }
