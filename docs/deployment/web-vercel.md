@@ -24,7 +24,7 @@ Highlights:
 - `BKASH_WEBHOOK_SECRET` — shared with the mobile app via the operator's Settings tab. Signs all four watcher endpoints.
 - `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` — optional; set `true` to reject the legacy body-only signature and enforce the v2 (timestamp + nonce) protocol.
 - Supabase service-role key — server-only.
-- `OPENROUTER_API_KEY` — server-only; the primary AI provider (set a hard spend cap). Legacy `GROQ_API_KEY` + `GEMINI_API_KEY` are the fallback when it's absent. See [`apps/web/docs/OPENROUTER_MIGRATION.md`](../../apps/web/docs/OPENROUTER_MIGRATION.md).
+- `GEMINI_API_KEY` — server-only; the **only** AI key (direct Google Gemini). It must be on a **paid** tier: Google's free tier trains on submitted prompts and allows human review (contradicting ToS §3) and is capped at 15 RPM. Bound spend with a Google Cloud Console **spend cap** budget scoped to the Gemini API service — a plain budget only emails you. See [`docs/decisions/0002-single-ai-provider-direct-gemini.md`](../decisions/0002-single-ai-provider-direct-gemini.md).
 - `ADMIN_API_KEY` — the HMAC secret used to sign/verify `/admin` session tokens (repurposed — it is no longer pasted as a key). The panel uses a username + password login: set `ADMIN_USERNAME` plus `ADMIN_PASSWORD_HASH` (scrypt, preferred) or `ADMIN_PASSWORD` (plaintext fallback). See `api/admin/_lib/session.ts`.
 - `CRON_SECRET` — Bearer auth for the pending-purchase expiry job (see below).
 

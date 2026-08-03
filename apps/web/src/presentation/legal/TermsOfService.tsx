@@ -96,12 +96,13 @@ export const TermsOfService: React.FC<Props> = ({ onBack }) => {
         <Section number="3" title="AI-generated content">
           <p>
             The service generates text by sending the information you provide (your career history,
-            target job description, and related fields) to third-party large language models —
-            currently <strong>Groq</strong> (Llama family) and <strong>Google Gemini</strong>. We do
-            not train these models on your data, and our prompts ask the providers to treat the
-            interaction as ephemeral, but their privacy policies and retention rules apply on top
-            of ours. By using the service you accept the providers' processing of your inputs for
-            the purpose of generating your output.
+            target job description, and related fields) to a third-party large language model —
+            currently <strong>Google Gemini</strong>, and only Google Gemini. We use Google's paid
+            API tier, under which Google states it does not use your prompts or responses to train
+            or improve its models, and does not subject them to human review. Google still logs
+            requests for a limited period to detect abuse, and its privacy policy and retention
+            rules apply on top of ours. By using the service you accept Google's processing of your
+            inputs for the purpose of generating your output.
           </p>
           <p>
             <strong>AI output is a draft, not a finished application.</strong> We optimize for ATS
@@ -157,8 +158,8 @@ export const TermsOfService: React.FC<Props> = ({ onBack }) => {
           <p>
             <strong>Your data, your output.</strong> You retain ownership of the personal information
             you provide and of the final generated résumé / cover letter / outreach package, to the
-            extent that ownership is granted by the underlying AI provider's terms (Groq and Google
-            both grant generation output to the calling user). You grant us a limited, non-exclusive
+            extent that ownership is granted by the underlying AI provider's terms (Google grants
+            generation output to the calling user). You grant us a limited, non-exclusive
             licence to store, process, and display this content as needed to operate the service.
           </p>
           <p>
@@ -217,7 +218,7 @@ export const TermsOfService: React.FC<Props> = ({ onBack }) => {
             output will result in interview invitations or job offers.
           </p>
           <p>
-            Third-party providers (Supabase, Vercel, Google, Groq, bKash) operate their own
+            Third-party providers (Supabase, Vercel, Google, bKash) operate their own
             services under their own terms; outages or policy changes on their end may affect the
             service, and we are not liable for those.
           </p>
