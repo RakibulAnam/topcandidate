@@ -1400,6 +1400,17 @@ alter table ai_call_log add column if not exists completion_tokens integer;
 alter table ai_call_log add column if not exists cost_usd numeric(12,6);
 alter table ai_call_log add column if not exists status text;
 alter table ai_call_log add column if not exists latency_ms integer;
+-- AI failure diagnosis (migration 020). error_code taxonomy is defined by
+-- GeminiErrorCode in src/infrastructure/ai/GeminiClient.ts and is intentionally
+-- NOT constrained here — logCall() swallows its own errors, so a CHECK
+-- violation would silently drop the row instead of failing loudly.
+alter table ai_call_log add column if not exists error_code text;
+alter table ai_call_log add column if not exists error_message text;
+alter table ai_call_log add column if not exists model_attempts jsonb;
+alter table ai_call_log add column if not exists thought_tokens integer;
+alter table ai_call_log add column if not exists attempt_count smallint;
+create index if not exists ai_call_log_errors_idx
+  on ai_call_log (created_at desc, error_code) where error_code is not null;
 do $$ begin
   if exists (select 1 from pg_constraint where conname='ai_call_log_kind_check' and conrelid='public.ai_call_log'::regclass) then
     alter table ai_call_log drop constraint ai_call_log_kind_check;
@@ -1424,12 +1435,32 @@ create or replace view v_daily_revenue as
   from purchases where status='completed' group by 1;
 create or replace view v_daily_signups as
   select date(created_at) as day, count(*) as signups from profiles group by 1;
+-- Thought tokens count toward the token total (they bill at the output rate),
+-- and each column is coalesced individually: sum(a+b) yields NULL for any row
+-- where either column is null, so sum() skipped those rows entirely and
+-- pre-telemetry rows were silently excluded from total_tokens.
 create or replace view v_daily_ai_usage as
   select date(created_at) as day, count(*) as calls,
          count(*) filter (where status='error') as errors,
          coalesce(sum(cost_usd),0) as cost_usd,
-         coalesce(sum(prompt_tokens+completion_tokens),0) as total_tokens
+         coalesce(sum(coalesce(prompt_tokens,0)+coalesce(completion_tokens,0)+coalesce(thought_tokens,0)),0) as total_tokens,
+         coalesce(sum(coalesce(thought_tokens,0)),0) as thought_tokens
   from ai_call_log group by 1;
+-- "Which calls fail, and why" — the surface the OpenRouter setup never had.
+create or replace view v_ai_failures_daily as
+  select date(created_at) as day, kind, coalesce(error_code,'unclassified') as error_code,
+         count(*) as failures, round(avg(latency_ms)) as avg_latency_ms,
+         round(avg(attempt_count),2) as avg_attempts, max(error_message) as sample_message
+  from ai_call_log where status='error' group by 1,2,3;
+-- Per-model health from model_attempts (the `model` column records only
+-- whichever model ultimately served the response, hiding failed chain steps).
+create or replace view v_ai_model_health as
+  select a.attempt->>'model' as model, count(*) as attempts,
+         count(*) filter (where (a.attempt->>'ok')::boolean) as successes,
+         count(*) filter (where not (a.attempt->>'ok')::boolean) as failures,
+         round(avg((a.attempt->>'ms')::numeric)) as avg_ms
+  from ai_call_log l cross join lateral jsonb_array_elements(l.model_attempts) as a(attempt)
+  where l.model_attempts is not null group by 1;
 create or replace view v_credit_liability as
   select coalesce(sum(toolkit_credits) filter (where toolkit_credits>0),0) as outstanding_credits,
          count(*) filter (where toolkit_credits<0) as negative_balance_users

@@ -51,6 +51,23 @@ export interface CallMeta {
   costUsd?: number;
   status?: 'success' | 'error';
   latencyMs?: number;
+  // ── Failure diagnosis (migration 020) ────────────────────────────────────
+  // Without these, `status: 'error'` was the whole story and we could not tell
+  // a rate limit from a schema bug, or see which model in a fallback chain
+  // actually broke. Kept as loose types on purpose: this module must not import
+  // from src/infrastructure, and a stricter union here would force a migration
+  // every time the taxonomy grows.
+  /** Normalized failure class — GeminiErrorCode in GeminiClient.ts. */
+  errorCode?: string;
+  /** Raw provider message. Truncated on write; never user-facing. */
+  errorMessage?: string;
+  /** Per-model outcomes, oldest first: [{model, ok, code, ms}]. Serialized to
+   *  jsonb, so the element shape is intentionally unconstrained here. */
+  modelAttempts?: readonly unknown[];
+  /** Gemini 3.x thinking tokens. Billed at the OUTPUT rate — must reach cost. */
+  thoughtTokens?: number;
+  /** Transport attempts for this logical call (chain walk + outer retries). */
+  attemptCount?: number;
 }
 
 export class RateLimitError extends Error {
@@ -129,6 +146,27 @@ export async function logCall(
       if (meta.costUsd !== undefined) row.cost_usd = meta.costUsd;
       if (meta.status !== undefined) row.status = meta.status;
       if (meta.latencyMs !== undefined) row.latency_ms = meta.latencyMs;
+      // Bound the code too — it is a closed taxonomy, so anything long is a bug
+      // upstream rather than data worth keeping.
+      if (meta.errorCode !== undefined) row.error_code = meta.errorCode.slice(0, 64);
+      // Provider messages can be long and can echo prompt fragments. Cap them:
+      // this column is for diagnosis, not an archive, and résumé text must not
+      // accumulate in a telemetry table.
+      //
+      // SECURITY: ai_call_log has a "Users can view own ai_call_log" SELECT
+      // policy, so whatever lands here is readable by that user. Provider errors
+      // sometimes echo the request (including a key in a URL), so redact
+      // key-shaped tokens before insert — both Google's AIza… form and the
+      // longer opaque form this project's key uses.
+      if (meta.errorMessage !== undefined) {
+        row.error_message = meta.errorMessage
+          .replace(/AIza[0-9A-Za-z_-]{10,}/g, 'AIza[REDACTED]')
+          .replace(/\bkey=[\w.-]+/gi, 'key=[REDACTED]')
+          .slice(0, 500);
+      }
+      if (meta.modelAttempts !== undefined) row.model_attempts = meta.modelAttempts;
+      if (meta.thoughtTokens !== undefined) row.thought_tokens = meta.thoughtTokens;
+      if (meta.attemptCount !== undefined) row.attempt_count = meta.attemptCount;
     }
     const { error } = await supabase.from('ai_call_log').insert(row);
     if (error) {
