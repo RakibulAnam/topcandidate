@@ -760,3 +760,51 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// ─── Structured-output schema (Gemini `responseJsonSchema`) ──────────────────
+//
+// Lifted from OpenRouterResumeOptimizer during the direct-Gemini port so the
+// optimizer's shape contract lives beside the prompt that describes it.
+//
+// Strict mode requires every property to appear in `required`, so the optional
+// sections are required-as-empty-arrays; validateOptimizedResponse() still
+// checks counts and IDs against the input afterwards. The schema cannot express
+// "echo back exactly these input IDs" — that is why buildUserPrompt() also
+// embeds the shape spec, and why the validator remains the final gate.
+const REFINED_SECTION = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      refinedBullets: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['id', 'refinedBullets'],
+    additionalProperties: false,
+  },
+} as const;
+
+export const OPTIMIZER_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    skills: { type: 'array', items: { type: 'string' } },
+    skillCategories: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          category: { type: 'string' },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['category', 'items'],
+        additionalProperties: false,
+      },
+    },
+    experience: REFINED_SECTION,
+    projects: REFINED_SECTION,
+    extracurriculars: REFINED_SECTION,
+  },
+  required: ['summary', 'skills', 'skillCategories', 'experience', 'projects', 'extracurriculars'],
+  additionalProperties: false,
+};

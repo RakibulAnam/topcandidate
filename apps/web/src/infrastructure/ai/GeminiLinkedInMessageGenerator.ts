@@ -1,72 +1,104 @@
-// Infrastructure - Gemini AI LinkedIn Connection Note Generator
+// Infrastructure — Gemini LinkedIn Connection Note Generator.
+// Direct-Google port of OpenRouterLinkedInMessageGenerator.
+//
+// Single-artifact generator for the free per-item regenerate flow, reusing the
+// shared prompt + the same guards + 280-char trim as the combined toolkit
+// generator. Plain text (no JSON), so there is no responseJsonSchema here.
+//
+// PORT NOTES (canonical template: GeminiProfileNormalizer.ts):
+//   • Transport is GeminiClient. The model fallback chain is now walked
+//     CLIENT-side (Google has no server-side models[] equivalent), so `models`
+//     is an ordered array and the client advances on transport failure.
+//   • `thinkingLevel` defaults to MINIMAL inside the client. Do not pass
+//     thinkingBudget:0 — it returns 400 on 3.5-flash-lite and 3.6-flash.
+//   • Usage fields are camelCase now (`promptTokens`, not `prompt_tokens`) and
+//     include `thoughtTokens` + `attempts`. `vite build` does NOT type-check
+//     src/, so a typo here fails silently and cost telemetry degrades to a
+//     4-chars/token estimate — worth the care.
+//   • The catch block copies `err.attempts` into the sink so a FAILED call still
+//     records which models were tried; otherwise failures log an empty chain.
+//   • No outer `withRetry`: one short 300-token artifact on a per-item retry the
+//     user drives themselves. The client's own chain walk is the retry, inside a
+//     single 30s budget.
+//
+// Model choice: 3.5-flash-lite leads (fastest measured, 0 thought tokens, priced
+// identically to the gemini-2.5-flash this file used to call). 3.6-flash sits
+// second because the artifact is ≤280 chars — a premium rescue on a 300-token
+// output is cheap — with 3.1-flash-lite as the last, cheapest resort.
+// NOTE: unlike the OpenRouter chain, there is no non-Google last resort — the
+// Llama escape hatch is gone, so a Google-wide outage fails this path.
 
-import { GoogleGenAI } from '@google/genai';
 import { ResumeData } from '../../domain/entities/Resume.js';
 import { ILinkedInMessageGenerator } from '../../domain/usecases/GenerateLinkedInMessageUseCase.js';
-import {
-  assertNoFabricatedTools,
-  assertOutreachSpecificity,
-  classifyFitMode,
-} from './prompts/toolkitContext.js';
-import {
-  LINKEDIN_SYSTEM_INSTRUCTION,
-  buildLinkedInUserPrompt,
-} from './prompts/toolkitPrompts.js';
+import type { UsageSink } from './usage.js';
+import { GeminiClient, GeminiError, GEMINI_MODELS } from './GeminiClient.js';
+import { LINKEDIN_SYSTEM_INSTRUCTION, buildLinkedInUserPrompt, LINKEDIN_MAX } from './prompts/toolkitPrompts.js';
+import { assertNoFabricatedTools, assertOutreachSpecificity, classifyFitMode } from './prompts/toolkitContext.js';
 
-// LinkedIn's connection-note hard limit is 300 characters; we aim for 280 to
-// leave a buffer and because shorter notes get accepted more often.
-const MAX_LENGTH = 280;
+const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
 
 export class GeminiLinkedInMessageGenerator implements ILinkedInMessageGenerator {
-  private genAI: GoogleGenAI;
-  private readonly model = 'gemini-2.5-flash';
+  private readonly client: GeminiClient;
 
   constructor(apiKey: string) {
-    if (!apiKey) {
-      throw new Error('Gemini API key is required');
-    }
-    this.genAI = new GoogleGenAI({ apiKey });
+    this.client = new GeminiClient(apiKey);
   }
 
-  async generate(data: ResumeData): Promise<string> {
+  async generate(data: ResumeData, usage?: UsageSink): Promise<string> {
     const fit = classifyFitMode(data);
-    console.info(`[linkedin-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
-    const result = await this.genAI.models.generateContent({
-      model: this.model,
-      contents: buildLinkedInUserPrompt(data, fit.mode),
-      config: {
-        temperature: fit.mode === 'stretch' ? 0.55 : 0.45,
-        systemInstruction: LINKEDIN_SYSTEM_INSTRUCTION,
-      },
-    });
+    console.info(`[gemini-linkedin-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
+    try {
+      const result = await this.client.generate(
+        {
+          models: MODELS,
+          systemInstruction: LINKEDIN_SYSTEM_INSTRUCTION,
+          contents: buildLinkedInUserPrompt(data, fit.mode),
+          temperature: fit.mode === 'stretch' ? 0.55 : 0.45,
+          maxOutputTokens: 300,
+        },
+        30_000,
+      );
 
-    const text = result.text;
-    if (!text) throw new Error('No response from AI');
+      if (usage) {
+        usage.provider = 'gemini';
+        usage.model = result.model;
+        usage.promptTokens = result.usage?.promptTokens;
+        usage.completionTokens = result.usage?.completionTokens;
+        usage.thoughtTokens = result.usage?.thoughtTokens;
+        usage.attempts = result.attempts;
+      }
 
-    let cleaned = text.trim();
-    // Strip accidental wrapping quotes or markdown.
-    cleaned = cleaned
-      .replace(/^["'`]+/, '')
-      .replace(/["'`]+$/, '')
-      .replace(/^\*+/, '')
-      .replace(/\*+$/, '')
-      .trim();
+      const text = result.text;
+      if (!text) throw new Error('No response from AI');
 
-    if (cleaned.length > MAX_LENGTH) {
-      // Safety trim — cut at the last sentence/word boundary before the cap.
-      const slice = cleaned.slice(0, MAX_LENGTH);
-      const lastPeriod = slice.lastIndexOf('.');
-      const lastSpace = slice.lastIndexOf(' ');
-      const cut = lastPeriod > MAX_LENGTH * 0.6 ? lastPeriod + 1 : lastSpace;
-      cleaned = (cut > 0 ? slice.slice(0, cut) : slice).trim();
+      let cleaned = text.trim();
+      cleaned = cleaned
+        .replace(/^["'`]+/, '')
+        .replace(/["'`]+$/, '')
+        .replace(/^\*+/, '')
+        .replace(/\*+$/, '')
+        .trim();
+
+      if (cleaned.length > LINKEDIN_MAX) {
+        const slice = cleaned.slice(0, LINKEDIN_MAX);
+        const lastPeriod = slice.lastIndexOf('.');
+        const lastSpace = slice.lastIndexOf(' ');
+        const cut = lastPeriod > LINKEDIN_MAX * 0.6 ? lastPeriod + 1 : lastSpace;
+        cleaned = (cut > 0 ? slice.slice(0, cut) : slice).trim();
+      }
+
+      assertNoFabricatedTools(cleaned, data, { allowJD: fit.mode === 'stretch' });
+      assertOutreachSpecificity(cleaned, data, 'either');
+
+      return cleaned;
+    } catch (err) {
+      // Preserve the attempt chain on failure too, so ai_call_log can show
+      // which models were tried on a call that ultimately failed.
+      if (usage && err instanceof GeminiError && err.attempts.length) {
+        usage.provider = 'gemini';
+        usage.attempts = err.attempts;
+      }
+      throw err;
     }
-
-    assertNoFabricatedTools(cleaned, data, { allowJD: fit.mode === 'stretch' });
-    // LinkedIn always uses 'either' specificity regardless of mode (280 chars
-    // rarely fits both anchors).
-    assertOutreachSpecificity(cleaned, data, 'either');
-
-    return cleaned;
   }
-
 }

@@ -23,7 +23,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
-import { resolveCost } from './_lib/aiCost.js';
+import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { toolkitGenerator } from './_lib/aiFactory.js';
 import type { ResumeData } from '../src/domain/entities/Resume';
 import type { UsageSink } from '../src/infrastructure/ai/usage';
@@ -88,31 +88,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.warn(`[toolkit ${rid}] partial bundle in ${latencyMs}ms errors=${JSON.stringify(toolkit.errors)}`);
     }
     const outText = JSON.stringify(toolkit);
-    const cost = resolveCost(usage, data.targetJob.description, outText);
-    await logCall(auth.userId, auth.jwt, 'toolkit', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'success',
+    const meta = buildCallMeta({
+      usage,
       latencyMs,
+      fallbackInputText: data.targetJob.description,
+      fallbackOutputText: outText,
     });
+    if (errorKeys.length) {
+      // The bundle shipped, so this is NOT a request failure and status stays
+      // 'success' — but one or more slots failed their guard and the user sees
+      // retry buttons. Previously that was indistinguishable from a clean
+      // bundle in telemetry; now a partial is queryable.
+      meta.errorCode = 'partial_bundle';
+      meta.errorMessage = JSON.stringify(toolkit.errors);
+    }
+    await logCall(auth.userId, auth.jwt, 'toolkit', meta);
     console.info(`[toolkit ${rid}] 200 total=${Date.now() - t0}ms`);
     res.status(200).json({ toolkit });
   } catch (err) {
     const latencyMs = Date.now() - tAI;
     const msg = err instanceof Error ? err.message : 'Toolkit generation failed';
-    const cost = resolveCost(usage, data.targetJob.description);
-    await logCall(auth.userId, auth.jwt, 'toolkit', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'error',
-      latencyMs,
-    });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'toolkit',
+      buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: data.targetJob.description }),
+    );
     console.error(`[toolkit ${rid}] 502 total=${Date.now() - t0}ms: ${msg}`);
     res.status(502).json({ error: msg });
   }

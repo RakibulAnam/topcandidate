@@ -1,19 +1,51 @@
-// Infrastructure - Gemini AI Interview Questions Generator
+// Infrastructure — Gemini implementation of IInterviewQuestionsGenerator.
+// Direct-Google port of OpenRouterInterviewQuestionsGenerator.
+//
+// Single-artifact generator for the free per-item regenerate flow
+// (/api/toolkit-item), reusing the shared interview prompt + the same guard
+// posture as the combined toolkit generator. Bilingual EN/BN JSON output, so it
+// is the heaviest single-artifact payload here (Bengali tokenizes denser).
+//
+// PORT NOTES (canonical write-up lives in GeminiProfileNormalizer):
+//   • Transport is GeminiClient. The model fallback chain is walked CLIENT-side
+//     (Google has no server-side models[] equivalent), so `models` is an ordered
+//     array and the client advances on transport failure.
+//   • `thinkingLevel` is left at the client default (MINIMAL). Do not pass
+//     thinkingBudget:0 — it returns 400 on 3.5-flash-lite and 3.6-flash.
+//   • Usage fields are camelCase now (`promptTokens`, not `prompt_tokens`) and
+//     include `thoughtTokens` + `attempts`. `vite build` does NOT type-check
+//     src/, so a typo here fails silently and cost telemetry degrades to a
+//     4-chars/token estimate.
+//   • The catch block copies `err.attempts` into the sink so a FAILED call still
+//     records which models were tried; otherwise failures log an empty chain.
+//   • INTERVIEW_SCHEMA moved to prompts/toolkitPrompts.ts (shared, not
+//     redeclared here) and is passed as `responseJsonSchema` — the provider
+//     enforces the shape, so the large bilingual payload can't truncate or
+//     malform. safeJsonParse stays as defence in depth.
+//
+// Model choice: 3.5-flash-lite leads — measured fastest, 0 thought tokens, and
+// priced identically to the gemini-2.5-flash this path used to run. 3.6-flash is
+// second because the bilingual generation is the quality-sensitive part.
+// 3.1-flash-lite is the cheap last resort.
+// NOTE: unlike the OpenRouter chain, there is no non-Google last resort — the
+// Llama escape hatch is gone, so a Google-wide outage fails this path.
 
-import { GoogleGenAI, Type } from '@google/genai';
 import {
   ResumeData,
   InterviewQuestion,
   InterviewQuestionCategory,
 } from '../../domain/entities/Resume.js';
 import { IInterviewQuestionsGenerator } from '../../domain/usecases/GenerateInterviewQuestionsUseCase.js';
-import {
-  classifyFitMode,
-} from './prompts/toolkitContext.js';
+import type { UsageSink } from './usage.js';
+import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   INTERVIEW_SYSTEM_INSTRUCTION,
   buildInterviewUserPrompt,
+  INTERVIEW_SCHEMA,
 } from './prompts/toolkitPrompts.js';
+import { classifyFitMode } from './prompts/toolkitContext.js';
+
+const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
 
 const VALID_CATEGORIES: InterviewQuestionCategory[] = [
   'Behavioral',
@@ -24,93 +56,106 @@ const VALID_CATEGORIES: InterviewQuestionCategory[] = [
 ];
 
 export class GeminiInterviewQuestionsGenerator implements IInterviewQuestionsGenerator {
-  private genAI: GoogleGenAI;
-  private readonly model = 'gemini-2.5-flash';
+  private readonly client: GeminiClient;
 
   constructor(apiKey: string) {
-    if (!apiKey) {
-      throw new Error('Gemini API key is required');
-    }
-    this.genAI = new GoogleGenAI({ apiKey });
+    this.client = new GeminiClient(apiKey);
   }
 
-  async generate(data: ResumeData): Promise<InterviewQuestion[]> {
+  async generate(data: ResumeData, usage?: UsageSink): Promise<InterviewQuestion[]> {
     const fit = classifyFitMode(data);
-    console.info(`[interview-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
-    const result = await this.genAI.models.generateContent({
-      model: this.model,
-      contents: buildInterviewUserPrompt(data, fit.mode),
-      config: {
-        temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            questions: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  question: { type: Type.STRING },
-                  category: { type: Type.STRING },
-                  whyAsked: { type: Type.STRING },
-                  answerStrategy: { type: Type.STRING },
-                  // Bengali (Bangla) translations — see system instruction
-                  // for register & terminology rules. Bilingual prep is the
-                  // BD-market default; English is authoritative.
-                  questionBn: { type: Type.STRING },
-                  whyAskedBn: { type: Type.STRING },
-                  answerStrategyBn: { type: Type.STRING },
-                },
-                required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
-              },
-            },
+    console.info(`[gemini-interview-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
+    // Retry once on transient malformed JSON / guard failure (the schema
+    // enforces shape but the round trip can still fail transiently). Free
+    // per-item path; a retry is cheap.
+    return withRetry(async (remainingMs, attempt) => {
+      // Lead each retry with the next model: a per-minute 429 is scoped
+      // PerProjectPerModel, so rotating escapes the throttle immediately
+      // instead of waiting out Google's advised ~53s window.
+      const chain = rotateModels(MODELS, attempt);
+      try {
+        const result = await this.client.generate(
+          {
+            models: chain,
+            systemInstruction: INTERVIEW_SYSTEM_INSTRUCTION,
+            contents: buildInterviewUserPrompt(data, fit.mode),
+            responseJsonSchema: INTERVIEW_SCHEMA,
+            temperature: fit.mode === 'stretch' ? 0.55 : 0.4,
+            // Bilingual 6–8 Q is token-heavy (Bengali tokenizes denser); generous
+            // ceiling so a schema-valid payload never truncates.
+            maxOutputTokens: 8000,
           },
-          required: ['questions'],
-        },
-        systemInstruction: INTERVIEW_SYSTEM_INSTRUCTION,
-      },
-    });
+          remainingMs,
+        );
 
-    const text = result.text;
-    if (!text) throw new Error('No response from AI');
+        if (usage) {
+          usage.provider = 'gemini';
+          usage.model = result.model;
+          usage.promptTokens = result.usage?.promptTokens;
+          usage.completionTokens = result.usage?.completionTokens;
+          usage.thoughtTokens = result.usage?.thoughtTokens;
+          usage.attempts = result.attempts;
+        }
 
-    const parsed = JSON.parse(text) as { questions?: InterviewQuestion[] };
-    if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
-      throw new Error('Interview questions response was empty');
-    }
+        const text = result.text;
+        if (!text) throw new Error('No response from AI');
 
-    const questions = parsed.questions.map((q) => {
-      // Bengali fields tolerated as missing — UI falls back to English for
-      // any slot that comes back empty. Schema requires them, but we don't
-      // want a single missed translation to fail the whole retry.
-      const questionBn = (q.questionBn ?? '').trim();
-      const whyAskedBn = (q.whyAskedBn ?? '').trim();
-      const answerStrategyBn = (q.answerStrategyBn ?? '').trim();
-      return {
-      question: (q.question ?? '').trim(),
-      category: this.normalizeCategory(q.category),
-      whyAsked: (q.whyAsked ?? '').trim(),
-      answerStrategy: (q.answerStrategy ?? '').trim(),
-      ...(questionBn ? { questionBn } : {}),
-      ...(whyAskedBn ? { whyAskedBn } : {}),
-      ...(answerStrategyBn ? { answerStrategyBn } : {}),
-      };
-    });
+        const parsed = this.safeJsonParse(text);
+        if (!parsed.questions || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+          throw new Error('Interview questions response was empty');
+        }
 
-    // NO fabrication / anchor-coverage hard-fail on interview prep — questions
-    // are meant to probe the JD (incl. tech the candidate hasn't used) so they
-    // can rehearse. The prompt steers quality + honest answer coaching. (Kept in
-    // sync with OpenRouterInterviewQuestionsGenerator.)
-    return questions;
+        const questions = parsed.questions.map((q) => {
+          const questionBn = (q.questionBn ?? '').trim();
+          const whyAskedBn = (q.whyAskedBn ?? '').trim();
+          const answerStrategyBn = (q.answerStrategyBn ?? '').trim();
+          return {
+            question: (q.question ?? '').trim(),
+            category: this.normalizeCategory(q.category),
+            whyAsked: (q.whyAsked ?? '').trim(),
+            answerStrategy: (q.answerStrategy ?? '').trim(),
+            ...(questionBn ? { questionBn } : {}),
+            ...(whyAskedBn ? { whyAskedBn } : {}),
+            ...(answerStrategyBn ? { answerStrategyBn } : {}),
+          };
+        });
+
+        // NO fabrication / anchor-coverage hard-fail on interview prep (see the
+        // toolkit generator): questions intentionally probe the JD — including tech
+        // the candidate hasn't used — so they can rehearse. The prompt handles
+        // honest answer coaching; we don't block the artifact.
+        return questions;
+      } catch (err) {
+        // Preserve the attempt chain on failure too, so ai_call_log can show
+        // which models were tried on a call that ultimately failed.
+        if (usage && err instanceof GeminiError && err.attempts.length) {
+          usage.provider = 'gemini';
+          usage.attempts = err.attempts;
+        }
+        throw err;
+      }
+      // 55s deadline (not 45s): the bilingual interview is slow (~25-30s/attempt),
+      // and this single-artifact path runs ALONE on /api/toolkit-item (60s cap),
+      // so it can afford a retry if an attempt malforms. The enforced schema makes
+      // most attempts valid; the retry room covers the rest.
+    }, 55_000);
   }
 
   private normalizeCategory(raw: unknown): InterviewQuestionCategory {
     const value = String(raw ?? '').trim();
-    const match = VALID_CATEGORIES.find(
-      (c) => c.toLowerCase() === value.toLowerCase(),
-    );
+    const match = VALID_CATEGORIES.find((c) => c.toLowerCase() === value.toLowerCase());
     return match ?? 'Role-specific';
   }
 
+  private safeJsonParse(text: string): { questions?: Array<{
+    question?: string; category?: string; whyAsked?: string; answerStrategy?: string;
+    questionBn?: string; whyAskedBn?: string; answerStrategyBn?: string;
+  }> } {
+    try {
+      return JSON.parse(text);
+    } catch {
+      const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      return JSON.parse(cleaned);
+    }
+  }
 }

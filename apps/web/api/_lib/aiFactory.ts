@@ -1,107 +1,72 @@
 // Server-side construction of all AI providers + generators.
 //
-// OpenRouter is the LIVE default (cutover shipped). If OPENROUTER_API_KEY is
-// set, the entire AI surface runs through OpenRouter (one key → Gemini-2.5-flash
-// optimizer + Gemini-flash toolkit/single-artifact + Gemini-flash-lite
-// extractor, each with its own fallback chain; DeepSeek/Llama are fallbacks
-// only — DeepSeek was dropped as optimizer primary for unreliable strict JSON).
-// If the key is ABSENT, we fall back to the legacy Groq→Gemini optimizer + the
-// Gemini SDK generators — the "panic switch" rollback (remove OPENROUTER_API_KEY,
-// keep GROQ/GEMINI keys). @google/genai stays a dependency until the Phase-6b
-// cleanup removes the legacy path after a clean prod window.
+// SINGLE PROVIDER: direct Google Gemini, one key (GEMINI_API_KEY). OpenRouter and
+// Groq are gone. Every generator is a Gemini* class on GeminiClient, and each
+// carries its own ordered model-fallback chain (Google has no server-side
+// models[] equivalent, so the chain is walked client-side).
+//
+// WHY WE LEFT OPENROUTER: Gemini calls ran on OpenRouter's POOLED Google
+// credentials, so ~30% failed with a shared-pool 429 that arrived as HTTP 200 +
+// finish_reason='error' — a shape OpenRouter's own fallback did not route
+// around. Buying OpenRouter credits does not buy Google quota. Our own key does.
+//
+// WHY GROQ WENT TOO: the Groq→Gemini `MultiProviderResumeOptimizer` was only
+// reachable when OPENROUTER_API_KEY was unset, i.e. effectively never, and its
+// llama-3.3-70b is weak at Bengali — so the bilingual toolkit it would have
+// served was not an acceptable degradation. It was nominal resilience, not real.
+//
+// ⚠️ CONCENTRATION RISK, ACCEPTED KNOWINGLY: every model in every chain is
+// Google, so a Google-wide outage takes down all six workloads at once. The
+// former non-Google last resort (Llama, via OpenRouter) is gone. Adding a second
+// provider later is cheap — the domain interfaces (IResumeOptimizer,
+// IToolkitGenerator, …) are what the app depends on, not these classes — but it
+// is a deliberate future decision, not an oversight.
+//
+// Model assignment is evidence-based, measured 2026-08-04 via
+// `npm run ai:bench` (see scripts/ai-probe.ts):
+//   • gemini-3.5-flash-lite leads EVERY chain. Google's own documented
+//     replacement for gemini-2.5-flash at identical pricing ($0.30/$2.50), and
+//     measured fastest (optimizer 1.9s vs 11.9s for 3.6-flash), 0 thought
+//     tokens, and the cleanest Bengali of the three (0.000 Latin contamination
+//     vs 0.034 for 3.6-flash).
+//   • gemini-3.6-flash is the paid-path fallback only. It costs 4x more, ran 6x
+//     slower, and produced WORSE Bengali — there is no case for it as primary.
+//   • gemini-3.1-flash-lite is the cheap fallback, and primary-adjacent for the
+//     mechanical utility paths. It writes noticeably thinner prose (790-char
+//     cover letter vs 2133), so it is not fronted on artifact-quality paths.
+//   • gemini-2.5-* is UNREACHABLE on this account — HTTP 404 "no longer
+//     available to new users", including versioned aliases. Do not reintroduce.
 //
 // All keys are read from process.env (NOT VITE_-prefixed) so none reach the
 // client bundle. Singletons reused across warm Vercel invocations.
 
-// Legacy (Groq + Gemini direct) — kept as the no-OPENROUTER_API_KEY fallback.
 import { GeminiResumeOptimizer } from '../../src/infrastructure/ai/GeminiResumeOptimizer.js';
-import { GroqResumeOptimizer } from '../../src/infrastructure/ai/GroqResumeOptimizer.js';
-import {
-  MultiProviderResumeOptimizer,
-  NamedOptimizer,
-} from '../../src/infrastructure/ai/MultiProviderResumeOptimizer.js';
 import { GeminiToolkitGenerator } from '../../src/infrastructure/ai/GeminiToolkitGenerator.js';
 import { GeminiCoverLetterGenerator } from '../../src/infrastructure/ai/GeminiCoverLetterGenerator.js';
 import { GeminiOutreachEmailGenerator } from '../../src/infrastructure/ai/GeminiOutreachEmailGenerator.js';
 import { GeminiLinkedInMessageGenerator } from '../../src/infrastructure/ai/GeminiLinkedInMessageGenerator.js';
 import { GeminiInterviewQuestionsGenerator } from '../../src/infrastructure/ai/GeminiInterviewQuestionsGenerator.js';
 import { GeminiResumeExtractor } from '../../src/infrastructure/ai/GeminiResumeExtractor.js';
+import { GeminiProfileNormalizer } from '../../src/infrastructure/ai/GeminiProfileNormalizer.js';
 
-// OpenRouter (single-key) — the active path when OPENROUTER_API_KEY is set.
-import { OpenRouterResumeOptimizer } from '../../src/infrastructure/ai/OpenRouterResumeOptimizer.js';
-import { OpenRouterToolkitGenerator } from '../../src/infrastructure/ai/OpenRouterToolkitGenerator.js';
-import { OpenRouterCoverLetterGenerator } from '../../src/infrastructure/ai/OpenRouterCoverLetterGenerator.js';
-import { OpenRouterOutreachEmailGenerator } from '../../src/infrastructure/ai/OpenRouterOutreachEmailGenerator.js';
-import { OpenRouterLinkedInMessageGenerator } from '../../src/infrastructure/ai/OpenRouterLinkedInMessageGenerator.js';
-import { OpenRouterInterviewQuestionsGenerator } from '../../src/infrastructure/ai/OpenRouterInterviewQuestionsGenerator.js';
-import { OpenRouterResumeExtractor } from '../../src/infrastructure/ai/OpenRouterResumeExtractor.js';
-import { OpenRouterProfileNormalizer } from '../../src/infrastructure/ai/OpenRouterProfileNormalizer.js';
-
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY ?? '';
-const GROQ_KEY = process.env.GROQ_API_KEY ?? '';
 const GEMINI_KEY = process.env.GEMINI_API_KEY ?? '';
 
-const useOpenRouter = !!OPENROUTER_KEY;
-
-if (!OPENROUTER_KEY && !GROQ_KEY && !GEMINI_KEY) {
-  console.error('[aiFactory] No AI provider keys configured. Set OPENROUTER_API_KEY (preferred) or GROQ_API_KEY/GEMINI_API_KEY in Vercel env vars.');
-}
-if (useOpenRouter) {
-  console.info('[aiFactory] OpenRouter active (single-key path).');
+if (!GEMINI_KEY) {
+  console.error(
+    '[aiFactory] GEMINI_API_KEY is not set — every AI endpoint will return 503. ' +
+      'Set it in the Vercel project env vars.',
+  );
 } else {
-  console.info('[aiFactory] OpenRouter key absent — using legacy Groq/Gemini path.');
-  if (!GEMINI_KEY) {
-    console.warn('[aiFactory] GEMINI_API_KEY not set — legacy toolkit/cover-letter/extractor will fail.');
-  }
+  console.info('[aiFactory] Gemini active (direct Google API, single key).');
 }
 
-// ── Legacy optimizer (multi-provider) — only built on the fallback path ──────
-function buildLegacyOptimizer(): MultiProviderResumeOptimizer | null {
-  const optimizerProviders: NamedOptimizer[] = [];
-  if (GROQ_KEY) {
-    optimizerProviders.push({ name: 'groq', optimizer: new GroqResumeOptimizer(GROQ_KEY) });
-  }
-  if (GEMINI_KEY) {
-    optimizerProviders.push({ name: 'gemini', optimizer: new GeminiResumeOptimizer(GEMINI_KEY) });
-  }
-  return optimizerProviders.length ? new MultiProviderResumeOptimizer(optimizerProviders) : null;
-}
-
-// ── Active wiring ────────────────────────────────────────────────────────────
-// Each export is null only if neither path can serve it (no key) → the endpoint
-// returns 503 with a clear message rather than crashing module load.
-export const resumeOptimizer = useOpenRouter
-  ? new OpenRouterResumeOptimizer(OPENROUTER_KEY)
-  : buildLegacyOptimizer();
-
-export const toolkitGenerator = useOpenRouter
-  ? new OpenRouterToolkitGenerator(OPENROUTER_KEY)
-  : (GEMINI_KEY ? new GeminiToolkitGenerator(GEMINI_KEY) : null);
-
-export const coverLetterGenerator = useOpenRouter
-  ? new OpenRouterCoverLetterGenerator(OPENROUTER_KEY)
-  : (GEMINI_KEY ? new GeminiCoverLetterGenerator(GEMINI_KEY) : null);
-
-export const outreachEmailGenerator = useOpenRouter
-  ? new OpenRouterOutreachEmailGenerator(OPENROUTER_KEY)
-  : (GEMINI_KEY ? new GeminiOutreachEmailGenerator(GEMINI_KEY) : null);
-
-export const linkedInMessageGenerator = useOpenRouter
-  ? new OpenRouterLinkedInMessageGenerator(OPENROUTER_KEY)
-  : (GEMINI_KEY ? new GeminiLinkedInMessageGenerator(GEMINI_KEY) : null);
-
-export const interviewQuestionsGenerator = useOpenRouter
-  ? new OpenRouterInterviewQuestionsGenerator(OPENROUTER_KEY)
-  : (GEMINI_KEY ? new GeminiInterviewQuestionsGenerator(GEMINI_KEY) : null);
-
-export const resumeExtractor = useOpenRouter
-  ? new OpenRouterResumeExtractor(OPENROUTER_KEY)
-  : (GEMINI_KEY ? new GeminiResumeExtractor(GEMINI_KEY) : null);
-
-// Profile-item normalizer ("polished profile") — OpenRouter only; there is no
-// legacy Gemini sibling (the feature shipped after the OpenRouter cutover).
-// On the legacy path the endpoint returns 503 and the client treats
-// normalization as unavailable — profile saves are unaffected.
-export const profileNormalizer = useOpenRouter
-  ? new OpenRouterProfileNormalizer(OPENROUTER_KEY)
-  : null;
+// Each export is null only when the key is absent → the endpoint returns 503
+// with a clear message rather than crashing at module load.
+export const resumeOptimizer = GEMINI_KEY ? new GeminiResumeOptimizer(GEMINI_KEY) : null;
+export const toolkitGenerator = GEMINI_KEY ? new GeminiToolkitGenerator(GEMINI_KEY) : null;
+export const coverLetterGenerator = GEMINI_KEY ? new GeminiCoverLetterGenerator(GEMINI_KEY) : null;
+export const outreachEmailGenerator = GEMINI_KEY ? new GeminiOutreachEmailGenerator(GEMINI_KEY) : null;
+export const linkedInMessageGenerator = GEMINI_KEY ? new GeminiLinkedInMessageGenerator(GEMINI_KEY) : null;
+export const interviewQuestionsGenerator = GEMINI_KEY ? new GeminiInterviewQuestionsGenerator(GEMINI_KEY) : null;
+export const resumeExtractor = GEMINI_KEY ? new GeminiResumeExtractor(GEMINI_KEY) : null;
+export const profileNormalizer = GEMINI_KEY ? new GeminiProfileNormalizer(GEMINI_KEY) : null;

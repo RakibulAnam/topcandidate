@@ -15,7 +15,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
-import { resolveCost } from './_lib/aiCost.js';
+import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { resumeOptimizer } from './_lib/aiFactory.js';
 import type { ResumeData } from '../src/domain/entities/Resume';
 import type { UsageSink } from '../src/infrastructure/ai/usage';
@@ -62,30 +62,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const optimized = await resumeOptimizer.optimize(data, usage);
     const latencyMs = Date.now() - t0;
-    const cost = resolveCost(usage, data.targetJob?.description, optimized.summary);
-    await logCall(auth.userId, auth.jwt, 'optimize_general', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'success',
-      latencyMs,
-    });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'optimize_general',
+      buildCallMeta({ usage, latencyMs, fallbackInputText: data.targetJob?.description, fallbackOutputText: optimized.summary }),
+    );
     res.status(200).json({ optimized });
   } catch (err) {
     const latencyMs = Date.now() - t0;
     const msg = err instanceof Error ? err.message : 'Optimizer failed';
-    const cost = resolveCost(usage, data.targetJob?.description);
-    await logCall(auth.userId, auth.jwt, 'optimize_general', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'error',
-      latencyMs,
-    });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'optimize_general',
+      buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: data.targetJob?.description }),
+    );
     res.status(502).json({ error: msg });
   }
 }

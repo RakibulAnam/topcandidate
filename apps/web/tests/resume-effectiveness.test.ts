@@ -501,16 +501,22 @@ async function main() {
   // process.env.{GROQ,GEMINI}_API_KEY in Vercel Functions.
   const groqKey = env.GROQ_API_KEY || env.VITE_GROQ_API_KEY;
   const geminiKey = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY;
-  // Optional model override for either provider (rarely needed; e.g. testing
-  // gemini-2.5-flash-lite when 2.5-flash daily quota is exhausted).
+  // The MODEL override is gone. GeminiResumeOptimizer now owns an ordered model
+  // chain internally (gemini-3.5-flash-lite → 3.6-flash → 3.1-flash-lite) which
+  // GeminiClient walks on failure, so there is no single model to override — and
+  // the old default this override existed to escape, gemini-2.5-flash, is now
+  // HTTP 404 "no longer available to new users" on our key.
   const modelOverride = process.env.MODEL;
+  if (modelOverride) {
+    console.warn(`MODEL=${modelOverride} ignored — the optimizer owns its own model chain now.`);
+  }
 
   const providers: NamedOptimizer[] = [];
   if (!isPlaceholder(groqKey)) {
     providers.push({ name: 'groq', optimizer: new GroqResumeOptimizer(groqKey, modelOverride) });
   }
   if (!isPlaceholder(geminiKey)) {
-    providers.push({ name: 'gemini', optimizer: new GeminiResumeOptimizer(geminiKey, modelOverride) });
+    providers.push({ name: 'gemini', optimizer: new GeminiResumeOptimizer(geminiKey) });
   }
   if (!providers.length) {
     throw new Error('No AI provider key found in .env (VITE_GROQ_API_KEY or VITE_GEMINI_API_KEY)');

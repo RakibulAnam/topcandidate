@@ -29,7 +29,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
-import { resolveCost } from './_lib/aiCost.js';
+import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { resumeOptimizer } from './_lib/aiFactory.js';
 import type { ResumeData, GeneratedToolkit } from '../src/domain/entities/Resume';
 import type { UsageSink } from '../src/infrastructure/ai/usage';
@@ -160,18 +160,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const msg = optimizedResult.reason instanceof Error ? optimizedResult.reason.message : String(optimizedResult.reason);
     console.error(`[optimize ${rid}] optimizer rejected: ${msg}`);
     // Telemetry row (status=error). Tokens estimated from the input JD when the
-    // provider didn't report usage on the failed attempt.
+    // provider didn't report usage on the failed attempt; the sink still carries
+    // the attempt chain, so the row shows which models were tried.
+    //
+    // Deliberately written BEFORE the refund below, not after. Logging it after
+    // would let the row also record whether the refund succeeded, but a hung
+    // refund RPC would then lose the row entirely — and with it the daily-cap
+    // increment that stops a valid JWT from spam-failing the optimizer for free
+    // (the C5 audit requirement). Refund failures are already surfaced by the
+    // console.error below and reconcilable via credit_ledger, so the row
+    // guarantee wins.
     {
-      const cost = resolveCost(optUsage, data.targetJob.description);
-      await logCall(auth.userId, auth.jwt, 'optimize', {
-        provider: cost.provider,
-        model: cost.model,
-        promptTokens: cost.promptTokens,
-        completionTokens: cost.completionTokens,
-        costUsd: cost.costUsd,
-        status: 'error',
-        latencyMs,
-      });
+      await logCall(
+        auth.userId,
+        auth.jwt,
+        'optimize',
+        buildCallMeta({
+          usage: optUsage,
+          latencyMs,
+          error: optimizedResult.reason,
+          fallbackInputText: data.targetJob.description,
+        }),
+      );
     }
     // Core artifact failed — refund the credit so the user isn't charged for
     // a generation that produced nothing. If the refund itself fails the user
@@ -221,20 +231,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Success telemetry (status=success). Fallback token estimate uses the JD
   // (input) + the optimized summary (output) when the provider omitted usage.
   {
-    const cost = resolveCost(
-      optUsage,
-      data.targetJob.description,
-      optimized.summary
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'optimize',
+      buildCallMeta({
+        usage: optUsage,
+        latencyMs,
+        fallbackInputText: data.targetJob.description,
+        fallbackOutputText: optimized.summary,
+      }),
     );
-    await logCall(auth.userId, auth.jwt, 'optimize', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'success',
-      latencyMs,
-    });
   }
 
   console.info(`[optimize ${rid}] 200 total=${Date.now() - t0}ms`);

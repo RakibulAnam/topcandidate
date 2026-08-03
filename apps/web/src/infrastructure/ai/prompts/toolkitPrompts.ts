@@ -467,3 +467,89 @@ RULES
 - Never coach the candidate to claim experience or tools they don't have. JD topics they haven't used are framed as "here's how I'd prepare", not as past experience.
 `;
 }
+
+// ─── Structured-output schemas (Gemini `responseJsonSchema`) ─────────────────
+//
+// Lifted here from the generator modules during the OpenRouter → direct-Gemini
+// port. They were module-local consts inside the OpenRouter* generators, which
+// meant the combined toolkit and the single-artifact regenerate path each
+// carried their own copy of what is meant to be ONE contract — exactly the
+// divergence this prompts/ module exists to prevent.
+//
+// Safe for `responseJsonSchema` verbatim: `type`, `properties`, `required`,
+// `items`, `enum` and `additionalProperties` are all supported. Do NOT route
+// these through `config.responseSchema` instead — that interface has no
+// `additionalProperties` field, so it is both a TS error and a likely 400.
+
+/** Combined toolkit bundle: cover letter + outreach + LinkedIn + interview Qs. */
+export const TOOLKIT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    coverLetter: { type: 'string' },
+    outreachEmail: {
+      type: 'object',
+      properties: { subject: { type: 'string' }, body: { type: 'string' } },
+      required: ['subject', 'body'],
+      additionalProperties: false,
+    },
+    linkedInMessage: { type: 'string' },
+    interviewQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          category: { type: 'string' },
+          whyAsked: { type: 'string' },
+          answerStrategy: { type: 'string' },
+          questionBn: { type: 'string' },
+          whyAskedBn: { type: 'string' },
+          answerStrategyBn: { type: 'string' },
+        },
+        required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['coverLetter', 'outreachEmail', 'linkedInMessage', 'interviewQuestions'],
+  additionalProperties: false,
+};
+
+/** Single-artifact interview regenerate (/api/toolkit-item). */
+export const INTERVIEW_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          category: { type: 'string' },
+          whyAsked: { type: 'string' },
+          answerStrategy: { type: 'string' },
+          questionBn: { type: 'string' },
+          whyAskedBn: { type: 'string' },
+          answerStrategyBn: { type: 'string' },
+        },
+        required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['questions'],
+  additionalProperties: false,
+};
+
+/**
+ * Single-artifact outreach regenerate. NEW in the Gemini port: this generator
+ * was the last one still on OpenRouter's unenforced `json_object` mode with the
+ * shape described only in prose, so a malformed subject/body reached the guards
+ * as a parse failure. Gemini enforces it.
+ */
+export const OUTREACH_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: { subject: { type: 'string' }, body: { type: 'string' } },
+  required: ['subject', 'body'],
+  additionalProperties: false,
+};
