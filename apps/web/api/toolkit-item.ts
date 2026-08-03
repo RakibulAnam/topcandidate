@@ -47,7 +47,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   console.info(`[toolkit-item ${rid}] start user=${auth.userId.slice(0, 8)} kind=${kind}`);
 
   try {
-    await assertWithinLimit(auth.userId, auth.jwt);
+    // The 'toolkit_item' kind MUST be passed: assertWithinLimit only consults
+    // KIND_DAILY_CAPS for the kind it is given, so omitting it silently skipped
+    // the 8/day per-kind cap entirely and left this endpoint bounded only by the
+    // overall 20/day — which was the whole exposure the cap exists to close.
+    await assertWithinLimit(auth.userId, auth.jwt, 'toolkit_item');
   } catch (err) {
     if (err instanceof RateLimitError) {
       console.warn(`[toolkit-item ${rid}] 429 rate-limited used=${err.used}/${err.cap}`);

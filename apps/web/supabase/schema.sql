@@ -368,6 +368,29 @@ create index ai_call_log_user_created_idx on ai_call_log(user_id, created_at des
 
 alter table ai_call_log enable row level security;
 
+-- SECURITY (migrations 021 + 022). The analytics views are OPERATOR-only: they are
+-- owned by postgres with security_invoker, and public roles have no SELECT — every
+-- consumer is an /admin handler on SUPABASE_SERVICE_ROLE_KEY, which bypasses both.
+-- Without this they were readable by anyone holding the (public) anon key.
+revoke all on v_daily_revenue, v_daily_signups, v_daily_ai_usage,
+              v_credit_liability, v_ai_failures_daily, v_ai_model_health
+  from anon, authenticated;
+alter view v_daily_revenue     set (security_invoker = true);
+alter view v_daily_signups     set (security_invoker = true);
+alter view v_daily_ai_usage    set (security_invoker = true);
+alter view v_credit_liability  set (security_invoker = true);
+alter view v_ai_failures_daily set (security_invoker = true);
+alter view v_ai_model_health   set (security_invoker = true);
+alter default privileges in schema public revoke select on tables from anon;
+
+-- profiles is NOT a public/social profile — it holds full_name, email, phone,
+-- location, links and toolkit_credits. The Supabase boilerplate policy
+-- ("Public profiles are viewable by everyone.", USING (true)) leaked the whole
+-- user base; own-row only.
+drop policy if exists "Public profiles are viewable by everyone." on profiles;
+create policy "Users can view own profile" on profiles
+  for select using (auth.uid() = id);
+
 create policy "Users can view own ai_call_log" on ai_call_log
   for select using (auth.uid() = user_id);
 
