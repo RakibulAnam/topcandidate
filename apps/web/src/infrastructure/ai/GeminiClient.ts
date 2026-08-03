@@ -223,7 +223,8 @@ export function classifyGeminiError(
     // for the two: "You exceeded your current quota, please check your plan and
     // billing details." Matching on that prose ('quota' + 'exceeded') therefore
     // labels every RPM throttle as quota_exhausted. That was a real bug here,
-    // and it is the same one still live in MultiProviderResumeOptimizer.
+    // and it was also present in the now-deleted MultiProviderResumeOptimizer —
+    // so if a cooldown table is ever reintroduced, do not key it on the prose.
     //
     // The only reliable discriminator is the structured quotaId, e.g.
     //   GenerateRequestsPerMinutePerProjectPerModel-FreeTier   (per minute)

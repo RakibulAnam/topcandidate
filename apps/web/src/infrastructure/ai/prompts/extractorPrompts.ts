@@ -1,9 +1,9 @@
 // Shared prompt + schema for the resume extractor.
 //
 // Extracted from GeminiResumeExtractor (migration Phase 0) so the OpenRouter
-// port (Phase 5) reuses the same instruction. The Gemini Type-based response
-// schema stays in the generator class (SDK-specific); the OpenRouter path uses
-// EXTRACTOR_SCHEMA below (strict structured outputs — see OpenRouterClient).
+// EXTRACTOR_SCHEMA below is the single response schema, passed to Gemini as
+// `responseJsonSchema` (NOT `responseSchema` — that type has no
+// `additionalProperties` field, so it is both a TS error and a likely 400).
 //
 // 2026-06 quality pass: the prompt was de-biased (it over-emphasised work
 // experience, so education/skills/certs/awards were dropped under token

@@ -1,11 +1,14 @@
 // Shared prompt + validation logic for the resume optimizer.
 //
-// Used by GeminiResumeOptimizer (which passes a separate `responseSchema` to
-// the Gemini SDK) and GroqResumeOptimizer (which embeds the JSON shape spec
-// in the user prompt because OpenAI-compatible JSON mode does not enforce a
-// schema). Keeping all prompt text + validation in one place ensures the two
-// providers stay in lockstep on the rules — the rules are the product, not
-// the SDK.
+// Used by GeminiResumeOptimizer, which passes OPTIMIZER_SCHEMA (below) as
+// `responseJsonSchema` AND embeds the shape spec in the user prompt via
+// buildUserPrompt(data, { embedSchemaSpec: true }). Both are needed: a JSON
+// schema cannot express "echo back exactly these input IDs", so the prompt
+// states it and validateOptimizedResponse() is the final gate.
+//
+// Keeping all prompt text + validation here — rather than in the generator —
+// is what let the provider swap from Groq/OpenRouter to direct Gemini without
+// touching a single rule. The rules are the product; the SDK is not.
 
 import { ResumeData, OptimizedResumeData } from '../../../domain/entities/Resume.js';
 

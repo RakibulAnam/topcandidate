@@ -19,6 +19,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { ThinkingLevel } from '@google/genai';
 import {
   GeminiClient,
   GeminiError,
@@ -574,6 +575,89 @@ Go, Python, PostgreSQL, Kafka, Redis, Docker, Kubernetes`;
   if (pass < cases.length) process.exitCode = 1;
 }
 
+// ── gaps: the two paths e2e could not reach ─────────────────────────────────
+//  1. MULTIMODAL. e2e drives the extractor's text/plain branch only. The
+//     inlineData branch — what fires when pdf.js cannot pull text out, i.e.
+//     scanned PDFs — is a different code path (Part[] instead of a string) and
+//     had never run against Gemini 3.x. Needs a real PDF: pass its path as argv.
+//  2. gemini-3.6-flash AT FULL PAYLOAD. It sits mid-chain but no fallback ever
+//     fired in testing, so it was unexercised. thinkingLevel MINIMAL measured 0
+//     thoughts on a trivial task; if thoughts reappear on a real 8000-token
+//     toolkit they also consume maxOutputTokens, and truncation does not walk the
+//     chain — so this is the latent risk worth pricing.
+async function gaps(key: string, pdfPath?: string) {
+  console.log('\n=== GAPS: multimodal + premium-model-at-scale ===\n');
+  const client = new GeminiClient(key);
+
+  // ── 1. multimodal extractor
+  if (!pdfPath) {
+    console.log('  SKIP  multimodal — pass a PDF path as the 2nd arg');
+  } else {
+    const { GeminiResumeExtractor } = await import('../src/infrastructure/ai/GeminiResumeExtractor.js');
+    const b64 = readFileSync(pdfPath).toString('base64');
+    const u: any = {};
+    const t0 = Date.now();
+    try {
+      const r: any = await new GeminiResumeExtractor(key).extract(b64, 'application/pdf', u);
+      console.log(
+        `  PASS  multimodal extractor (inlineData, application/pdf, ${Math.round(b64.length / 1024)}KB b64)\n` +
+        `        served=${u.model} in=${u.promptTokens} out=${u.completionTokens} th=${u.thoughtTokens ?? 0} ` +
+        `$${costOf(u.model ?? '', u.promptTokens, u.completionTokens, u.thoughtTokens).toFixed(5)} ${Date.now() - t0}ms\n` +
+        `        name=${r.personalInfo?.fullName ?? '?'} ${r.experience?.length ?? 0} exp, ${r.education?.length ?? 0} edu, ${r.skills?.length ?? 0} skills`
+      );
+    } catch (e) {
+      const code = e instanceof GeminiError ? e.code : classifyGeminiError(e).code;
+      console.log(`  FAIL  multimodal extractor\n        code=${code} ${(e as Error).message.slice(0, 200)}`);
+      process.exitCode = 1;
+    }
+  }
+
+  // ── 2. gemini-3.6-flash on the real toolkit payload, MINIMAL vs default
+  const { buildToolkitSystemInstruction, buildToolkitUserPrompt, TOOLKIT_SCHEMA } =
+    await import('../src/infrastructure/ai/prompts/toolkitPrompts.js');
+  const data: any = {
+    targetJob: { title: 'Senior Backend Engineer', company: 'NordPay Fintech Ltd', description: JD },
+    personalInfo: { fullName: 'Rifat Hasan', email: 'r@e.com', phone: '+8801700000000', location: 'Dhaka' },
+    summary: '', education: [], projects: [],
+    experience: [{ id: 'exp-1', company: 'Shohoz Ltd', role: 'Software Engineer', startDate: '2019-07', endDate: '2022-02', isCurrent: false,
+      rawDescription: 'Implemented bKash payment reconciliation for ticketing, cutting settlement mismatches 40%. Built a double-entry ledger for refunds in PostgreSQL. Automated Bangladesh Bank settlement reporting.', refinedBullets: [] }],
+    skills: ['Go', 'PostgreSQL', 'Kafka', 'Redis'],
+  };
+
+  for (const [label, thinking] of [
+    ['thinkingLevel MINIMAL (what we ship)', ThinkingLevel.MINIMAL],
+    ['thinking DEFAULT (what we avoid)', undefined],
+  ] as Array<[string, ThinkingLevel | undefined]>) {
+    const t0 = Date.now();
+    try {
+      const r = await client.generate(
+        {
+          models: [GEMINI_MODELS.FLASH_36],
+          systemInstruction: buildToolkitSystemInstruction('match'),
+          contents: buildToolkitUserPrompt(data, 'match'),
+          responseJsonSchema: TOOLKIT_SCHEMA,
+          temperature: 0.4,
+          maxOutputTokens: 8000,
+          ...(thinking ? { thinkingLevel: thinking } : {}),
+        },
+        55_000,
+      );
+      const th = r.usage?.thoughtTokens ?? 0;
+      const out = r.usage?.completionTokens ?? 0;
+      console.log(
+        `  ${th === 0 || thinking ? 'PASS' : 'INFO'}  3.6-flash @8000 tok — ${label}\n` +
+        `        in=${r.usage?.promptTokens} out=${out} thoughts=${th}` +
+        `${out ? ` (${(th / out).toFixed(2)}x output)` : ''} ` +
+        `$${costOf(GEMINI_MODELS.FLASH_36, r.usage?.promptTokens, out, th).toFixed(5)} ${Date.now() - t0}ms`
+      );
+    } catch (e) {
+      const code = e instanceof GeminiError ? e.code : classifyGeminiError(e).code;
+      console.log(`  FAIL  3.6-flash — ${label}\n        code=${code} ${(e as Error).message.slice(0, 160)}`);
+      process.exitCode = 1;
+    }
+  }
+}
+
 async function main() {
   const mode = process.argv[2] ?? 'selftest';
   const key = loadKey();
@@ -582,7 +666,8 @@ async function main() {
   else if (mode === 'bench') await bench(client, Number(process.argv[3] ?? 1));
   else if (mode === 'tier') await tierCheck(client);
   else if (mode === 'e2e') await e2e(key);
-  else { console.error(`unknown mode "${mode}" — use selftest, bench, tier or e2e`); process.exit(1); }
+  else if (mode === 'gaps') await gaps(key, process.argv[3]);
+  else { console.error(`unknown mode "${mode}" — use selftest, bench, tier, e2e or gaps`); process.exit(1); }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
