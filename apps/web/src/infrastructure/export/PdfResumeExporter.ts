@@ -16,6 +16,7 @@ import {
   TemplateDefinition,
   resolveTemplate,
 } from '../../presentation/templates/TemplateRegistry';
+import { formatResumeDate, formatResumeDateRange } from '../../presentation/templates/dateFormat';
 import {
   ContactSegment,
   buildContactSegments,
@@ -82,7 +83,7 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Experience', t, cursor);
       for (const exp of data.experience) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 4, t.margin);
-        const dateStr = `${exp.startDate} \u2013 ${exp.isCurrent ? 'Present' : exp.endDate}`;
+        const dateStr = formatResumeDateRange(exp.startDate, exp.endDate, exp.isCurrent);
         this.renderItemTitleRow(doc, exp.role, dateStr, t, cursor, contentWidth);
         this.renderItalicLine(doc, exp.company, t, cursor, contentWidth);
         const bullets =
@@ -130,9 +131,7 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Education', t, cursor);
       for (const edu of data.education) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 3, t.margin);
-        const dateStr = edu.startDate
-          ? `${edu.startDate} \u2013 ${edu.endDate}`
-          : edu.endDate;
+        const dateStr = formatResumeDateRange(edu.startDate, edu.endDate);
         this.renderItemTitleRow(doc, edu.school, dateStr, t, cursor, contentWidth);
         const degreeText = `${edu.degree}${edu.field ? ` in ${edu.field}` : ''}${edu.gpa ? ` \u2022 GPA: ${edu.gpa}` : ''}`;
         this.renderBodyLine(doc, degreeText, t, cursor, contentWidth);
@@ -148,7 +147,7 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Certifications', t, cursor);
       for (const cert of data.certifications) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 3, t.margin);
-        this.renderItemTitleRow(doc, cert.name, cert.date, t, cursor, contentWidth);
+        this.renderItemTitleRow(doc, cert.name, formatResumeDate(cert.date), t, cursor, contentWidth);
         this.renderItalicLine(doc, cert.issuer, t, cursor, contentWidth);
         cursor.y += t.itemGap;
       }
@@ -162,7 +161,7 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Extracurricular Activities', t, cursor);
       for (const extra of data.extracurriculars) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 4, t.margin);
-        const dateStr = `${extra.startDate} \u2013 ${extra.endDate}`;
+        const dateStr = formatResumeDateRange(extra.startDate, extra.endDate);
         this.renderItemTitleRow(doc, extra.title, dateStr, t, cursor, contentWidth);
         this.renderItalicLine(doc, extra.organization, t, cursor, contentWidth);
         const bullets =
@@ -181,7 +180,7 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Awards & Honors', t, cursor);
       for (const award of data.awards) {
         this.ensureSpace(doc, cursor, t.sizeItemTitle * 3, t.margin);
-        this.renderItemTitleRow(doc, award.title, award.date, t, cursor, contentWidth);
+        this.renderItemTitleRow(doc, award.title, formatResumeDate(award.date), t, cursor, contentWidth);
         const awardDetail = awardDetailText(award);
         const issuerLine = `${award.issuer}${awardDetail ? ` \u2013 ${awardDetail}` : ''}`;
         this.renderBodyLine(doc, issuerLine, t, cursor, contentWidth);
@@ -197,7 +196,7 @@ export class PdfResumeExporter {
       this.renderSectionHeading(doc, 'Publications', t, cursor);
       for (const pub of data.publications) {
         this.ensureSpace(doc, cursor, t.sizeBody * 2, t.margin);
-        const prefix = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${pub.date}`;
+        const prefix = `${pub.title}${pub.publisher ? `, ${pub.publisher}` : ''}, ${formatResumeDate(pub.date)}`;
         // Shortened visible text (full URL stays the link target); raw when unlinkable.
         const pubSeg = pub.link ? webSegment(pub.link) : undefined;
         if (pub.link && pubSeg?.href) {
@@ -239,7 +238,7 @@ export class PdfResumeExporter {
       for (const aff of data.affiliations) {
         this.ensureSpace(doc, cursor, t.sizeBody * 2, t.margin);
         const affDates = aff.startDate
-          ? ` (${aff.startDate} \u2013 ${aff.endDate || 'Present'})`
+          ? ` (${formatResumeDateRange(aff.startDate, aff.endDate) || 'Present'})`
           : '';
         const line = `${aff.role}, ${aff.organization}${affDates}`;
         this.renderBodyLine(doc, line, t, cursor, contentWidth);
