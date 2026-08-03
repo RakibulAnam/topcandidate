@@ -20,7 +20,7 @@
 - The Flutter SMS-watcher for bKash confirmation (see `AGENTS.md` §13)
 - Email deliverability for password resets (Supabase handles it on Pro)
 
-> **Heads-up on the AI stack:** OpenRouter is **now SHIPPED and live** (see `docs/OPENROUTER_MIGRATION.md`). When `OPENROUTER_API_KEY` is set, the entire AI surface runs through a single OpenRouter key (Gemini 2.5 Flash optimizer + Gemini-Flash toolkit + Gemini-Flash-Lite extractor, each with a fallback chain); `api/_lib/aiFactory.ts` gates on it. The legacy **Groq + Gemini direct** stack (`GROQ_API_KEY` + `GEMINI_API_KEY`) is retained only as the no-OpenRouter-key fallback / panic switch. The §12 "via OpenRouter" cost tables now reflect the current bill, not a projection.
+> **Heads-up on the AI stack:** the AI surface runs on the **direct Google Gemini API**, one key (`GEMINI_API_KEY`), gated in `api/_lib/aiFactory.ts`. OpenRouter and Groq were removed 2026-08-04 — see [`../../../docs/decisions/0002-single-ai-provider-direct-gemini.md`](../../../docs/decisions/0002-single-ai-provider-direct-gemini.md) and `AGENTS.md` §9. The key **must be on a paid tier**: Google's free tier trains on submitted prompts and allows human review, which contradicts ToS §3. Any "via OpenRouter" cost figure below is stale; the measured number is **~$0.0101 per paid generation** (~3% of net revenue on a ৳200 5-credit pack).
 
 **Assumption:** You are the only user on Vercel and Cloudflare for now. Solo dev. One account each.
 
@@ -368,7 +368,7 @@ Saves you "I didn't know it was down for 4 hours" stories.
 
 These are not gating; do them once you have ~100 real users:
 
-- [x] (Done) AI providers migrated to **OpenRouter** (single key, gated in `api/_lib/aiFactory.ts`). Set the $20/mo hard spend cap + ZDR routing on the key in the OpenRouter dashboard (resumes are PII). See `docs/OPENROUTER_MIGRATION.md`.
+- [x] (Done) AI runs on the **direct Google Gemini API**, one key, gated in `api/_lib/aiFactory.ts`. Bound spend in Cloud Console → Billing → Budgets with a **spend cap** budget scoped to the Gemini API — a plain budget only emails you while charges continue. Confirm the key is on a **paid** tier (the free tier trains on prompts; resumes are PII). See ADR-0002.
 - [ ] Build the **Flutter SMS-watcher** for bKash confirmation (AGENTS.md §13). Until this exists, you confirm purchases manually via `select confirm_purchase('<txnid>', '<observed_sender_msisdn>');` in the Supabase SQL editor (the function takes the transaction id plus the observed sender msisdn), or use the `/admin` panel's "Confirm now" action.
 - [ ] Upgrade **Supabase to Pro** ($25/mo) the day you cross 40K monthly active users on Auth. Free tier pauses inactive projects after 7 days, so do this *before* launch traffic if anyone in another timezone needs the app online overnight.
 - [ ] **Apply all DB migrations through `019_guided_free_for_existing_text.sql`** (full list + order in [`../DEPLOYING.md`](../DEPLOYING.md)). Migration 012 ships near-real-time credit assignment (`inbound_payments` + match-on-submit) and adds the `purchases` table to the `supabase_realtime` publication; 013 adds the analytics/BI surface; 015–019 add the polished-profile normalization and Guided Mode.
