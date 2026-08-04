@@ -3,17 +3,23 @@
 // JWT from racking up paid usage.
 //
 // Two operations:
-//   - assertWithinLimit(userId, jwt, kind?): throws if user is over the daily
-//     cap, or over the per-kind cap when KIND_DAILY_CAPS has an entry for kind
-//   - logCall(userId, jwt, kind, meta?): inserts a row marking the call
+//   - reserveCall(userId, jwt, kind, cap?): ATOMICALLY checks the daily caps
+//     and claims a slot, returning the reserved ai_call_log row id. Throws
+//     RateLimitError when over cap; returns null (fail-open) if the reservation
+//     RPC is unavailable. Replaces the old read-then-write assertWithinLimit,
+//     which could not enforce a cap under concurrency — see migration 024.
+//   - logCall(userId, jwt, kind, meta?, reservationId?): records the outcome. With
+//     a reservationId it FINALIZES the row reserveCall already inserted; without
+//     one it inserts. Never both — inserting alongside a reservation would
+//     double-count every call against the cap.
 //
 // Daily window = rolling 24h, not calendar-day, so a user can't drain the
 // quota at 23:59 and again at 00:01.
 //
-// Caller pattern (audit C5): assert → run AI → log at EVERY terminal point,
-// success AND failure. All four AI endpoints (optimize, optimize-general,
-// toolkit-item, extract-resume) write exactly one ai_call_log row per attempt
-// that gets past the rate-limit gate, so failed/aborted calls still count
+// Caller pattern (audit C5): reserve → run AI → log at EVERY terminal point,
+// success AND failure. All six AI endpoints (optimize, optimize-general, toolkit,
+// toolkit-item, extract-resume, normalize-item) write exactly one ai_call_log row
+// per attempt that gets past the gate, so failed/aborted calls still count
 // toward the cap — a stolen or abusive JWT cannot spam-fail the providers to
 // drain shared quota. The row also carries cost/telemetry (provider/model/
 // tokens/cost/status/latency) when AI actually ran. Cheap input-validation
@@ -94,49 +100,53 @@ export class RateLimitError extends Error {
   }
 }
 
-const dayAgoIso = () => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-// Throws RateLimitError if the user is over the overall daily cap, or — when
-// `kind` has an entry in KIND_DAILY_CAPS — over that kind's own cap. One
-// query: the row set is small (≤ overall cap), so we count in JS rather than
-// issuing two head-count round-trips.
-export async function assertWithinLimit(
+/**
+ * Atomically check the daily caps AND claim a slot, returning the reserved
+ * ai_call_log row id to hand to logCall().
+ *
+ * This replaces the read-then-write shape of assertWithinLimit for every AI
+ * endpoint. That shape could not enforce a cap under concurrency: it SELECTed the
+ * count, and the row was only INSERTed after the provider returned, so the window
+ * between check and record was the whole provider latency — 5 to 30 seconds. With
+ * 7 rows against a cap of 8, fifty concurrent requests all read 7, all passed, and
+ * all ran AI: 57 calls against an 8/day cap. Migration 024's reserve_ai_call takes
+ * a per-user advisory lock, counts, and inserts a 'pending' row in one
+ * transaction, so request N+1 counts request N.
+ *
+ * FAILS OPEN, deliberately and only for infrastructure errors. A missing function
+ * (code shipped before the migration) or a Supabase hiccup returns null and the
+ * call proceeds — blocking every user's generation because telemetry is unwell is
+ * far worse than briefly under-enforcing a cost cap. A genuine cap rejection is a
+ * thrown RateLimitError and is never swallowed.
+ *
+ * @returns reservation id, or null when reservation was unavailable (fail-open).
+ * @throws RateLimitError when the user is genuinely over a cap.
+ */
+export async function reserveCall(
   userId: string,
   jwt: string,
-  kind?: CallKind,
-  cap: number = DEFAULT_DAILY_CAP
-): Promise<void> {
+  kind: CallKind,
+  cap: number = DEFAULT_DAILY_CAP,
+): Promise<string | null> {
   const supabase = userClient(jwt);
-  // Row volume per user per day is small (overall cap + per-kind caps), so we
-  // fetch kinds and count in JS — one round-trip covers both checks. The 200
-  // ceiling is a sanity bound far above any legitimate day's rows.
-  const { data, error } = await supabase
-    .from('ai_call_log')
-    .select('kind')
-    .eq('user_id', userId)
-    .gte('created_at', dayAgoIso())
-    .limit(200);
+  const { data, error } = await supabase.rpc('reserve_ai_call', {
+    p_kind: kind,
+    p_overall_cap: cap,
+    p_kind_cap: KIND_DAILY_CAPS[kind] ?? 0,
+    p_excluded_kinds: [...EXCLUDED_FROM_OVERALL],
+  });
 
   if (error) {
-    // Don't fail-open on the daily cap — but don't fail-closed either; if
-    // Supabase is hiccuping we'd block all users. Log + allow.
-    console.warn('[rateLimit] Could not check daily cap:', error.message);
-    return;
-  }
-
-  const rows = data ?? [];
-  const overallUsed = rows.filter((r) => !EXCLUDED_FROM_OVERALL.has(r.kind as string)).length;
-  if (overallUsed >= cap) {
-    throw new RateLimitError(overallUsed, cap);
-  }
-
-  const kindCap = kind ? KIND_DAILY_CAPS[kind] : undefined;
-  if (kind && kindCap !== undefined) {
-    const kindUsed = rows.filter((r) => r.kind === kind).length;
-    if (kindUsed >= kindCap) {
-      throw new RateLimitError(kindUsed, kindCap, kind);
+    // 'rate_limited:<used>:<cap>:<scope>' — the only error we honour.
+    const m = /rate_limited:(\d+):(\d+):(\w+)/.exec(error.message ?? '');
+    if (m) {
+      const [, used, capHit, scope] = m;
+      throw new RateLimitError(Number(used), Number(capHit), scope === 'overall' ? undefined : (scope as CallKind));
     }
+    console.warn(`[rateLimit] reserve_ai_call unavailable, proceeding without a reservation: ${error.message}`);
+    return null;
   }
+  return typeof data === 'string' ? data : null;
 }
 
 /**
@@ -152,11 +162,20 @@ function redactSecrets(text: string): string {
     .replace(/\bBearer\s+[\w.\-]{16,}/gi, 'Bearer [REDACTED]');
 }
 
+/**
+ * Record the outcome of an AI call.
+ *
+ * With a `reservationId` from reserveCall, this FINALIZES that already-inserted
+ * row — it must not insert a second one, or every call would be double-counted
+ * against the cap. Without one (fail-open path, or a legacy caller), it inserts as
+ * before.
+ */
 export async function logCall(
   userId: string,
   jwt: string,
   kind: CallKind,
-  meta?: CallMeta
+  meta?: CallMeta,
+  reservationId?: string | null,
 ): Promise<void> {
   // Telemetry is additive and must NEVER break the request — wrap everything
   // (including building the row) in a try/catch and only ever warn.
@@ -200,6 +219,33 @@ export async function logCall(
       if (meta.thoughtTokens !== undefined) row.thought_tokens = meta.thoughtTokens;
       if (meta.attemptCount !== undefined) row.attempt_count = meta.attemptCount;
     }
+    if (reservationId) {
+      // Finalize the row reserveCall already inserted. Column names, not CallMeta
+      // camelCase — finalize_ai_call extracts these keys explicitly.
+      const patch: Record<string, unknown> = {};
+      const map: Record<string, string> = {
+        provider: 'provider', model: 'model', prompt_tokens: 'prompt_tokens',
+        completion_tokens: 'completion_tokens', thought_tokens: 'thought_tokens',
+        cost_usd: 'cost_usd', status: 'status', latency_ms: 'latency_ms',
+        error_code: 'error_code', error_message: 'error_message',
+        model_attempts: 'model_attempts', attempt_count: 'attempt_count',
+      };
+      for (const key of Object.keys(map)) {
+        if (row[key] !== undefined) patch[key] = row[key];
+      }
+      // A reserved row starts as 'pending'; if nothing set a status, the call
+      // reached a terminal point without one, which is an error, not a success.
+      if (patch.status === undefined) patch.status = 'error';
+      const { error } = await supabase.rpc('finalize_ai_call', {
+        p_id: reservationId,
+        p_meta: patch,
+      });
+      if (error) {
+        console.warn('[rateLimit] Failed to finalize AI call row:', error.message);
+      }
+      return;
+    }
+
     const { error } = await supabase.from('ai_call_log').insert(row);
     if (error) {
       // Logging failures are non-fatal — call already succeeded; we'd rather

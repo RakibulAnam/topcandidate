@@ -1501,3 +1501,67 @@ language sql security definer set search_path = public as $$
   select u.id, u.email::text from auth.users u where u.id = any(p_ids);
 $$;
 revoke all on function public.admin_auth_emails(uuid[]) from public, anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Atomic AI-call reservation (migration 024)
+-- ─────────────────────────────────────────────────────────────────────────
+-- The daily caps used to be a read-then-write: count ai_call_log, then INSERT
+-- only AFTER the provider returned. The gap between the two was the full provider
+-- latency (5-30s), so a parallel burst all read the same pre-burst count and all
+-- passed. reserve_ai_call closes it by counting and inserting a 'pending' row in
+-- one advisory-locked transaction; finalize_ai_call fills in the outcome later.
+create or replace function reserve_ai_call(
+  p_kind text, p_overall_cap int, p_kind_cap int default 0, p_excluded_kinds text[] default '{}'
+) returns uuid
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_user uuid := auth.uid(); v_overall int; v_kind int; v_id uuid;
+  v_exempt boolean := p_kind = any(p_excluded_kinds);
+begin
+  if v_user is null then raise exception 'not_authenticated'; end if;
+  -- Per-user lock: without it, two concurrent transactions both read the
+  -- pre-burst count under READ COMMITTED. Released automatically at commit.
+  perform pg_advisory_xact_lock(hashtextextended(v_user::text, 0));
+  select count(*) filter (where kind <> all(p_excluded_kinds)),
+         count(*) filter (where kind = p_kind)
+    into v_overall, v_kind
+  from ai_call_log
+  where user_id = v_user and created_at >= now() - interval '24 hours';
+  if not v_exempt and v_overall >= p_overall_cap then
+    raise exception 'rate_limited:%:%:overall', v_overall, p_overall_cap;
+  end if;
+  if p_kind_cap > 0 and v_kind >= p_kind_cap then
+    raise exception 'rate_limited:%:%:%', v_kind, p_kind_cap, p_kind;
+  end if;
+  insert into ai_call_log (user_id, kind, status)
+  values (v_user, p_kind, 'pending') returning id into v_id;
+  return v_id;
+end; $$;
+
+-- A function, NOT an UPDATE policy on ai_call_log: a policy would let a user
+-- rewrite any of their own telemetry rows, destroying the audit trail the caps
+-- depend on. This can only touch the row id it is given, and only if it is theirs.
+create or replace function finalize_ai_call(p_id uuid, p_meta jsonb)
+returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update ai_call_log set
+    provider          = coalesce(p_meta->>'provider', provider),
+    model             = coalesce(p_meta->>'model', model),
+    prompt_tokens     = coalesce((p_meta->>'prompt_tokens')::int, prompt_tokens),
+    completion_tokens = coalesce((p_meta->>'completion_tokens')::int, completion_tokens),
+    thought_tokens    = coalesce((p_meta->>'thought_tokens')::int, thought_tokens),
+    cost_usd          = coalesce((p_meta->>'cost_usd')::numeric, cost_usd),
+    status            = coalesce(p_meta->>'status', status),
+    latency_ms        = coalesce((p_meta->>'latency_ms')::int, latency_ms),
+    error_code        = coalesce(p_meta->>'error_code', error_code),
+    error_message     = coalesce(p_meta->>'error_message', error_message),
+    model_attempts    = coalesce(p_meta->'model_attempts', model_attempts),
+    attempt_count     = coalesce((p_meta->>'attempt_count')::smallint, attempt_count)
+  where id = p_id and user_id = auth.uid();
+end; $$;
+
+revoke all on function reserve_ai_call(text, int, int, text[]) from public, anon;
+revoke all on function finalize_ai_call(uuid, jsonb) from public, anon;
+grant execute on function reserve_ai_call(text, int, int, text[]) to authenticated, service_role;
+grant execute on function finalize_ai_call(uuid, jsonb) to authenticated, service_role;

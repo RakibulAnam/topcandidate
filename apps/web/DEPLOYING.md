@@ -169,7 +169,7 @@ The query-string secret fallback (`?secret=...`) was removed in the 2026-05-30 a
 ## Post-deploy hardening checklist
 
 - [ ] Decide on email confirmation. The app ships with it OFF (immediate session on sign-up); only turn it on if you've tested that the UI handles the unconfirmed state.
-- [ ] All migrations applied in order through 022 (especially 008, 009, 010, 011, 013, and **021 + 022 which are security fixes** — 021 revokes public access to the analytics views, 022 restricts the `profiles` SELECT policy to own-row)
+- [ ] All migrations applied in order through 024 (especially 008, 009, 010, 011, 013, and **021 + 022 which are security fixes** — 021 revokes public access to the analytics views, 022 restricts the `profiles` SELECT policy to own-row; 024 makes the daily AI caps atomic)
 - [ ] `GEMINI_API_KEY` is on a **paid** tier, and a Cloud Console **spend cap** budget scoped to the Gemini API is in place
 - [ ] `ADMIN_API_KEY` (signing secret), `ADMIN_USERNAME`, and `ADMIN_PASSWORD_HASH`/`ADMIN_PASSWORD` all set as server env. Use a strong password — `/api/admin/login` is internet-reachable and stateless (no lockout beyond a small fixed delay)
 - [ ] Vercel security headers in place (already in `vercel.json` since 2026-05-30: HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)

@@ -28,7 +28,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { authenticate } from './_lib/auth.js';
-import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { reserveCall, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { publicAiError } from './_lib/aiErrorResponse.js';
 import { resumeOptimizer } from './_lib/aiFactory.js';
@@ -68,8 +68,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Reserved BEFORE the provider call so a parallel burst cannot overshoot the
+  // daily caps; null means reservation was unavailable and we failed open.
+  let reservation: string | null = null;
   try {
-    await assertWithinLimit(auth.userId, auth.jwt);
+    reservation = await reserveCall(auth.userId, auth.jwt, 'optimize');
   } catch (err) {
     if (err instanceof RateLimitError) {
       console.warn(`[optimize ${rid}] 429 rate-limited used=${err.used}/${err.cap}`);
@@ -111,7 +114,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // via the WHERE clause + RETURNING idiom (no race with a concurrent call).
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error(`[optimize ${rid}] 503 service-role not configured`);
-    await logCall(auth.userId, auth.jwt, 'optimize', { status: 'error' });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'optimize',
+      { status: 'error' },
+      reservation,
+    );
     res.status(503).json({ error: 'Server is not configured for credit accounting.' });
     return;
   }
@@ -130,10 +139,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // But it MUST carry an error_code: without one, v_ai_failures_daily
       // grouped these under 'unclassified' alongside real provider failures, so
       // a user running out of credits looked like the AI breaking.
-      await logCall(auth.userId, auth.jwt, 'optimize', {
-        status: 'error',
-        errorCode: 'insufficient_credits',
-      });
+      await logCall(
+        auth.userId,
+        auth.jwt,
+        'optimize',
+        { status: 'error', errorCode: 'insufficient_credits' },
+        reservation,
+      );
       res.status(402).json({
         error: 'No toolkit credits remaining. Purchase a pack to continue.',
         code: 'insufficient_credits',
@@ -188,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           error: optimizedResult.reason,
           fallbackInputText: data.targetJob.description,
         }),
+        reservation,
       );
     }
     // Core artifact failed — refund the credit so the user isn't charged for
@@ -248,6 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         fallbackInputText: data.targetJob.description,
         fallbackOutputText: optimized.summary,
       }),
+      reservation,
     );
   }
 

@@ -16,7 +16,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
-import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { reserveCall, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { publicAiError } from './_lib/aiErrorResponse.js';
 import { resumeExtractor } from './_lib/aiFactory.js';
@@ -55,8 +55,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Reserved BEFORE the provider call so a parallel burst cannot overshoot the
+  // daily caps; null means reservation was unavailable and we failed open.
+  let reservation: string | null = null;
   try {
-    await assertWithinLimit(auth.userId, auth.jwt);
+    reservation = await reserveCall(auth.userId, auth.jwt, 'extract_resume');
   } catch (err) {
     if (err instanceof RateLimitError) {
       res.status(429).json({ error: err.message, used: err.used, cap: err.cap, code: 'rate_limited' });
@@ -84,6 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth.jwt,
       'extract_resume',
       buildCallMeta({ usage, latencyMs, fallbackOutputText: JSON.stringify(result ?? '') }),
+      reservation,
     );
     res.status(200).json({ result });
   } catch (err) {
@@ -94,6 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth.jwt,
       'extract_resume',
       buildCallMeta({ usage, latencyMs, error: err }),
+      reservation,
     );
     res.status(502).json(publicAiError(err));
   }

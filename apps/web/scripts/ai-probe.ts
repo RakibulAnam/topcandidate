@@ -833,8 +833,12 @@ Go, Python, PostgreSQL, Kafka, Redis, Docker, Kubernetes`;
     } },
     { name: 'interview (INTERVIEW_SCHEMA, bilingual)', run: async (u) => {
       const r = await new GeminiInterviewQuestionsGenerator(key).generate(data, u);
-      const bn = r.map((q) => `${q.questionBn ?? ''} ${q.answerStrategyBn ?? ''}`).join(' ');
-      return `${r.length} Qs, latinRatioBN=${bnRatio(bn).toFixed(3)}`;
+      const bn = [
+        ...r.questions.map((q) => `${q.questionBn ?? ''} ${q.answerStrategyBn ?? ''}`),
+        ...r.prepTopics.map((t) => `${t.topicBn ?? ''} ${t.howToPrepareBn ?? ''}`),
+      ].join(' ');
+      if (r.questions.length === 0) throw new Error('no interview questions');
+      return `${r.questions.length} Qs, ${r.prepTopics.length} prep topics, latinRatioBN=${bnRatio(bn).toFixed(3)}`;
     } },
   ];
 

@@ -20,7 +20,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
-import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { reserveCall, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { publicAiError } from './_lib/aiErrorResponse.js';
 import { profileNormalizer } from './_lib/aiFactory.js';
@@ -64,8 +64,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Reserved BEFORE the provider call so a parallel burst cannot overshoot the
+  // daily caps; null means reservation was unavailable and we failed open.
+  let reservation: string | null = null;
   try {
-    await assertWithinLimit(auth.userId, auth.jwt, 'normalize');
+    reservation = await reserveCall(auth.userId, auth.jwt, 'normalize');
   } catch (err) {
     if (err instanceof RateLimitError) {
       console.warn(`[normalize ${rid}] 429 rate-limited used=${err.used}/${err.cap}`);
@@ -85,6 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth.jwt,
       'normalize',
       buildCallMeta({ usage, latencyMs, fallbackInputText: text, fallbackOutputText: JSON.stringify(result) }),
+      reservation,
     );
     console.info(`[normalize ${rid}] 200 total=${Date.now() - t0}ms bullets=${result.bullets.length} gaps=${result.gaps.length}`);
     res.status(200).json({ result });
@@ -96,6 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth.jwt,
       'normalize',
       buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: text }),
+      reservation,
     );
     console.error(`[normalize ${rid}] 502 total=${Date.now() - t0}ms: ${msg}`);
     res.status(502).json(publicAiError(err));
