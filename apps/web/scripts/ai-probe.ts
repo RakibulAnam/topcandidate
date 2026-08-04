@@ -220,7 +220,7 @@ const fmtAttempts = (a: GeminiAttempt[]) =>
 // deterministic — and unlike a live RPM test it keeps working on a paid tier,
 // where 300 RPM makes the throttle impractical to provoke.
 import { publicAiError } from '../api/_lib/aiErrorResponse.js';
-import { ResumeFabricationError, dropBannedOpenerBullets } from '../src/infrastructure/ai/prompts/resumeOptimizerPrompts.js';
+import { ResumeFabricationError, dropBannedOpenerBullets, filterFabricatedSkills } from '../src/infrastructure/ai/prompts/resumeOptimizerPrompts.js';
 import { trimToLinkedInLimit } from '../src/infrastructure/ai/prompts/toolkitPrompts.js';
 
 const RECORDED: Array<{ name: string; status: number; body: string; expect: string; expectDelayMs?: number }> = [
@@ -445,14 +445,64 @@ function bannedOpenerRegression(): boolean {
   return ok;
 }
 
+
+// The skills filter must block CHECKABLE ASSETS and keep COMPETENCY LABELS.
+// Before this split it required the label itself to appear in the evidence, which
+// deleted 13 skills from a mobile dev, 11 from a nurse and ALL 8 from an
+// accountant (empty skills section shipped). Offline — no API calls.
+function skillsFilterRegression(): boolean {
+  console.log('\n=== SKILLS FILTER: assets vs competency labels (offline) ===\n');
+  const candidate: any = {
+    personalInfo: { fullName: 'T' }, summary: '', userType: 'experienced',
+    skills: ['Excel'],
+    experience: [{ id: 'e1', company: 'Rahim Textiles', role: 'Junior Accountant',
+      rawDescription: 'proti mash e bikroy ar khoroch er hisab excel e banai. bank er statement er shathe amader khata milai. supplier der bill check kori.' }],
+    projects: [], education: [], certifications: [], languages: [], awards: [], publications: [], extracurriculars: [], affiliations: [],
+  };
+  const parsed: any = {
+    summary: '', experience: [{ id: 'e1', refinedBullets: ['Reconciled bank statements.'] }], projects: [], extracurriculars: [],
+    skills: [
+      'Bank Reconciliation',      // competency label, ungrounded  -> KEEP
+      'Accounts Payable',         // competency label, ungrounded  -> KEEP
+      'MS Excel',                 // asset named informally ("excel") -> KEEP
+      'Tally',                    // asset never named             -> DELETE
+      'SAP',                      // asset never named             -> DELETE
+      'CPA Certification',        // credential                    -> DELETE
+      'Kubernetes',               // asset never named             -> DELETE
+    ],
+    skillCategories: [{ category: 'Tools', items: ['MS Excel', 'Tally'] }],
+    skillEvidence: [{ skill: 'Bank Reconciliation', quote: 'bank er statement er shathe amader khata milai' }],
+  };
+  const { kept, fabricated } = filterFabricatedSkills(parsed, candidate);
+  const has = (a: string[], x: string) => a.some((v) => v.toLowerCase() === x.toLowerCase());
+  const checks: Array<[string, boolean]> = [
+    ['keeps a grounded competency label', has(kept, 'Bank Reconciliation')],
+    ['keeps an UNgrounded competency label (the reversal)', has(kept, 'Accounts Payable')],
+    ['keeps an asset the user named informally ("excel" -> "MS Excel")', has(kept, 'MS Excel')],
+    ['deletes a never-named tool (Tally)', has(fabricated, 'Tally')],
+    ['deletes a never-named platform (SAP)', has(fabricated, 'SAP')],
+    ['deletes a credential claim', has(fabricated, 'CPA Certification')],
+    ['deletes a never-named technology (Kubernetes)', has(fabricated, 'Kubernetes')],
+    ['prunes deleted items out of skillCategories', !JSON.stringify(parsed.skillCategories).includes('Tally')],
+    ['strips transient skillEvidence from the response', parsed.skillEvidence === undefined],
+  ];
+  let ok = true;
+  for (const [name, pass] of checks) { if (!pass) ok = false; console.log(`  ${pass ? '✓' : '✗'} ${name}`); }
+  console.log(`\n  kept: ${kept.join(', ')}`);
+  console.log(`  deleted: ${fabricated.join(', ')}`);
+  console.log(`\n  ${ok ? 'assets blocked, competencies preserved' : 'REGRESSION DETECTED'}`);
+  return ok;
+}
+
 // ── selftest: prove the error taxonomy is real ──────────────────────────────
 async function selftest(client: GeminiClient) {
   const regressionOk = classifierRegression();
   const publicOk = publicErrorRegression();
   const trimOk = linkedInTrimRegression();
   const openerOk = bannedOpenerRegression();
+  const skillsOk = skillsFilterRegression();
   console.log('\n=== SELFTEST: error taxonomy + fallback chain (live) ===\n');
-  if (!regressionOk || !publicOk || !trimOk || !openerOk) process.exitCode = 1;
+  if (!regressionOk || !publicOk || !trimOk || !openerOk || !skillsOk) process.exitCode = 1;
   // `expect` is ASSERTED, not decorative: 'ok' means the call must succeed,
   // anything else is the GeminiErrorCode it must produce.
   const cases: Array<{ name: string; expect: string; run: () => Promise<unknown> }> = [
