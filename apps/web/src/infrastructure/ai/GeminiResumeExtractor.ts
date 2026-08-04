@@ -29,7 +29,7 @@
 
 import type { Part } from '@google/genai';
 import { ExtractedProfileData, IResumeExtractor } from '../../domain/usecases/ExtractResumeUseCase.js';
-import type { UsageSink } from './usage.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import { EXTRACTOR_PROMPT, EXTRACTOR_JSON_SHAPE, EXTRACTOR_SCHEMA } from './prompts/extractorPrompts.js';
 
@@ -64,6 +64,9 @@ export class GeminiResumeExtractor implements IResumeExtractor {
       // PerProjectPerModel, so rotating escapes the throttle immediately
       // instead of waiting out Google's advised ~53s window.
       const chain = rotateModels(EXTRACTOR_MODELS, attempt);
+      // Clear last attempt's token fields so a failure row can't inherit them —
+      // see resetUsageAttempt.
+      resetUsageAttempt(usage);
       try {
         const result = await this.client.generate(
           {

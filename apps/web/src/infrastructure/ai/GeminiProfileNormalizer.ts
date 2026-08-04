@@ -31,7 +31,7 @@ import {
   IProfileItemNormalizer,
   ProfileItemContext,
 } from '../../domain/usecases/NormalizeProfileItemUseCase.js';
-import type { UsageSink } from './usage.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   NORMALIZER_SYSTEM_INSTRUCTION,
@@ -61,6 +61,9 @@ export class GeminiProfileNormalizer implements IProfileItemNormalizer {
       // PerProjectPerModel, so rotating escapes the throttle immediately
       // instead of waiting out Google's advised ~53s window.
       const chain = rotateModels(NORMALIZER_MODELS, attempt);
+      // Clear last attempt's token fields so a failure row can't inherit them —
+      // see resetUsageAttempt.
+      resetUsageAttempt(usage);
       try {
         const result = await this.client.generate(
           {

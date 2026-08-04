@@ -36,7 +36,7 @@ import {
   InterviewQuestionCategory,
 } from '../../domain/entities/Resume.js';
 import { IInterviewQuestionsGenerator } from '../../domain/usecases/GenerateInterviewQuestionsUseCase.js';
-import type { UsageSink } from './usage.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   INTERVIEW_SYSTEM_INSTRUCTION,
@@ -73,6 +73,9 @@ export class GeminiInterviewQuestionsGenerator implements IInterviewQuestionsGen
       // PerProjectPerModel, so rotating escapes the throttle immediately
       // instead of waiting out Google's advised ~53s window.
       const chain = rotateModels(MODELS, attempt);
+      // Clear last attempt's token fields so a failure row can't inherit them —
+      // see resetUsageAttempt.
+      resetUsageAttempt(usage);
       try {
         const result = await this.client.generate(
           {

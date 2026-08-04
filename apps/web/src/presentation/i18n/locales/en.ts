@@ -617,6 +617,22 @@ export const en = {
     secRefsLabel: 'References',
     secRefsHint: "Common on Bangladeshi CVs (banks, conglomerates, gov't). Skip for most international resumes.",
   },
+  // Server-side AI failures, keyed by the stable `code` in the JSON body
+  // (api/_lib/aiErrorResponse.ts). The server deliberately sends a CODE rather
+  // than prose: it used to return the provider's raw error text, which meant a
+  // Bengali user saw an English JSON blob from Google. Localize here, never
+  // there.
+  apiError: {
+    rateLimited: "You've hit today's generation limit ({used}/{cap}). It resets about 24 hours after your first one today.",
+    rateLimitedNoCount: "You've hit today's generation limit. It resets about 24 hours after your first one today.",
+    providerBusy: 'Our AI service is busy right now. Please wait a minute and try again.',
+    providerTimeout: 'The AI took too long to respond. Please try again.',
+    providerDown: "Our AI service is temporarily unavailable. This is on our side — please try again in a few minutes.",
+    badOutput: 'The AI returned an incomplete result. Please try again.',
+    blocked: "The AI wouldn't process this content. Try rephrasing the job description.",
+    guardRejected: "We couldn't produce a version we're confident in — it didn't hold to your real experience. Please try again.",
+    generationFailed: "Something went wrong on our side. Please try again.",
+  },
   builder: {
     serviceNotInit: 'Service not initialized. Please refresh the page.',
     generalRegenSuccess: 'General Resume regenerated successfully!',

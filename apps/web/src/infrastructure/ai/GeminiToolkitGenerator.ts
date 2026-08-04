@@ -46,12 +46,12 @@ import {
   ToolkitErrors,
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
-import type { UsageSink } from './usage.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   buildToolkitSystemInstruction,
   buildToolkitUserPrompt,
-  LINKEDIN_MAX,
+  trimToLinkedInLimit,
   TOOLKIT_SCHEMA,
 } from './prompts/toolkitPrompts.js';
 import {
@@ -116,6 +116,9 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       // PerProjectPerModel, so rotating escapes the throttle immediately
       // instead of waiting out Google's advised ~53s window.
       const chain = rotateModels(TOOLKIT_MODELS, attempt);
+      // Clear last attempt's token fields so a failure row can't inherit them —
+      // see resetUsageAttempt.
+      resetUsageAttempt(usage);
       try {
         const result = await this.client.generate(
           {
@@ -210,13 +213,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
         .replace(/\*+$/, '')
         .trim();
       if (!linkedInMessage) throw new Error('LinkedIn note is empty');
-      if (linkedInMessage.length > LINKEDIN_MAX) {
-        const slice = linkedInMessage.slice(0, LINKEDIN_MAX);
-        const lastPeriod = slice.lastIndexOf('.');
-        const lastSpace = slice.lastIndexOf(' ');
-        const cut = lastPeriod > LINKEDIN_MAX * 0.6 ? lastPeriod + 1 : lastSpace;
-        linkedInMessage = (cut > 0 ? slice.slice(0, cut) : slice).trim();
-      }
+      linkedInMessage = trimToLinkedInLimit(linkedInMessage);
       const fabricated = detectFabricatedTokens(linkedInMessage, pitchEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
       assertOutreachSpecificity(linkedInMessage, data, 'either');

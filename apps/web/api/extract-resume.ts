@@ -18,6 +18,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { buildCallMeta } from './_lib/aiTelemetry.js';
+import { publicAiError } from './_lib/aiErrorResponse.js';
 import { resumeExtractor } from './_lib/aiFactory.js';
 import type { UsageSink } from '../src/infrastructure/ai/usage';
 
@@ -58,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await assertWithinLimit(auth.userId, auth.jwt);
   } catch (err) {
     if (err instanceof RateLimitError) {
-      res.status(429).json({ error: err.message, used: err.used, cap: err.cap });
+      res.status(429).json({ error: err.message, used: err.used, cap: err.cap, code: 'rate_limited' });
       return;
     }
     throw err;
@@ -94,6 +95,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'extract_resume',
       buildCallMeta({ usage, latencyMs, error: err }),
     );
-    res.status(502).json({ error: msg });
+    res.status(502).json(publicAiError(err));
   }
 }

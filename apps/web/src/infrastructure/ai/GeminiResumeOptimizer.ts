@@ -45,7 +45,7 @@
 
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
-import type { UsageSink } from './usage.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   buildSystemInstruction,
@@ -54,6 +54,7 @@ import {
   normalizeSkills,
   filterFabricatedSkills,
   reportFabricatedProse,
+  assertProseMatchesStrippedSkills,
   reorderLeadBulletByJDFit,
   reorderProjectsByJDFit,
   enforceBulletDensity,
@@ -92,6 +93,9 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
         // PerProjectPerModel, so rotating escapes the throttle immediately
         // instead of waiting out Google's advised ~53s window.
         const chain = rotateModels(OPTIMIZER_MODELS, attempt);
+        // Clear last attempt's token fields so a failure row can't inherit them —
+        // see resetUsageAttempt.
+        resetUsageAttempt(usage);
         try {
           const result = await this.client.generate(
             {
@@ -124,12 +128,17 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
           if (fabResult.fabricated.length) {
             console.warn(`[gemini] stripped ${fabResult.fabricated.length} fabricated skill(s):`, fabResult.fabricated.join(', '));
           }
-          // Visibility only — see reportFabricatedProse for why this warns
-          // instead of throwing on the paid path.
+          // Visibility only — see reportFabricatedProse for why a prose-only hit
+          // warns instead of throwing on the paid path.
           const proseFab = reportFabricatedProse(parsed, data);
           if (proseFab.length) {
             console.warn(`[gemini] UNVERIFIED token(s) in résumé prose (not blocked):`, proseFab.join(', '));
           }
+          // ...but a token stripped from `skills` that survives in a bullet is a
+          // self-contradicting document, and that one does throw. See
+          // assertProseMatchesStrippedSkills for why the intersection is the
+          // confident signal and a prose-only hit is not.
+          assertProseMatchesStrippedSkills(parsed, data, fabResult.fabricated);
           reorderLeadBulletByJDFit(parsed, data.targetJob.description);
           reorderProjectsByJDFit(parsed, data.targetJob.description);
           enforceBulletDensity(parsed, data.targetJob.description);

@@ -32,7 +32,7 @@ import { ResumeData } from '../../domain/entities/Resume.js';
 import { ILinkedInMessageGenerator } from '../../domain/usecases/GenerateLinkedInMessageUseCase.js';
 import type { UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS } from './GeminiClient.js';
-import { LINKEDIN_SYSTEM_INSTRUCTION, buildLinkedInUserPrompt, LINKEDIN_MAX } from './prompts/toolkitPrompts.js';
+import { LINKEDIN_SYSTEM_INSTRUCTION, buildLinkedInUserPrompt, trimToLinkedInLimit } from './prompts/toolkitPrompts.js';
 import { assertNoFabricatedTools, assertOutreachSpecificity, classifyFitMode } from './prompts/toolkitContext.js';
 
 const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
@@ -79,13 +79,7 @@ export class GeminiLinkedInMessageGenerator implements ILinkedInMessageGenerator
         .replace(/\*+$/, '')
         .trim();
 
-      if (cleaned.length > LINKEDIN_MAX) {
-        const slice = cleaned.slice(0, LINKEDIN_MAX);
-        const lastPeriod = slice.lastIndexOf('.');
-        const lastSpace = slice.lastIndexOf(' ');
-        const cut = lastPeriod > LINKEDIN_MAX * 0.6 ? lastPeriod + 1 : lastSpace;
-        cleaned = (cut > 0 ? slice.slice(0, cut) : slice).trim();
-      }
+      cleaned = trimToLinkedInLimit(cleaned);
 
       assertNoFabricatedTools(cleaned, data, { allowJD: fit.mode === 'stretch' });
       assertOutreachSpecificity(cleaned, data, 'either');

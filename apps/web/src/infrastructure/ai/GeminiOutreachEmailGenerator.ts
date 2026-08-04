@@ -35,7 +35,7 @@
 
 import { ResumeData, OutreachEmail } from '../../domain/entities/Resume.js';
 import { IOutreachEmailGenerator } from '../../domain/usecases/GenerateOutreachEmailUseCase.js';
-import type { UsageSink } from './usage.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   OUTREACH_SYSTEM_INSTRUCTION,
@@ -64,6 +64,9 @@ export class GeminiOutreachEmailGenerator implements IOutreachEmailGenerator {
       // PerProjectPerModel, so rotating escapes the throttle immediately
       // instead of waiting out Google's advised ~53s window.
       const chain = rotateModels(MODELS, attempt);
+      // Clear last attempt's token fields so a failure row can't inherit them —
+      // see resetUsageAttempt.
+      resetUsageAttempt(usage);
       try {
         const result = await this.client.generate(
           {

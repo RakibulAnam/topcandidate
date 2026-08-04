@@ -95,17 +95,37 @@ export function buildCallMeta(input: TelemetryInput): CallMeta {
     // ToolkitSpecificityError, because those read "output never names target
     // company ..." and "output is generic — ...". That is the same trap as
     // matching Google's 429 prose: the wording is not the contract, the type is.
-    const name = error instanceof Error ? error.name : '';
-    const isGuard =
-      name === 'ToolkitFabricationError' ||
-      name === 'ToolkitSpecificityError' ||
-      name === 'ToolkitAnchorError' ||
-      /^Toolkit\w*Error$/.test(name) ||
-      // Plain-Error guards raised inline by the generators for an empty slot.
-      /\bis empty\b|no interview questions/i.test(raw);
-    meta.errorCode = isGuard ? 'guard_rejected' : code;
+    meta.errorCode = isGuardError(error) ? 'guard_rejected' : code;
     meta.errorMessage = raw;
   }
 
   return meta;
+}
+
+/**
+ * True when the provider SUCCEEDED and our own quality guards refused the
+ * content. Shared with aiErrorResponse.publicAiErrorCode so the telemetry code
+ * and the HTTP code can never disagree about what a guard rejection is.
+ *
+ * Classify on the ERROR CLASS, not the message. An earlier version matched prose
+ * (/fabricat|not specific enough|.../) and silently missed every
+ * ToolkitSpecificityError, because those read "output never names target company
+ * ..." and "output is generic — ...". That is the same trap as matching Google's
+ * 429 prose: the wording is not the contract, the type is.
+ */
+export function isGuardError(error: unknown): boolean {
+  const name = error instanceof Error ? error.name : '';
+  if (
+    name === 'ToolkitFabricationError' ||
+    name === 'ToolkitSpecificityError' ||
+    name === 'ToolkitAnchorError' ||
+    /^Toolkit\w*Error$/.test(name) ||
+    // Same class of guard on the optimizer (paid) path — a token stripped from
+    // `skills` that survived in a bullet. Named differently because it is not a
+    // toolkit artifact, so the /^Toolkit/ pattern above does not reach it.
+    name === 'ResumeFabricationError'
+  ) return true;
+  // Plain-Error guards raised inline by the generators for an empty slot.
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  return /\bis empty\b|no interview questions/i.test(raw);
 }

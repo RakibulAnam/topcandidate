@@ -219,6 +219,10 @@ const fmtAttempts = (a: GeminiAttempt[]) =>
 // quota_exhausted. Only the structured quotaId distinguishes them. Free, offline,
 // deterministic — and unlike a live RPM test it keeps working on a paid tier,
 // where 300 RPM makes the throttle impractical to provoke.
+import { publicAiError } from '../api/_lib/aiErrorResponse.js';
+import { ResumeFabricationError } from '../src/infrastructure/ai/prompts/resumeOptimizerPrompts.js';
+import { trimToLinkedInLimit } from '../src/infrastructure/ai/prompts/toolkitPrompts.js';
+
 const RECORDED: Array<{ name: string; status: number; body: string; expect: string; expectDelayMs?: number }> = [
   {
     name: '429 per-MINUTE throttle',
@@ -316,11 +320,94 @@ function classifierRegression(): boolean {
   return allOk;
 }
 
+
+// The SAME recorded payloads, run through the browser-facing mapper. This is the
+// regression that matters for users rather than for telemetry: every one of these
+// used to reach a toast as raw provider JSON, so the assertion is both "the code
+// is right" AND "no provider text survives".
+const PUBLIC_EXPECT: Record<string, string> = {
+  rate_limit: 'provider_busy',
+  quota_exhausted: 'provider_busy',
+  timeout: 'provider_timeout',
+  auth: 'provider_down',
+  billing_required: 'provider_down',
+  model_unavailable: 'provider_down',
+  upstream_error: 'provider_down',
+  json_parse: 'bad_output',
+  schema_invalid: 'bad_output',
+  truncated: 'bad_output',
+  empty_response: 'bad_output',
+  safety_blocked: 'blocked',
+  unknown: 'generation_failed',
+};
+
+function publicErrorRegression(): boolean {
+  console.log('\n=== PUBLIC ERROR BODY (recorded payloads, offline) ===\n');
+  let ok = true;
+  const leakPatterns = [/gemini-/i, /"error"\s*:/, /RESOURCE_EXHAUSTED/, /googleapis/i, /quotaId/i, /API[_ ]?key/i];
+  for (const c of RECORDED) {
+    const err = Object.assign(new Error(c.body), { status: c.status, name: 'ApiError' });
+    const body = publicAiError(err);
+    const wantCode = PUBLIC_EXPECT[c.expect] ?? 'generation_failed';
+    const codeOk = body.code === wantCode;
+    const leak = leakPatterns.find((re) => re.test(body.error));
+    if (!codeOk || leak) ok = false;
+    console.log(
+      `  ${codeOk && !leak ? '✓' : '✗'} ${c.name.padEnd(54)} -> ${body.code}` +
+      `${codeOk ? '' : ` (EXPECTED ${wantCode})`}${leak ? `  LEAKED /${leak.source}/` : ''}`,
+    );
+  }
+  // Our own guards must be distinguishable from a provider failure, or the client
+  // tells a user to "wait a minute" when the real problem is the content.
+  const guard = publicAiError(new ResumeFabricationError(['Kubernetes']));
+  const guardOk = guard.code === 'guard_rejected';
+  console.log(`  ${guardOk ? '✓' : '✗'} ${'ResumeFabricationError -> guard_rejected'.padEnd(54)} -> ${guard.code}`);
+  const tk = publicAiError(Object.assign(new Error('x'), { name: 'ToolkitSpecificityError' }));
+  const tkOk = tk.code === 'guard_rejected';
+  console.log(`  ${tkOk ? '✓' : '✗'} ${'ToolkitSpecificityError -> guard_rejected'.padEnd(54)} -> ${tk.code}`);
+  const allOk = ok && guardOk && tkOk;
+  console.log(`\n  ${allOk ? 'no provider text reaches the browser' : 'REGRESSION DETECTED'}`);
+  return allOk;
+}
+
+// LinkedIn note truncation: the old cut used lastIndexOf('.'), which cannot tell a
+// sentence end from a decimal point, so a strong metric late in the note produced
+// "...down to 1." See trimToLinkedInLimit.
+function linkedInTrimRegression(): boolean {
+  console.log('\n=== LINKEDIN TRIM (offline) ===\n');
+  const cases: Array<{ name: string; input: string }> = [
+    { name: 'decimal metric past the 60% mark', input: 'Hi Sarah, I saw the Senior Backend Engineer role at Pathao and wanted to reach out directly rather than through the portal. At Bikroy I owned the checkout service end to end and cut p95 checkout latency from 4.2s down to 1.1s across two quarters while order volume tripled, which is exactly the reliability work your posting describes.' },
+    { name: 'version number past the 60% mark', input: 'Hi Sarah, I noticed the Platform Engineer opening at Pathao. At Bikroy I migrated our fleet from Kubernetes 1.24 to 1.29 and rebuilt the deploy pipeline, cutting release time from ninety minutes to under twelve, which lines up closely with the platform reliability work your posting describes today.' },
+    { name: 'no sentence punctuation at all', input: 'Hi Sarah I saw the Senior Backend Engineer role at Pathao and wanted to reach out directly rather than through the portal because at Bikroy I owned the checkout service end to end and cut p95 checkout latency across two quarters while order volume tripled which is the reliability work you describe' },
+  ];
+  let ok = true;
+  for (const c of cases) {
+    const out = trimToLinkedInLimit(c.input);
+    const midNumber = /\d\.$/.test(out);
+    const noTerminator = !/[.!?…]$/.test(out);
+    const overLimit = out.length > 280;
+    const good = !midNumber && !noTerminator && !overLimit;
+    if (!good) ok = false;
+    console.log(`  ${good ? '✓' : '✗'} ${c.name.padEnd(54)} ${out.length}ch  …${out.slice(-34)}`);
+    if (midNumber) console.log('      ✗ ends mid-number');
+    if (noTerminator) console.log('      ✗ no terminal punctuation');
+    if (overLimit) console.log('      ✗ over 280');
+  }
+  const short = 'Hi Sarah, I saw the role at Pathao. Would love to connect.';
+  const untouched = trimToLinkedInLimit(short) === short;
+  if (!untouched) ok = false;
+  console.log(`  ${untouched ? '✓' : '✗'} ${'under the limit is returned untouched'.padEnd(54)}`);
+  console.log(`\n  ${ok ? 'no broken notes produced' : 'REGRESSION DETECTED'}`);
+  return ok;
+}
+
 // ── selftest: prove the error taxonomy is real ──────────────────────────────
 async function selftest(client: GeminiClient) {
   const regressionOk = classifierRegression();
+  const publicOk = publicErrorRegression();
+  const trimOk = linkedInTrimRegression();
   console.log('\n=== SELFTEST: error taxonomy + fallback chain (live) ===\n');
-  if (!regressionOk) process.exitCode = 1;
+  if (!regressionOk || !publicOk || !trimOk) process.exitCode = 1;
   // `expect` is ASSERTED, not decorative: 'ok' means the call must succeed,
   // anything else is the GeminiErrorCode it must produce.
   const cases: Array<{ name: string; expect: string; run: () => Promise<unknown> }> = [

@@ -12,6 +12,7 @@ import { Navbar } from './components/Layout/Navbar';
 import { PurchaseModal } from './components/PurchaseModal';
 import { profileRepository } from '../infrastructure/config/dependencies';
 import { ApiCallError } from '../infrastructure/ai/proxy/ProxyClients';
+import { apiErrorMessage, isRetryPointless } from './i18n/apiErrorMessage.js';
 import { useT } from './i18n/LocaleContext';
 
 
@@ -41,6 +42,12 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const [resumeData, setResumeData] = useState<ResumeData>(initialData);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
+  // Localized replacement copy for the full-screen error panel. The panel used to
+  // render a HARDCODED body ("Your credit was not charged. Give it another
+  // try…") while `generationError` held the real reason and was used only as a
+  // boolean — so a user who hit the daily cap was told to try again, next to a
+  // Retry button that could only fail. Null = keep the default copy.
+  const [generationErrorBody, setGenerationErrorBody] = useState<string | null>(null);
 
   // Toolkit credits — null while loading, integer once fetched. We fetch on
   // mount and after every purchase so the user always sees a fresh balance
@@ -271,6 +278,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
 
     setIsGenerating(true);
     setGenerationError(null);
+      setGenerationErrorBody(null);
     try {
       // Strip selected sections that have no content so they never produce an
       // empty header in the generated resume.
@@ -407,6 +415,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`[builder] generation failed name=${errName} status=${errStatus ?? '-'} code=${errCode ?? '-'} msg="${errMsg}"`);
       setGenerationError(errMsg);
+      const localized = apiErrorMessage(err, t);
+      setGenerationErrorBody(localized);
       // Server says no credits left — open the purchase modal instead of
       // showing an error. Covers the race where the local count was stale
       // (e.g. user bought credits in another tab and they ran out, or the
@@ -436,6 +446,19 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
             },
           },
         );
+      } else if (localized) {
+        // A recognized server failure: show WHY, localized. Offer Retry only when
+        // retrying can actually succeed — on a daily-cap 429 every press is a
+        // guaranteed rejection, so the button is removed rather than lying.
+        toast.error(localized, {
+          duration: 12000,
+          ...(isRetryPointless(err) ? {} : {
+            action: {
+              label: t('builder.retryCta'),
+              onClick: () => { void handleGenerate(opts); },
+            },
+          }),
+        });
       } else {
         toast.error(t('builder.optimizeFailed'), {
           duration: 10000,
@@ -548,7 +571,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               <AlertTriangle className="text-red-500" size={26} />
             </div>
             <h1 className="font-display text-2xl font-semibold text-brand-700">{t('builder.generationErrorTitle')}</h1>
-            <p className="mt-2 text-[15px] leading-relaxed text-charcoal-500">{t('builder.generationErrorBody')}</p>
+            <p className="mt-2 text-[15px] leading-relaxed text-charcoal-500">{generationErrorBody ?? t('builder.generationErrorBody')}</p>
             <div className="mt-6 flex items-center justify-center gap-3">
               <button
                 type="button"

@@ -18,6 +18,60 @@ import type { ResumeData } from '../../../domain/entities/Resume.js';
 // prompt (as a stated limit) and the generator's post-validation truncation.
 export const LINKEDIN_MAX = 280;
 
+/**
+ * Trim an over-long LinkedIn note to LINKEDIN_MAX without publishing a broken
+ * sentence. Shared by the combined toolkit generator and the single-artifact
+ * LinkedIn generator, which previously carried two identical copies of this.
+ *
+ * The bug this replaces: the old version took `slice.lastIndexOf('.')` and cut
+ * there if it sat past 60% of the limit. `lastIndexOf` cannot tell a
+ * sentence-ending period from a DECIMAL POINT, and a metric late in the note is
+ * exactly where a period tends to land. A real 335-char note ending
+ * "...cut p95 checkout latency from 4.2s down to 1.1s across two quarters..."
+ * has its only sentence period at index 121 (below the 168 threshold) and the
+ * decimal of "1.1s" at 222 — so 222 won and the user was handed a note ending
+ * "...from 4.2s down to 1." The stronger the candidate's metrics, the more
+ * likely they got a truncated one.
+ *
+ * A period is a sentence end here only when the NEXT character is whitespace or
+ * the text ends. That is checked against the ORIGINAL string, not the window:
+ * were it checked against the window, a boundary falling immediately after a
+ * decimal point would still look terminal.
+ */
+export function trimToLinkedInLimit(text: string, max: number = LINKEDIN_MAX): string {
+  if (text.length <= max) return text;
+  const window = text.slice(0, max);
+
+  for (let i = window.length - 1; i >= 0; i--) {
+    if (window[i] !== '.' && window[i] !== '!' && window[i] !== '?') continue;
+    const next = text[i + 1];
+    if (next !== undefined && !/\s/.test(next)) continue; // decimal, version, URL
+    // Only accept a sentence end that keeps most of the note. Below that we'd
+    // throw away more than we keep, so a word-boundary cut reads better.
+    if (i >= max * 0.6) return window.slice(0, i + 1).trim();
+    break;
+  }
+
+  // No usable sentence end: cut at the last word boundary — never mid-word —
+  // drop a dangling connector, and mark the truncation so the note doesn't read
+  // as if the candidate simply stopped typing.
+  const lastSpace = window.lastIndexOf(' ');
+  if (lastSpace <= 0) return window.trim();
+  let body = window.slice(0, lastSpace).trim();
+  // Drop trailing punctuation and any dangling function word, so the note ends
+  // on content ("…order volume tripled…") rather than mid-grammar
+  // ("…order volume tripled, which…"). Repeat: "and of the" can stack.
+  for (let i = 0; i < 4; i++) {
+    const next = body
+      .replace(/[,;:—–-]+$/, '')
+      .replace(/\s+(?:which|that|and|but|so|because|while|when|as|to|for|of|in|on|at|with|from|by|the|a|an|my|our|their|its|this|these|is|are|was|were|be|been|has|have|had|will|would|can|could)$/i, '')
+      .trim();
+    if (next === body) break;
+    body = next;
+  }
+  return body + '…';
+}
+
 function stretchSystemBlock(): string {
   return `STRETCH MODE — CAREER SWITCH FRAMING
 This application is a stretch: the candidate's evidence does NOT closely match the JD's

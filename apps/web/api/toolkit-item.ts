@@ -11,6 +11,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
 import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { buildCallMeta } from './_lib/aiTelemetry.js';
+import { publicAiError } from './_lib/aiErrorResponse.js';
 import {
   coverLetterGenerator,
   outreachEmailGenerator,
@@ -44,6 +45,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Missing kind or resume data' });
     return;
   }
+  // 503 BEFORE the rate-limit gate, matching every sibling AI endpoint
+  // (optimize 66/71, optimize-general 33/38, toolkit 49/54, extract-resume
+  // 34/58, normalize-item 46/67). This endpoint used to be the only one that
+  // checked its generator INSIDE runItem — i.e. after the gate — so a
+  // deployment with GEMINI_API_KEY unset spent one of the caller's 8 daily
+  // toolkit_item slots to tell them the server is misconfigured. A config
+  // problem must never be billed to the user's quota.
+  if (!generatorFor(kind)) {
+    console.error(`[toolkit-item ${rid}] 503 no AI provider configured kind=${kind}`);
+    res.status(503).json({ error: 'No AI provider configured on server' });
+    return;
+  }
+
   console.info(`[toolkit-item ${rid}] start user=${auth.userId.slice(0, 8)} kind=${kind}`);
 
   try {
@@ -55,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err) {
     if (err instanceof RateLimitError) {
       console.warn(`[toolkit-item ${rid}] 429 rate-limited used=${err.used}/${err.cap}`);
-      res.status(429).json({ error: err.message, used: err.used, cap: err.cap });
+      res.status(429).json({ error: err.message, used: err.used, cap: err.cap, code: 'rate_limited' });
       return;
     }
     throw err;
@@ -96,26 +110,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: data.targetJob.description }),
     );
     console.error(`[toolkit-item ${rid}] 502 kind=${kind} total=${Date.now() - t0}ms: ${msg}`);
-    res.status(502).json({ error: msg });
+    res.status(502).json(publicAiError(err));
+  }
+}
+
+// One place that maps a kind to its generator, so the pre-gate 503 check above
+// and runItem below can never disagree about what "configured" means.
+function generatorFor(kind: Kind) {
+  switch (kind) {
+    case 'coverLetter': return coverLetterGenerator;
+    case 'outreachEmail': return outreachEmailGenerator;
+    case 'linkedInMessage': return linkedInMessageGenerator;
+    case 'interviewQuestions': return interviewQuestionsGenerator;
+    default: return null;
   }
 }
 
 // `usage` is filled in-place by whichever generator runs, so the caller can log
 // the real model/tokens/attempt-chain instead of a hardcoded guess.
 async function runItem(kind: Kind, data: ResumeData, usage: UsageSink): Promise<unknown> {
+  const gen = generatorFor(kind);
+  // Unreachable via the handler (guarded pre-gate) but kept as a real check so a
+  // future caller can't skip it.
+  if (!gen) throw new Error(`No generator configured for toolkit item kind: ${kind}`);
   switch (kind) {
     case 'coverLetter':
-      if (!coverLetterGenerator) throw new Error('Cover letter generator not configured');
-      return coverLetterGenerator.generate(data, usage);
+      return coverLetterGenerator!.generate(data, usage);
     case 'outreachEmail':
-      if (!outreachEmailGenerator) throw new Error('Outreach email generator not configured');
-      return outreachEmailGenerator.generate(data, usage);
+      return outreachEmailGenerator!.generate(data, usage);
     case 'linkedInMessage':
-      if (!linkedInMessageGenerator) throw new Error('LinkedIn message generator not configured');
-      return linkedInMessageGenerator.generate(data, usage);
+      return linkedInMessageGenerator!.generate(data, usage);
     case 'interviewQuestions':
-      if (!interviewQuestionsGenerator) throw new Error('Interview questions generator not configured');
-      return interviewQuestionsGenerator.generate(data, usage);
+      return interviewQuestionsGenerator!.generate(data, usage);
     default:
       throw new Error(`Unknown toolkit item kind: ${kind}`);
   }

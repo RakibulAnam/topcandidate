@@ -551,6 +551,55 @@ export function reportFabricatedProse(parsed: OptimizedResumeData, candidate: Re
   return prose.trim() ? detectFabricatedTokens(prose, evidence) : [];
 }
 
+export class ResumeFabricationError extends Error {
+  constructor(public readonly tokens: string[]) {
+    super(
+      `Résumé prose claimed tool(s) the same guard already stripped from the skills list: ${tokens.join(', ')}`,
+    );
+    this.name = 'ResumeFabricationError';
+  }
+}
+
+/**
+ * The one fabrication case on the paid path that must NOT ship: a token that
+ * `filterFabricatedSkills` DELETED from `skills` and that still appears in a
+ * bullet or the summary.
+ *
+ * Why this specific intersection, and not all of reportFabricatedProse:
+ *
+ * A prose-only hit is treated as a warning because the dictionary can
+ * false-positive on ordinary English (see AMBIGUOUS_WITH_ENGLISH in
+ * toolkitContext) and killing a paid generation over one ambiguous word is
+ * worse for the user than shipping it. But when the SAME token was independently
+ * flagged in the structured skills array — where there is no surrounding prose to
+ * make it ambiguous — the false-positive reading collapses. Two independent hits
+ * on one token is a real fabrication, not a dictionary artifact.
+ *
+ * It is also the only case that produces a self-contradicting document. Left
+ * unblocked, the pipeline deletes "Kubernetes" from the skills list and keeps
+ * "Architected Kafka-backed event pipelines on Kubernetes" in the experience
+ * bullet — so the résumé simultaneously claims and disclaims the same tool. That
+ * is worse than either shipping or stripping it consistently, and it is the
+ * artifact most likely to be caught in an interview.
+ *
+ * Throwing is the right shape here: `withRetry` rotates to the next model and
+ * tries once more (temperature is 0.3, so a different model often does not
+ * fabricate), and `api/optimize` refunds the credit if it ultimately fails. That
+ * is exactly the treatment the toolkit path already gives its own artifacts.
+ */
+export function assertProseMatchesStrippedSkills(
+  parsed: OptimizedResumeData,
+  candidate: ResumeData,
+  strippedSkills: string[],
+): void {
+  if (strippedSkills.length === 0) return;
+  const inProse = reportFabricatedProse(parsed, candidate);
+  if (inProse.length === 0) return;
+  const stripped = new Set(strippedSkills.map((s) => s.toLowerCase()));
+  const both = inProse.filter((t) => stripped.has(t.toLowerCase()));
+  if (both.length > 0) throw new ResumeFabricationError(both);
+}
+
 function buildEvidenceText(c: ResumeData): string {
   const parts: string[] = [...(c.skills ?? [])];
   // Polished-profile bullets/skills count as evidence too — they are
