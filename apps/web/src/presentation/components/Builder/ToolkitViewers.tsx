@@ -20,6 +20,7 @@ import {
 import {
   OutreachEmail,
   InterviewQuestion,
+  PrepTopic,
 } from '../../../domain/entities/Resume';
 import { useT } from '../../i18n/LocaleContext';
 
@@ -430,10 +431,78 @@ function pickLang(en: string, bn: string | undefined, lang: PrepLang): string {
   return en;
 }
 
+/**
+ * Study topics drawn from the JD gap — the second half of the Preparation Guide.
+ *
+ * Kept deliberately calm and short. A gap list is the one place in this product
+ * that risks feeling like homework, so: no checkboxes, no progress meter, no
+ * "recommended reading" pile. One heading, one muted lead line, and per topic a
+ * single concrete action. If the model returned nothing, this renders nothing —
+ * the questions stand on their own.
+ */
+const PrepTopicsSection = ({
+  topics,
+  lang,
+}: {
+  topics: PrepTopic[];
+  lang: PrepLang;
+}) => {
+  const t = useT();
+  if (topics.length === 0) return null;
+
+  return (
+    <section className="mt-8 border-t border-charcoal-200 pt-6">
+      <h3 className="font-display text-lg font-semibold text-brand-700">
+        {t('toolkit.prepTopicsHeading')}
+      </h3>
+      <p className="mt-1 text-sm leading-relaxed text-charcoal-500">
+        {t('toolkit.prepTopicsLead')}
+      </p>
+
+      <ul className="mt-5 space-y-4">
+        {topics.map((topic, i) => (
+          <li
+            key={i}
+            className="rounded-2xl border border-charcoal-200 bg-charcoal-50 p-4 sm:p-5"
+          >
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-100 text-xs font-semibold text-accent-700"
+              >
+                {i + 1}
+              </span>
+              <div className="min-w-0">
+                <p className="font-semibold text-brand-700">
+                  {pickLang(topic.topic, topic.topicBn, lang)}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-charcoal-600">
+                  <span className="font-semibold text-charcoal-500">
+                    {t('toolkit.prepTopicsWhy')}:{' '}
+                  </span>
+                  {pickLang(topic.whyItMatters, topic.whyItMattersBn, lang)}
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-brand-600">
+                  <span className="font-semibold">
+                    {t('toolkit.prepTopicsAction')}:{' '}
+                  </span>
+                  {pickLang(topic.howToPrepare, topic.howToPrepareBn, lang)}
+                </p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+};
+
 export const InterviewPrepViewer = ({
   questions,
+  prepTopics = [],
 }: {
   questions: InterviewQuestion[];
+  prepTopics?: PrepTopic[];
 }) => {
   const t = useT();
   const [expanded, setExpanded] = useState<Set<number>>(new Set([0]));
@@ -466,7 +535,7 @@ export const InterviewPrepViewer = ({
     );
   };
 
-  const fullBrief = questions
+  const questionBrief = questions
     .map((q, i) => {
       const question = pickLang(q.question, q.questionBn, effectiveLang);
       const why = pickLang(q.whyAsked, q.whyAskedBn, effectiveLang);
@@ -474,6 +543,21 @@ export const InterviewPrepViewer = ({
       return `Q${i + 1}. ${question}\n[${q.category}]\n${t('toolkit.interviewWhy')}: ${why}\n${t('toolkit.interviewHow')}: ${how}`;
     })
     .join('\n\n──\n\n');
+
+  // Copy takes the WHOLE guide. Someone pasting this into their notes app the
+  // night before wants the revision list too, not just the questions.
+  const topicsBrief = prepTopics.length
+    ? `\n\n══ ${t('toolkit.prepTopicsHeading')} ══\n\n` +
+      prepTopics
+        .map((topic, i) => {
+          const name = pickLang(topic.topic, topic.topicBn, effectiveLang);
+          const why = pickLang(topic.whyItMatters, topic.whyItMattersBn, effectiveLang);
+          const how = pickLang(topic.howToPrepare, topic.howToPrepareBn, effectiveLang);
+          return `${i + 1}. ${name}\n${t('toolkit.prepTopicsWhy')}: ${why}\n${t('toolkit.prepTopicsAction')}: ${how}`;
+        })
+        .join('\n\n')
+    : '';
+  const fullBrief = questionBrief + topicsBrief;
 
   return (
     <ViewerShell
@@ -544,6 +628,8 @@ export const InterviewPrepViewer = ({
           />
         ))}
       </div>
+
+      <PrepTopicsSection topics={prepTopics} lang={effectiveLang} />
     </ViewerShell>
   );
 };

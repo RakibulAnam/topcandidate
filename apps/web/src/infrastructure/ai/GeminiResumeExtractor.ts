@@ -1,253 +1,165 @@
-import { GoogleGenAI, Type, Schema } from '@google/genai';
-import { ExtractedProfileData, IResumeExtractor } from '../../domain/usecases/ExtractResumeUseCase.js';
-import type { UsageSink } from './usage.js';
-import { EXTRACTOR_PROMPT } from './prompts/extractorPrompts.js';
+// Infrastructure — Gemini implementation of IResumeExtractor (multimodal).
+// Direct-Google port of OpenRouterResumeExtractor.
+//
+// Shares EXTRACTOR_PROMPT and applies the SAME post-parse sanitization
+// (regenerate ids, normalize dates to YYYY-MM) as every previous extractor.
+// Uses `responseJsonSchema` (EXTRACTOR_SCHEMA) so the provider enforces the full
+// shape — the prompt's EXTRACTOR_JSON_SHAPE is kept as redundant guidance.
+//
+// PORT NOTES (canonical template: GeminiProfileNormalizer.ts):
+//   • Transport is GeminiClient. The model fallback chain is walked CLIENT-side
+//     (Google has no server-side models[] equivalent), so `models` is an ordered
+//     array and the client advances on transport failure.
+//   • `thinkingLevel` defaults to MINIMAL inside the client. Do not pass
+//     thinkingBudget:0 — it returns 400 on 3.5-flash-lite and 3.6-flash.
+//   • Usage fields are camelCase now (`promptTokens`, not `prompt_tokens`) and
+//     include `thoughtTokens` + `attempts`. `vite build` does NOT type-check
+//     src/, so a typo here fails silently and cost telemetry degrades to a
+//     4-chars/token estimate — worth the care.
+//   • The catch block copies `err.attempts` into the sink so a FAILED call still
+//     records which models were tried; otherwise failures log an empty chain.
+//   • MULTIMODAL: Gemini reads a PDF natively via `inlineData`, so OpenRouter's
+//     `plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }]` block has no
+//     equivalent and is dropped — there is nothing to configure.
+//
+// Model choice: 3.5-flash-lite leads (measured fastest, 0 thought tokens, native
+// PDF, priced identically to the gemini-2.5-flash this project used to run);
+// 3.1-flash-lite is the cheaper fallback. NOTE: unlike the OpenRouter chain there
+// is no non-Google last resort, so a Google-wide outage fails this path.
 
-const EXTRACTOR_MODEL = 'gemini-2.5-flash';
+import type { Part } from '@google/genai';
+import { ExtractedProfileData, IResumeExtractor } from '../../domain/usecases/ExtractResumeUseCase.js';
+import { resetUsageAttempt, type UsageSink } from './usage.js';
+import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
+import { EXTRACTOR_PROMPT, EXTRACTOR_JSON_SHAPE, EXTRACTOR_SCHEMA } from './prompts/extractorPrompts.js';
+
+const EXTRACTOR_MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_LITE_31];
 
 export class GeminiResumeExtractor implements IResumeExtractor {
-    private genAI: GoogleGenAI;
+  private readonly client: GeminiClient;
+  private readonly deadlineMs = 45_000;
 
-    constructor(apiKey: string) {
-        if (!apiKey) {
-            throw new Error('Gemini API key is required');
+  constructor(apiKey: string) {
+    this.client = new GeminiClient(apiKey);
+  }
+
+  async extract(fileData: string, mimeType: string, usage?: UsageSink): Promise<ExtractedProfileData> {
+    // Two input modes:
+    //  • 'text/plain' → `fileData` is already-extracted resume text (the client
+    //    pulled it out with pdf.js). Send it as a plain string prompt — tiny
+    //    body, no body-size limit, no parser plugin needed.
+    //  • anything else → `fileData` is base64 of the raw file; send it as an
+    //    `inlineData` part and let natively-multimodal Gemini read it
+    //    (scanned-PDF fallback path).
+    const isText = mimeType === 'text/plain';
+    const contents: string | Part[] = isText
+      ? `Extract this resume into the schema. The resume text follows:\n\n${fileData}`
+      : [
+          { text: 'Extract this resume into the schema.' },
+          { inlineData: { mimeType, data: fileData } },
+        ];
+
+    const parsed = await withRetry(async (remainingMs, attempt) => {
+      // Lead each retry with the next model: a per-minute 429 is scoped
+      // PerProjectPerModel, so rotating escapes the throttle immediately
+      // instead of waiting out Google's advised ~53s window.
+      const chain = rotateModels(EXTRACTOR_MODELS, attempt);
+      // Clear last attempt's token fields so a failure row can't inherit them —
+      // see resetUsageAttempt.
+      resetUsageAttempt(usage);
+      try {
+        const result = await this.client.generate(
+          {
+            models: chain,
+            systemInstruction: `${EXTRACTOR_PROMPT}\n${EXTRACTOR_JSON_SHAPE}`,
+            contents,
+            // Strict structured outputs — the provider enforces the full schema,
+            // so the large multi-section resume JSON can't truncate mid-output
+            // (the old `json_object` mode silently dropped trailing sections like
+            // education / certifications / awards). See extractorPrompts.ts.
+            responseJsonSchema: EXTRACTOR_SCHEMA,
+            temperature: 0,
+            // Raised 4000 → 8000: a full multi-page resume's JSON (verbatim
+            // rawDescription text + every section) exceeds 4000 tokens and used to
+            // get cut off. Fits the 45s deadline below.
+            maxOutputTokens: 8000,
+          },
+          remainingMs,
+        );
+
+        if (usage) {
+          usage.provider = 'gemini';
+          usage.model = result.model;
+          usage.promptTokens = result.usage?.promptTokens;
+          usage.completionTokens = result.usage?.completionTokens;
+          usage.thoughtTokens = result.usage?.thoughtTokens;
+          usage.attempts = result.attempts;
         }
-        this.genAI = new GoogleGenAI({ apiKey });
-    }
 
-    async extract(fileData: string, mimeType: string, usage?: UsageSink): Promise<ExtractedProfileData> {
-        const extractionSchema: Schema = {
-            type: Type.OBJECT,
-            properties: {
-                userType: {
-                    type: Type.STRING,
-                    enum: ['student', 'experienced'],
-                    description: "Infer if the candidate is a 'student' (or entry-level/recent grad) or 'experienced' (has significant work experience)."
-                },
-                personalInfo: {
-                    type: Type.OBJECT,
-                    properties: {
-                        fullName: { type: Type.STRING },
-                        email: { type: Type.STRING },
-                        phone: { type: Type.STRING },
-                        location: { type: Type.STRING },
-                        linkedin: { type: Type.STRING },
-                        github: { type: Type.STRING },
-                        website: { type: Type.STRING },
-                    }
-                },
-                experience: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique UUID or random string for this item." },
-                            company: { type: Type.STRING },
-                            role: { type: Type.STRING },
-                            startDate: { type: Type.STRING, description: "Format: YYYY-MM or Month YYYY" },
-                            endDate: { type: Type.STRING, description: "Format: YYYY-MM or 'Present'" },
-                            isCurrent: { type: Type.BOOLEAN },
-                            rawDescription: { type: Type.STRING, description: "The original description of responsibilities and achievements." },
-                        },
-                        required: ['id', 'company', 'role', 'startDate', 'rawDescription']
-                    }
-                },
-                projects: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique UUID or random string for this item." },
-                            name: { type: Type.STRING },
-                            technologies: { type: Type.STRING, description: "Comma-separated tools, methods, software, or media used. May be tech ('React, Node.js'), design tools ('Figma, Illustrator'), research methods ('qualitative interviews, SPSS'), media ('oil paint, video'), or empty string if none apply. Do not invent." },
-                            rawDescription: { type: Type.STRING, description: "The original description of the project." },
-                            link: { type: Type.STRING }
-                        },
-                        required: ['id', 'name', 'rawDescription']
-                    }
-                },
-                education: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique UUID or random string for this item." },
-                            school: { type: Type.STRING },
-                            degree: { type: Type.STRING },
-                            field: { type: Type.STRING },
-                            startDate: { type: Type.STRING },
-                            endDate: { type: Type.STRING },
-                            gpa: { type: Type.STRING }
-                        },
-                        required: ['id', 'school', 'degree', 'field']
-                    }
-                },
-                skills: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: "List of extracted skills (technical, soft, languages, etc.)"
-                },
-                extracurriculars: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique ID." },
-                            title: { type: Type.STRING },
-                            organization: { type: Type.STRING },
-                            startDate: { type: Type.STRING },
-                            endDate: { type: Type.STRING },
-                            description: { type: Type.STRING },
-                        },
-                        required: ['id', 'title', 'organization']
-                    }
-                },
-                awards: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique ID." },
-                            title: { type: Type.STRING },
-                            issuer: { type: Type.STRING },
-                            date: { type: Type.STRING },
-                            description: { type: Type.STRING }
-                        },
-                        required: ['id', 'title', 'issuer']
-                    }
-                },
-                certifications: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique ID." },
-                            name: { type: Type.STRING },
-                            issuer: { type: Type.STRING },
-                            date: { type: Type.STRING },
-                            link: { type: Type.STRING }
-                        },
-                        required: ['id', 'name', 'issuer']
-                    }
-                },
-                affiliations: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique ID." },
-                            organization: { type: Type.STRING },
-                            role: { type: Type.STRING },
-                            startDate: { type: Type.STRING },
-                            endDate: { type: Type.STRING }
-                        },
-                        required: ['id', 'organization']
-                    }
-                },
-                publications: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            id: { type: Type.STRING, description: "Generate a unique ID." },
-                            title: { type: Type.STRING },
-                            publisher: { type: Type.STRING },
-                            date: { type: Type.STRING },
-                            link: { type: Type.STRING }
-                        },
-                        required: ['id', 'title']
-                    }
-                }
-            },
-            required: ['personalInfo', 'userType']
-        };
-
-        const prompt = EXTRACTOR_PROMPT;
-
-        // 'text/plain' → `fileData` is already-extracted resume text (client-side
-        // pdf.js); send it inline as text. Otherwise `fileData` is base64 of the
-        // raw file (scanned-PDF fallback) → send as inlineData for native read.
-        const contents = mimeType === 'text/plain'
-            ? [{ text: `${prompt}\n\nThe resume text follows:\n\n${fileData}` }]
-            : [
-                { inlineData: { data: fileData, mimeType } },
-                { text: prompt },
-            ];
-
+        const text = result.text;
+        if (!text) throw new Error('No response from AI');
         try {
-            const result = await this.genAI.models.generateContent({
-                model: EXTRACTOR_MODEL,
-                contents,
-                config: {
-                    responseMimeType: 'application/json',
-                    responseSchema: extractionSchema,
-                }
-            });
-
-            // Capture token usage for cost telemetry before discarding the raw
-            // SDK response (additive — does not affect the extracted data).
-            if (usage) {
-                usage.provider = 'gemini';
-                usage.model = EXTRACTOR_MODEL;
-                const um = (result as any)?.usageMetadata;
-                usage.promptTokens = um?.promptTokenCount;
-                usage.completionTokens = um?.candidatesTokenCount;
-            }
-
-            const responseText = result.text;
-            if (!responseText) {
-                throw new Error('No response from AI');
-            }
-
-            const parsed = JSON.parse(responseText) as ExtractedProfileData;
-
-            const sanitizeDate = (d?: string) => {
-                if (!d || d === 'Present') return d || '';
-                return /^\d{4}-\d{2}$/.test(d) ? d : '';
-            };
-
-            if (parsed.experience) {
-                parsed.experience = parsed.experience.map(e => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
-            }
-            if (parsed.projects) {
-                parsed.projects = parsed.projects.map(e => ({ ...e, id: crypto.randomUUID() }));
-            }
-            if (parsed.education) {
-                parsed.education = parsed.education.map(e => {
-                    const startDate = sanitizeDate(e.startDate);
-                    const endDate = sanitizeDate(e.endDate);
-                    // Education is usually a single (graduation) date, not a range.
-                    // If the model produced only a start date, treat it as the end
-                    // date — endDate is the mandatory one; startDate is optional.
-                    const single = !endDate && !!startDate;
-                    return {
-                        ...e,
-                        id: crypto.randomUUID(),
-                        startDate: single ? '' : startDate,
-                        endDate: single ? startDate : endDate,
-                    };
-                });
-            }
-            if (parsed.extracurriculars) {
-                parsed.extracurriculars = parsed.extracurriculars.map(e => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
-            }
-            if (parsed.awards) {
-                parsed.awards = parsed.awards.map(e => ({ ...e, id: crypto.randomUUID(), date: sanitizeDate(e.date) }));
-            }
-            if (parsed.certifications) {
-                parsed.certifications = parsed.certifications.map(e => ({ ...e, id: crypto.randomUUID(), date: sanitizeDate(e.date) }));
-            }
-            if (parsed.affiliations) {
-                parsed.affiliations = parsed.affiliations.map(e => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
-            }
-            if (parsed.publications) {
-                parsed.publications = parsed.publications.map(e => ({ ...e, id: crypto.randomUUID(), date: sanitizeDate(e.date) }));
-            }
-
-            return parsed;
-        } catch (error) {
-            console.error('Gemini extraction failed:', error);
-            throw new Error('Failed to extract resume data. Please make sure the PDF is valid or try entering manually.');
+          return JSON.parse(text) as ExtractedProfileData;
+        } catch {
+          const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+          return JSON.parse(cleaned) as ExtractedProfileData;
         }
+      } catch (err) {
+        // Preserve the attempt chain on failure too, so ai_call_log can show
+        // which models were tried on a call that ultimately failed.
+        if (usage && err instanceof GeminiError && err.attempts.length) {
+          usage.provider = 'gemini';
+          usage.attempts = err.attempts;
+        }
+        throw err;
+      }
+    }, this.deadlineMs);
+
+    // Identical post-parse sanitization to the previous extractors: regenerate
+    // ids (the model's are throwaway) and force dates to YYYY-MM or ''.
+    const sanitizeDate = (d?: string) => {
+      if (!d || d === 'Present') return d || '';
+      return /^\d{4}-\d{2}$/.test(d) ? d : '';
+    };
+
+    if (parsed.experience) {
+      parsed.experience = parsed.experience.map((e) => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
     }
+    if (parsed.projects) {
+      parsed.projects = parsed.projects.map((e) => ({ ...e, id: crypto.randomUUID() }));
+    }
+    if (parsed.education) {
+      parsed.education = parsed.education.map((e) => {
+        const startDate = sanitizeDate(e.startDate);
+        const endDate = sanitizeDate(e.endDate);
+        // Education is usually a single (graduation) date, not a range. If the
+        // model produced only a start date, treat it as the end date — endDate
+        // is the mandatory, meaningful one; startDate is optional.
+        const single = !endDate && !!startDate;
+        return {
+          ...e,
+          id: crypto.randomUUID(),
+          startDate: single ? '' : startDate,
+          endDate: single ? startDate : endDate,
+        };
+      });
+    }
+    if (parsed.extracurriculars) {
+      parsed.extracurriculars = parsed.extracurriculars.map((e) => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
+    }
+    if (parsed.awards) {
+      parsed.awards = parsed.awards.map((e) => ({ ...e, id: crypto.randomUUID(), date: sanitizeDate(e.date) }));
+    }
+    if (parsed.certifications) {
+      parsed.certifications = parsed.certifications.map((e) => ({ ...e, id: crypto.randomUUID(), date: sanitizeDate(e.date) }));
+    }
+    if (parsed.affiliations) {
+      parsed.affiliations = parsed.affiliations.map((e) => ({ ...e, id: crypto.randomUUID(), startDate: sanitizeDate(e.startDate), endDate: sanitizeDate(e.endDate) }));
+    }
+    if (parsed.publications) {
+      parsed.publications = parsed.publications.map((e) => ({ ...e, id: crypto.randomUUID(), date: sanitizeDate(e.date) }));
+    }
+
+    return parsed;
+  }
 }

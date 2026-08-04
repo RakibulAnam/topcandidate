@@ -165,6 +165,13 @@ export class ResumeService {
       toolkit.outreachEmail = value.outreachEmail;
       toolkit.linkedInMessage = value.linkedInMessage;
       toolkit.interviewQuestions = value.interviewQuestions;
+      // Prep topics ride with the questions as one Preparation Guide. This
+      // assembly copies slot-by-slot rather than spreading `value`, so a NEW
+      // toolkit field is silently dropped unless it is named here — which is
+      // exactly what happened when prepTopics was added: the generator produced
+      // them, the API returned them, and this line's absence meant the UI never
+      // saw a single one. If you add a toolkit artifact, add it here too.
+      toolkit.prepTopics = value.prepTopics;
       if (Object.keys(value.errors).length > 0) {
         toolkit.errors = { ...value.errors };
         console.warn(`[resume-service] toolkit partial — errors=${JSON.stringify(value.errors)}`);
@@ -223,8 +230,12 @@ export class ResumeService {
         nextToolkit.linkedInMessage = v;
       } else if (item === 'interviewQuestions') {
         const v = await this.withRetry(() => this.interviewQuestionsUseCase.execute(data));
-        if (!v?.length) throw new Error('Generator returned no interview questions');
-        nextToolkit.interviewQuestions = v;
+        if (!v?.questions?.length) throw new Error('Generator returned no interview questions');
+        nextToolkit.interviewQuestions = v.questions;
+        // Only overwrite study topics when the regenerate actually produced some —
+        // an empty list means the model skipped them, and keeping the previous
+        // topics beats blanking half the Preparation Guide on a retry.
+        if (v.prepTopics.length > 0) nextToolkit.prepTopics = v.prepTopics;
       }
       delete nextErrors[item];
       console.info(`[resume-service] regenerateToolkitItem ok item=${item} took=${Math.round(performance.now() - t0)}ms`);
@@ -252,8 +263,29 @@ export class ResumeService {
     return next;
   }
 
-  // Retry transient failures (rate limits, timeouts, network blips). One extra
-  // attempt with a short backoff is enough in practice — persistent errors
+  /**
+   * Failures a second attempt cannot fix. Retrying these is not merely useless —
+   * for a per-item regenerate each attempt is its own HTTP request that writes
+   * its own ai_call_log row, so one Retry click spent TWO of the user's 8 daily
+   * toolkit_item slots. On a 429 that meant the app answered "you're over the
+   * daily limit" by immediately consuming another slot from that same limit.
+   *
+   * Duck-typed on `status`/`code` rather than importing ApiCallError: this is the
+   * application layer and must not depend on infrastructure (see the Clean
+   * Architecture rule in CLAUDE.md). The proxy sets both fields.
+   */
+  private static isPermanent(err: unknown): boolean {
+    const e = err as { status?: number; code?: string; name?: string };
+    // 401 unauthenticated, 402 out of credits, 403 forbidden, 404 no such route,
+    // 429 over cap, 503 provider not configured. None improves in 1.2s.
+    if (typeof e?.status === 'number' && [401, 402, 403, 404, 429, 503].includes(e.status)) return true;
+    if (e?.code === 'insufficient_credits' || e?.code === 'rate_limited') return true;
+    // Client-side content gates already told the user what to fix.
+    return e?.name === 'GibberishContentError';
+  }
+
+  // Retry transient failures (provider throttling, timeouts, network blips). One
+  // extra attempt with a short backoff is enough in practice — persistent errors
   // surface via `toolkit.errors` for the user to retry from the Preview.
   private async withRetry<T>(fn: () => Promise<T>, attempts = 1, delayMs = 1200): Promise<T> {
     let lastErr: unknown;
@@ -262,6 +294,7 @@ export class ResumeService {
         return await fn();
       } catch (err) {
         lastErr = err;
+        if (ResumeService.isPermanent(err)) throw err;
         if (i < attempts) {
           await new Promise((r) => setTimeout(r, delayMs * Math.pow(2, i)));
         }

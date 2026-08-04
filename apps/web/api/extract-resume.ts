@@ -16,8 +16,9 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
-import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
-import { resolveCost } from './_lib/aiCost.js';
+import { reserveCall, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { buildCallMeta } from './_lib/aiTelemetry.js';
+import { publicAiError } from './_lib/aiErrorResponse.js';
 import { resumeExtractor } from './_lib/aiFactory.js';
 import type { UsageSink } from '../src/infrastructure/ai/usage';
 
@@ -54,11 +55,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Reserved BEFORE the provider call so a parallel burst cannot overshoot the
+  // daily caps; null means reservation was unavailable and we failed open.
+  let reservation: string | null = null;
   try {
-    await assertWithinLimit(auth.userId, auth.jwt);
+    reservation = await reserveCall(auth.userId, auth.jwt, 'extract_resume');
   } catch (err) {
     if (err instanceof RateLimitError) {
-      res.status(429).json({ error: err.message, used: err.used, cap: err.cap });
+      res.status(429).json({ error: err.message, used: err.used, cap: err.cap, code: 'rate_limited' });
       return;
     }
     throw err;
@@ -78,30 +82,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const result = await resumeExtractor.extract(fileData, mimeType, usage);
     const latencyMs = Date.now() - t0;
-    const cost = resolveCost(usage, undefined, JSON.stringify(result ?? ''));
-    await logCall(auth.userId, auth.jwt, 'extract_resume', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'success',
-      latencyMs,
-    });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'extract_resume',
+      buildCallMeta({ usage, latencyMs, fallbackOutputText: JSON.stringify(result ?? '') }),
+      reservation,
+    );
     res.status(200).json({ result });
   } catch (err) {
     const latencyMs = Date.now() - t0;
     const msg = err instanceof Error ? err.message : 'Extraction failed';
-    const cost = resolveCost(usage);
-    await logCall(auth.userId, auth.jwt, 'extract_resume', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'error',
-      latencyMs,
-    });
-    res.status(502).json({ error: msg });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'extract_resume',
+      buildCallMeta({ usage, latencyMs, error: err }),
+      reservation,
+    );
+    res.status(502).json(publicAiError(err));
   }
 }

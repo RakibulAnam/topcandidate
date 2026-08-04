@@ -47,9 +47,9 @@ So there are **two apps and one database**, and the two apps never talk directly
               service-role key │                 │ API keys (server-only)
                                ▼                 ▼
                     ┌────────────────┐   ┌──────────────────┐
-                    │  SUPABASE      │   │  OpenRouter       │
-                    │  Postgres+Auth │   │  (AI; or legacy   │
-                    │                │   │   Groq+Gemini)    │
+                    │  SUPABASE      │   │  GOOGLE GEMINI    │
+                    │  Postgres+Auth │   │  (AI; direct API, │
+                    │                │   │   one key)        │
                     └────────────────┘   └──────────────────┘
                                ▲
                                │  POST /api/confirm-purchase
@@ -71,16 +71,16 @@ So there are **two apps and one database**, and the two apps never talk directly
 | Component | Responsibility | Holds which secrets |
 |---|---|---|
 | **Browser (React SPA)** | UI, login, purchase form, AI requests, status polling, admin UI | The user's login token; for the operator, the admin key — both in `localStorage` |
-| **Vercel `/api/*` functions** | The only code allowed to touch AI keys, the service-role DB key, and credit-granting logic | `SUPABASE_SERVICE_ROLE_KEY`, `OPENROUTER_API_KEY` (or legacy `GROQ_API_KEY`/`GEMINI_API_KEY`), `BKASH_WEBHOOK_SECRET`, `ADMIN_API_KEY`, `CRON_SECRET` |
+| **Vercel `/api/*` functions** | The only code allowed to touch AI keys, the service-role DB key, and credit-granting logic | `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `BKASH_WEBHOOK_SECRET`, `ADMIN_API_KEY`, `CRON_SECRET` |
 | **Supabase Postgres** | Stores everything; enforces Row-Level Security; runs credit logic inside `SECURITY DEFINER` functions | — |
 | **Supabase Auth** | Email/password login, issues JWTs (email confirmation **off**) | — |
 | **Flutter watcher** | Reads bKash SMS, signs and POSTs confirmations | `BKASH_WEBHOOK_SECRET` (operator types it in) |
-| **OpenRouter** (or legacy Groq / Gemini) | The actual AI text generation — Gemini-Flash optimizer + toolkit, Flash-Lite extractor, via one key | — |
+| **Google Gemini API** | The actual AI text generation — all eight generators on one key, each walking its own ordered model chain **client-side** (`gemini-3.5-flash-lite` → `gemini-3.6-flash` → `gemini-3.1-flash-lite`; extractor + normalizer skip `3.6-flash`). The key **must be on a paid tier** — Google's free tier trains on submitted prompts and allows human review; bound spend with a Cloud Console **spend cap** budget scoped to the Gemini API | — |
 
 ### How components communicate
 - **Browser → Vercel:** HTTPS + Supabase JWT bearer.
 - **Vercel → Supabase:** the **service-role key** (bypasses Row-Level Security) — server-only.
-- **Vercel → OpenRouter** (or legacy Groq/Gemini): API key, server-only.
+- **Vercel → Google Gemini:** `GEMINI_API_KEY`, server-only.
 - **Phone → Vercel:** HTTPS + **HMAC-SHA256** over the exact request bytes + a timestamp + a one-time nonce (replay protection).
 - **Phone → Android OS:** `RECEIVE_SMS` / `READ_SMS` permissions.
 
@@ -104,7 +104,7 @@ So there are **two apps and one database**, and the two apps never talk directly
 | **Wait** | Navbar "Verifying…" pill (3-step timeline) | Pill subscribes to its purchase row via **Supabase Realtime** (sub-second) + a 20s fallback poll of `GET /api/my-purchase-status`, no time cap | — |
 | **Validation** | (nothing visible) | Operator's phone gets the bKash SMS → watcher confirms it (see §5) | `purchases.status` flips |
 | **Credits assigned** | Pill shows "5 credits added" (often instantly on submit) | `confirm_purchase` / match-on-submit adds credits, audits the change; Realtime pushes the update | `profiles.toolkit_credits += 5`; `purchase_state_changes` row |
-| **Use credits** | Generate a tailored package in the Builder | `POST /api/optimize` consumes 1 credit, runs AI | `toolkit_credits -= 1`; `ai_call_log` row; `generated_resumes` |
+| **Use credits** | Generate a tailored package in the Builder | `POST /api/optimize` consumes 1 credit, runs AI (its Gemini model chain is walked client-side inside one 50s wall-clock budget; the parallel `/api/toolkit` gets 52s and measured **26.7s in Vercel**) | `toolkit_credits -= 1`; `ai_call_log` row; `generated_resumes` |
 
 ---
 
@@ -195,7 +195,7 @@ Webhook **v2**: generates a UTC ISO-8601 timestamp, computes `HMAC-SHA256(secret
 - **Earned:** via `confirm_purchase` (webhook), `operator_confirm_purchase` / `admin_grant_override` / `apply_purchase_topup` (operator), or `admin_grant_credits` (manual).
 - **Spent:** `consume_toolkit_credit` (1 per `/api/optimize`), refunded via `refund_toolkit_credit` if the optimizer fails.
 - **Removed:** `record_purchase_reversal` (bKash reversal), `admin_deduct_credits`, `operator_refund_purchase`.
-- **Rate limit:** 20 AI calls / rolling 24h per user (`ai_call_log`, `rateLimit.ts`).
+- **Rate limit:** 20 AI calls / rolling 24h per user, plus per-kind caps — `optimize_general` 5, `toolkit_item` 8, `normalize` 40 (excluded from the overall cap) (`ai_call_log`, `rateLimit.ts`).
 
 ### Admin functionality (`/admin`)
 - **Auth:** a single shared `ADMIN_API_KEY` (no roles), sent as `X-Admin-Key`, timing-safe compared (`adminAuth.ts`). Handlers use the **service-role** client (bypasses RLS).
@@ -258,7 +258,7 @@ See [`contracts/api-endpoints.md`](contracts/api-endpoints.md) for the full inde
 | `POST /api/dispute-purchase` | User | File a dispute | 400 short notes, 429 >3/24h |
 | `POST /api/optimize` | User | Spend credit, run AI | 402 no credits, 429 daily cap, 413 JD too long, 503 no provider, 502 optimizer failed (credit refunded) |
 | `POST /api/toolkit` | User | Combined toolkit bundle (free; fired in parallel with `/api/optimize`) | 429 daily cap, 413 JD too long |
-| `POST /api/optimize-general`, `/api/toolkit-item`, `/api/extract-resume`, `/api/normalize-item` | User | Free AI helpers | 401, 429 (`normalize-item`: 413 > 4k chars, 503 on legacy AI path) |
+| `POST /api/optimize-general`, `/api/toolkit-item`, `/api/extract-resume`, `/api/normalize-item` | User | Free AI helpers | 401, 429 (`normalize-item`: 413 > 4k chars, 503 when `GEMINI_API_KEY` is unset) |
 | `POST /api/confirm-purchase` | Watcher (HMAC) | Confirm payment → grant | 401 bad sig, 400 bad body, 404 no pending, 409 mismatch/underpaid, 200 idempotent, 503 misconfig |
 | `POST /api/orphan-inbound-sms` | Watcher (HMAC) | Dump unmatched SMS | 401, 400 |
 | `POST /api/reverse-purchase` | Watcher (HMAC) | Reversal → refund | 401, 404 no completed |
@@ -341,7 +341,7 @@ Operator → /admin (paste ADMIN_API_KEY) → X-Admin-Key header
 - **One package only** (`five-pack`). Multi-package pricing is not implemented.
 - **`flag-user` is cosmetic** — sets `flagged_at` and a UI chip but nothing auto-restricts a flagged user.
 - **Parseable-but-unclassified SMS** create silent local `failed` rows with no server signal.
-- **AI provider is env-gated** — `api/_lib/aiFactory.ts` runs the entire AI surface through **OpenRouter** when `OPENROUTER_API_KEY` is set (single key → Gemini 2.5 Flash optimizer + toolkit, Gemini 2.5 Flash-Lite extractor, OpenRouter-only profile normalizer), and falls back to the legacy **Groq + Gemini** path when the key is absent. The normalizer (`/api/normalize-item`) has **no legacy sibling**, so on the Groq/Gemini path it returns 503 and the client treats normalization as unavailable.
+- **One AI provider, one key** — `api/_lib/aiFactory.ts` runs the entire AI surface through the direct **Google Gemini** API on `GEMINI_API_KEY`; there is no second provider to fall back to (only the model chain within Google), so every AI endpoint returns 503 if the key is absent. Because every model in every chain is Google, a Google-wide outage takes down all AI at once — a knowingly accepted trade, not an oversight (the app depends on the domain interfaces, so a second provider can be added later).
 - **No automated test harness** on the web app (verification = `npm run build` + manual pass). The mobile app has Dart unit tests under `apps/mobile/test/`.
 - **No push / FCM / email** — "credits ready" reaches the browser via Supabase Realtime (live while the tab is open) and resolves on the next visit otherwise. There is no web-push, FCM, or email notification channel; for a user actively waiting on the purchase pill (the common case, now ~1–2 s) it isn't needed. Add web-push/FCM later only as a re-engagement channel for users who left the page.
 - **Carrier SMS delivery is outside our control.** Match-on-submit and immediate dispatch removed the app-side latency, but submit-first grants still wait on however long bKash takes to text the operator's phone.
@@ -366,7 +366,7 @@ Operator → /admin (paste ADMIN_API_KEY) → X-Admin-Key header
 
 **Important services / layers:**
 - Web is **Clean Architecture**: Presentation → Application (`ResumeService`) → Domain ← Infrastructure. Presentation never imports a Gemini class directly (see `apps/web/AGENTS.md`).
-- AI is proxied: the browser calls `/api/*` (`ProxyClients.ts`); the server holds the key (`aiFactory.ts` — OpenRouter when `OPENROUTER_API_KEY` is set, else legacy Groq + Gemini).
+- AI is proxied: the browser calls `/api/*` (`ProxyClients.ts`); the server holds the key (`aiFactory.ts` — direct Google Gemini on `GEMINI_API_KEY`, the only provider).
 - Mobile is an isolate + state-machine design (see `apps/mobile/spec/`).
 
 **Key architecture decisions:**

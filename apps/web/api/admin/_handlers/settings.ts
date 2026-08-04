@@ -36,8 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         BKASH_WEBHOOK_SECRET: Boolean(process.env.BKASH_WEBHOOK_SECRET),
         SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
         CRON_SECRET: Boolean(process.env.CRON_SECRET),
+        // Only AI key remaining; GROQ_API_KEY went with the OpenRouter exit.
         GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
-        GROQ_API_KEY: Boolean(process.env.GROQ_API_KEY),
       },
       lastConfirmAt: lastConfirm.data?.created_at ?? null,
       lastConfirmActor: lastConfirm.data?.actor ?? null,

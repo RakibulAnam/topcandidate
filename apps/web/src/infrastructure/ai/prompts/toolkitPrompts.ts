@@ -18,6 +18,60 @@ import type { ResumeData } from '../../../domain/entities/Resume.js';
 // prompt (as a stated limit) and the generator's post-validation truncation.
 export const LINKEDIN_MAX = 280;
 
+/**
+ * Trim an over-long LinkedIn note to LINKEDIN_MAX without publishing a broken
+ * sentence. Shared by the combined toolkit generator and the single-artifact
+ * LinkedIn generator, which previously carried two identical copies of this.
+ *
+ * The bug this replaces: the old version took `slice.lastIndexOf('.')` and cut
+ * there if it sat past 60% of the limit. `lastIndexOf` cannot tell a
+ * sentence-ending period from a DECIMAL POINT, and a metric late in the note is
+ * exactly where a period tends to land. A real 335-char note ending
+ * "...cut p95 checkout latency from 4.2s down to 1.1s across two quarters..."
+ * has its only sentence period at index 121 (below the 168 threshold) and the
+ * decimal of "1.1s" at 222 — so 222 won and the user was handed a note ending
+ * "...from 4.2s down to 1." The stronger the candidate's metrics, the more
+ * likely they got a truncated one.
+ *
+ * A period is a sentence end here only when the NEXT character is whitespace or
+ * the text ends. That is checked against the ORIGINAL string, not the window:
+ * were it checked against the window, a boundary falling immediately after a
+ * decimal point would still look terminal.
+ */
+export function trimToLinkedInLimit(text: string, max: number = LINKEDIN_MAX): string {
+  if (text.length <= max) return text;
+  const window = text.slice(0, max);
+
+  for (let i = window.length - 1; i >= 0; i--) {
+    if (window[i] !== '.' && window[i] !== '!' && window[i] !== '?') continue;
+    const next = text[i + 1];
+    if (next !== undefined && !/\s/.test(next)) continue; // decimal, version, URL
+    // Only accept a sentence end that keeps most of the note. Below that we'd
+    // throw away more than we keep, so a word-boundary cut reads better.
+    if (i >= max * 0.6) return window.slice(0, i + 1).trim();
+    break;
+  }
+
+  // No usable sentence end: cut at the last word boundary — never mid-word —
+  // drop a dangling connector, and mark the truncation so the note doesn't read
+  // as if the candidate simply stopped typing.
+  const lastSpace = window.lastIndexOf(' ');
+  if (lastSpace <= 0) return window.trim();
+  let body = window.slice(0, lastSpace).trim();
+  // Drop trailing punctuation and any dangling function word, so the note ends
+  // on content ("…order volume tripled…") rather than mid-grammar
+  // ("…order volume tripled, which…"). Repeat: "and of the" can stack.
+  for (let i = 0; i < 4; i++) {
+    const next = body
+      .replace(/[,;:—–-]+$/, '')
+      .replace(/\s+(?:which|that|and|but|so|because|while|when|as|to|for|of|in|on|at|with|from|by|the|a|an|my|our|their|its|this|these|is|are|was|were|be|been|has|have|had|will|would|can|could)$/i, '')
+      .trim();
+    if (next === body) break;
+    body = next;
+  }
+  return body + '…';
+}
+
 function stretchSystemBlock(): string {
   return `STRETCH MODE — CAREER SWITCH FRAMING
 This application is a stretch: the candidate's evidence does NOT closely match the JD's
@@ -125,8 +179,31 @@ BILINGUAL PREP (REQUIRED) — for EACH question, also produce the Bengali (Bangl
   • Banking / finance terminology stays bilingual-natural: "credit analysis" → "ক্রেডিট অ্যানালাইসিস", "interest rate" → "সুদের হার", "loan portfolio" → "লোন পোর্টফোলিও". Use whichever form a real BD banker would say out loud.
   • Numbers, dates, and currency stay as written (5 crore taka stays "5 crore taka" or "৫ কোটি টাকা" — pick whichever reads naturally for that sentence).
   • Length parity: Bengali version should be roughly the same depth as English — not a one-sentence summary. The candidate needs a full prep brief in either language.
-  • Category labels (Behavioral / Technical / Role-specific / Values & Culture / Situational) stay in English — they are categorisation tokens, not narrative copy.`;
+  • Category labels (Behavioral / Technical / Role-specific / Values & Culture / Situational) stay in English — they are categorisation tokens, not narrative copy.
+
+${PREP_TOPICS_BLOCK}`;
 }
+
+// Shared by the combined toolkit generator and the single-artifact interview
+// generator, so a regenerate produces the same contract as the bundle.
+export const PREP_TOPICS_BLOCK = `═══════════════════════════════════════════════
+ARTIFACT 5 — PREPARATION TOPICS (array, prepTopics)
+═══════════════════════════════════════════════
+COUNT — 3–5 topics. Fewer good ones beat five padded ones.
+
+SOURCE — THE GAP, and only the gap. Read the JD's requirements, compare against the candidate evidence above, and list what THIS employer will probe that the candidate's evidence does NOT currently support. A topic the candidate has already demonstrated is worthless here — they do not need to revise their own work. If the JD names a tool, framework, regulation, methodology or certification absent from their evidence, that is a topic. If the JD demands a seniority behaviour they have not evidenced (leading a team, owning a budget, presenting to executives), that is a topic.
+
+DO NOT invent a gap to fill the count. If the candidate genuinely matches nearly everything, return the 3 areas where this employer will push DEEPEST on what they do have — labelled honestly as depth, not as a hole.
+
+TOPIC — Name it the way the JD names it, so the candidate can search it. "Kubernetes deployments and rollbacks", not "container stuff".
+
+WHY IT MATTERS — 1–2 sentences: which JD requirement this maps to, and what the interviewer will actually ask about it. Be concrete about the question they should expect.
+
+HOW TO PREPARE — ONE concrete, finishable action, sized to a few evenings before an interview. "Deploy a two-service app to a local k3s cluster and practise describing a rollback" — NOT "learn Kubernetes". Never recommend a paid course. Never suggest claiming experience they lack.
+
+TONE — Level with them like a senior colleague who wants them to walk in ready. No shaming, no hedging, no "you may wish to consider". This is the honest counterpart to the résumé: the résumé states what they HAVE done in the strongest true terms, and this section names what they still need — so nothing in the interview is a surprise.
+
+BILINGUAL (REQUIRED) — also produce topicBn, whyItMattersBn, howToPrepareBn under the same Bengali rules as the interview questions: natural professional register, English/Roman script kept for proper nouns, tool names, and canonical industry terms.`;
 
 export function buildToolkitUserPrompt(data: ResumeData, mode: FitMode = 'match'): string {
   const candidateContext = buildCandidateContext(data);
@@ -424,7 +501,9 @@ BILINGUAL PREP (REQUIRED) — for EACH question also produce the Bengali (Bangla
   • Proper nouns: keep employer names, product names, certifications, and English-canonical industry terms (Basel III, IFRS 9, KYC, SWIFT, NPL, ECL, CFA, BBA, MBA, SME, CV, KPI, ROI) in English / Roman script inline. Bangla speakers in professional contexts read these as English tokens.
   • Banking / finance and other domain terminology stays bilingual-natural — use whichever form a real BD professional in that field would say out loud.
   • Length parity: Bengali version should match English depth.
-  • Do NOT translate the category label; it stays English.`;
+  • Do NOT translate the category label; it stays English.
+
+${PREP_TOPICS_BLOCK}`;
 
 export function buildInterviewUserPrompt(data: ResumeData, mode: 'match' | 'stretch' = 'match'): string {
   const candidateContext = buildCandidateContext(data);
@@ -467,3 +546,118 @@ RULES
 - Never coach the candidate to claim experience or tools they don't have. JD topics they haven't used are framed as "here's how I'd prepare", not as past experience.
 `;
 }
+
+// ─── Structured-output schemas (Gemini `responseJsonSchema`) ─────────────────
+//
+// Lifted here from the generator modules during the OpenRouter → direct-Gemini
+// port. They were module-local consts inside the OpenRouter* generators, which
+// meant the combined toolkit and the single-artifact regenerate path each
+// carried their own copy of what is meant to be ONE contract — exactly the
+// divergence this prompts/ module exists to prevent.
+//
+// Safe for `responseJsonSchema` verbatim: `type`, `properties`, `required`,
+// `items`, `enum` and `additionalProperties` are all supported. Do NOT route
+// these through `config.responseSchema` instead — that interface has no
+// `additionalProperties` field, so it is both a TS error and a likely 400.
+
+/** Combined toolkit bundle: cover letter + outreach + LinkedIn + interview Qs. */
+/**
+ * prepTopics, shared verbatim by TOOLKIT_SCHEMA and INTERVIEW_SCHEMA so a
+ * per-item regenerate returns the same contract as the bundle. One definition:
+ * two drifting copies of a required schema is how a regenerate silently starts
+ * dropping half a section.
+ *
+ * Declared ABOVE both schemas on purpose — these are module-level consts
+ * initialised at import time, so a schema referencing it from above would hit the
+ * temporal dead zone and throw before any generator could run.
+ */
+const PREP_TOPICS_SCHEMA_ITEMS: Record<string, unknown> = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      topic: { type: 'string' },
+      whyItMatters: { type: 'string' },
+      howToPrepare: { type: 'string' },
+      topicBn: { type: 'string' },
+      whyItMattersBn: { type: 'string' },
+      howToPrepareBn: { type: 'string' },
+    },
+    required: ['topic', 'whyItMatters', 'howToPrepare', 'topicBn', 'whyItMattersBn', 'howToPrepareBn'],
+    additionalProperties: false,
+  },
+};
+
+export const TOOLKIT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    coverLetter: { type: 'string' },
+    outreachEmail: {
+      type: 'object',
+      properties: { subject: { type: 'string' }, body: { type: 'string' } },
+      required: ['subject', 'body'],
+      additionalProperties: false,
+    },
+    linkedInMessage: { type: 'string' },
+    interviewQuestions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          category: { type: 'string' },
+          whyAsked: { type: 'string' },
+          answerStrategy: { type: 'string' },
+          questionBn: { type: 'string' },
+          whyAskedBn: { type: 'string' },
+          answerStrategyBn: { type: 'string' },
+        },
+        required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
+        additionalProperties: false,
+      },
+    },
+    prepTopics: PREP_TOPICS_SCHEMA_ITEMS,
+  },
+  required: ['coverLetter', 'outreachEmail', 'linkedInMessage', 'interviewQuestions', 'prepTopics'],
+  additionalProperties: false,
+};
+
+/** Single-artifact interview regenerate (/api/toolkit-item). */
+export const INTERVIEW_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          category: { type: 'string' },
+          whyAsked: { type: 'string' },
+          answerStrategy: { type: 'string' },
+          questionBn: { type: 'string' },
+          whyAskedBn: { type: 'string' },
+          answerStrategyBn: { type: 'string' },
+        },
+        required: ['question', 'category', 'whyAsked', 'answerStrategy', 'questionBn', 'whyAskedBn', 'answerStrategyBn'],
+        additionalProperties: false,
+      },
+    },
+    prepTopics: PREP_TOPICS_SCHEMA_ITEMS,
+  },
+  required: ['questions', 'prepTopics'],
+  additionalProperties: false,
+};
+
+/**
+ * Single-artifact outreach regenerate. NEW in the Gemini port: this generator
+ * was the last one still on OpenRouter's unenforced `json_object` mode with the
+ * shape described only in prose, so a malformed subject/body reached the guards
+ * as a parse failure. Gemini enforces it.
+ */
+export const OUTREACH_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: { subject: { type: 'string' }, body: { type: 'string' } },
+  required: ['subject', 'body'],
+  additionalProperties: false,
+};

@@ -27,9 +27,7 @@ See [`.env.example`](./.env.example) for the full annotated list. In short:
 
 | Variable | What it does |
 |---|---|
-| `OPENROUTER_API_KEY` | **Primary AI provider** (single key). When set, all AI runs through OpenRouter: Gemini 2.5 Flash optimizer (Llama 3.3 70B fallback) → Gemini 2.5 Flash toolkit/single-artifact (DeepSeek V3.2 / Llama fallbacks) → Gemini 2.5 Flash-Lite extractor. `api/_lib/aiFactory.ts` gates on it. Set a hard monthly spend cap + enable ZDR in the OpenRouter dashboard. https://openrouter.ai/keys — see [`docs/OPENROUTER_MIGRATION.md`](./docs/OPENROUTER_MIGRATION.md). |
-| `GROQ_API_KEY` | **Legacy fallback** (used only when `OPENROUTER_API_KEY` is absent). Groq optimizer, free at https://console.groq.com/keys (1,000 RPD). Kept one cycle as the rollback path. |
-| `GEMINI_API_KEY` | **Legacy fallback** optimizer + all legacy toolkit/extractor generators. Free at https://aistudio.google.com/app/apikey (20 RPD). Kept one cycle as the rollback path. |
+| `GEMINI_API_KEY` | **The AI provider** — a single key, direct to Google Gemini (no gateway). Every generator runs on `src/infrastructure/ai/GeminiClient.ts`: `gemini-3.5-flash-lite` → `gemini-3.6-flash` → `gemini-3.1-flash-lite` for the optimizer / toolkit / single-artifact paths, `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` for the extractor + profile normalizer. Google has no server-side fallback, so the chain is walked client-side inside one shared wall-clock budget. `api/_lib/aiFactory.ts` gates on it. **The key must be on a paid tier** — Google's free tier trains on submitted prompts and allows human review (contradicts our ToS §3), and caps at 15 RPM. Bound spend with a Cloud Console **spend cap** budget scoped to the Gemini API service (a plain budget only emails you). https://aistudio.google.com/app/apikey |
 | `SUPABASE_SERVICE_ROLE_KEY` | Bypasses RLS. Used server-side by the HMAC webhooks (`/api/confirm-purchase`, `/api/orphan-inbound-sms`, `/api/reverse-purchase`), `/api/cron/expire-pending`, `/api/optimize` (the service-role-only credit RPCs from migration 008), and the admin dispatcher. |
 | `BKASH_WEBHOOK_SECRET` | HMAC-SHA256 secret shared with the Flutter SMS-watcher in `apps/mobile/`. Generate with `openssl rand -hex 32`. |
 | `BKASH_WEBHOOK_REQUIRE_TIMESTAMP` | Optional. Set to `'true'` to enforce webhook protocol v2 (timestamp ±5min window + nonce replay protection, migration 011). Default (unset) accepts the legacy unsigned-timestamp path. |
@@ -44,7 +42,7 @@ See [`.env.example`](./.env.example) for the full annotated list. In short:
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon key. Public by design; RLS gates every table. |
 | `VITE_BKASH_PAYMENT_NUMBER` | Operator's bKash number, shown in the purchase modal. |
 
-**Never put `VITE_GEMINI_API_KEY` or `VITE_GROQ_API_KEY` in your env.** AI keys are server-only; the proxy at `/api/*` is the only thing that talks to providers. If you see a `VITE_GEMINI_API_KEY` instruction in an older doc, ignore it — it predates the proxy migration.
+**Never put `VITE_GEMINI_API_KEY` in your env.** The AI key is server-only; the proxy at `/api/*` is the only thing that talks to Google. If you see a `VITE_GEMINI_API_KEY` instruction in an older doc, ignore it — it predates the proxy migration.
 
 ## Database
 
@@ -71,6 +69,7 @@ At time of writing, the full set is:
 - `017_delete_user_complete.sql` *(fix account deletion — cascade the remaining child tables)*
 - `018_guided_mode.sql` *(Guided Mode questionnaire — `guided` JSONB + `input_mode`)*
 - `019_guided_free_for_existing_text.sql` *(Guided Mode data-loss fix for existing text)*
+- `020_ai_failure_telemetry.sql` *(AI failure taxonomy on `ai_call_log` — `error_code`, `error_message`, `model_attempts`, `thought_tokens`, `attempt_count`; adds `v_ai_failures_daily` + `v_ai_model_health`)*
 
 See [`DEPLOYING.md`](./DEPLOYING.md) for the full first-deploy walk-through.
 
@@ -93,7 +92,7 @@ There is no automated test suite. Verification = the two commands above + a manu
 ## What's in the box
 
 - Multi-step Builder (Personal info → Sections → Experience → Projects → Education → Skills → Extras → Languages → References → Generate → Preview)
-- AI via OpenRouter (single key) when `OPENROUTER_API_KEY` is set — Gemini 2.5 Flash optimizer + Gemini-Flash toolkit + Gemini-Flash-Lite extractor, each with a `models[]` fallback chain; falls back to legacy Groq→Gemini otherwise. Gated in `api/_lib/aiFactory.ts`
+- AI via direct Google Gemini (single key) — `gemini-3.5-flash-lite` optimizer + toolkit + extractor, with `gemini-3.6-flash` / `gemini-3.1-flash-lite` as the next hops, walked client-side inside one shared deadline. Gated in `api/_lib/aiFactory.ts`. Every hop is Google, so a Google-wide outage takes all AI down at once — a knowingly accepted trade
 - One combined toolkit generator (cover letter + outreach email + LinkedIn note + interview prep) — the "2-call hot path"
 - bKash purchase flow with HMAC-signed Flutter watcher confirmation (see `apps/mobile/`)
 - Operator admin SPA at `/admin` (Dashboard / Users / Purchases / Disputes / Orphans / Parser failures / Audit log / Settings)

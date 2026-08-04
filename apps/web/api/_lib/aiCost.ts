@@ -13,8 +13,16 @@ export interface PricePer1M {
 
 // Approximate list prices (USD / 1M tokens). See note above.
 const PRICE_TABLE: Record<string, PricePer1M> = {
-  // Direct-provider model ids (Groq/Gemini path — recorded without a provider prefix).
+  // ── Direct Google Gemini (bare ids — the active path) ───────────────────
+  // Verified against ai.google.dev/gemini-api/docs/pricing on 2026-08-04.
+  // NOTE: gemini-2.5-* are unreachable on our key (404 "not available to new
+  // users"); their prices stay only so historical rows still cost out.
+  'gemini-3.5-flash-lite': { in: 0.30, out: 2.50 },
+  'gemini-3.1-flash-lite': { in: 0.25, out: 1.50 },
+  'gemini-3.6-flash': { in: 1.50, out: 7.50 },
+  'gemini-3.5-flash': { in: 1.50, out: 9.00 },
   'gemini-2.5-flash': { in: 0.30, out: 2.50 },
+  'gemini-2.5-flash-lite': { in: 0.10, out: 0.40 },
   'llama-3.3-70b-versatile': { in: 0.59, out: 0.79 },
 };
 
@@ -30,6 +38,14 @@ function priceFor(model?: string): PricePer1M {
   if (!model) return FALLBACK_PRICE;
   if (PRICE_TABLE[model]) return PRICE_TABLE[model];
   const m = model.toLowerCase();
+  // Order matters: every '-flash-lite' family test MUST precede its '-flash'
+  // sibling, because 'gemini-3.5-flash' is a substring of
+  // 'gemini-3.5-flash-lite'. Getting this backwards silently bills a $0.30
+  // model at the $1.50 rate.
+  if (m.includes('gemini-3.5-flash-lite')) return { in: 0.30, out: 2.50 };
+  if (m.includes('gemini-3.1-flash-lite')) return { in: 0.25, out: 1.50 };
+  if (m.includes('gemini-3.6-flash')) return { in: 1.50, out: 7.50 };
+  if (m.includes('gemini-3.5-flash')) return { in: 1.50, out: 9.00 };
   if (m.includes('gemini-2.5-flash-lite')) return { in: 0.10, out: 0.40 };
   if (m.includes('gemini-2.5-flash')) return { in: 0.30, out: 2.50 };
   if (m.includes('deepseek-v3') || m.includes('deepseek-chat')) return { in: 0.229, out: 0.343 };
@@ -43,14 +59,23 @@ export function estimateTokens(text: string | undefined | null): number {
   return Math.ceil(text.length / 4);
 }
 
-// cost = prompt/1e6*in + completion/1e6*out. Returns USD as a number.
+// cost = prompt/1e6*in + (completion + thoughts)/1e6*out. Returns USD.
+//
+// Thought tokens bill at the OUTPUT rate on Gemini 3.x, so they belong on the
+// output side, not ignored. Omitting them is not a rounding error: at its
+// default thinking level gemini-3.6-flash produced 721 thought tokens against
+// 147 visible output tokens in testing, i.e. ~85% of the true output cost would
+// go unrecorded. The client forces thinkingLevel MINIMAL (which measured 0
+// thoughts on every model), so this should normally be 0 — a non-zero value
+// here is the signal that something is calling a model without that setting.
 export function computeCostUsd(
   promptTokens: number,
   completionTokens: number,
-  model?: string
+  model?: string,
+  thoughtTokens = 0
 ): number {
   const p = priceFor(model);
-  return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out;
+  return (promptTokens / 1e6) * p.in + ((completionTokens + thoughtTokens) / 1e6) * p.out;
 }
 
 // What a provider/generator filled in (subset of UsageSink, kept structural so
@@ -60,6 +85,8 @@ export interface ResolvedUsage {
   model?: string;
   promptTokens?: number;
   completionTokens?: number;
+  /** Gemini 3.x thinking tokens, billed at the output rate. */
+  thoughtTokens?: number;
 }
 
 export interface CostFields {
@@ -67,6 +94,7 @@ export interface CostFields {
   model?: string;
   promptTokens: number;
   completionTokens: number;
+  thoughtTokens: number;
   costUsd: number;
 }
 
@@ -82,11 +110,13 @@ export function resolveCost(
     usage.promptTokens ?? estimateTokens(fallbackInputText);
   const completionTokens =
     usage.completionTokens ?? estimateTokens(fallbackOutputText);
+  const thoughtTokens = usage.thoughtTokens ?? 0;
   return {
     provider: usage.provider,
     model: usage.model,
     promptTokens,
     completionTokens,
-    costUsd: computeCostUsd(promptTokens, completionTokens, usage.model),
+    thoughtTokens,
+    costUsd: computeCostUsd(promptTokens, completionTokens, usage.model, thoughtTokens),
   };
 }

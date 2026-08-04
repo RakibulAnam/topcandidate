@@ -31,3 +31,6 @@ TEST_ACCOUNT.local.md
 *.sln
 *.sw?
 .vercel
+
+# quality-audit.ts ats output
+ats-audit-resume.pdf

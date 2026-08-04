@@ -368,6 +368,29 @@ create index ai_call_log_user_created_idx on ai_call_log(user_id, created_at des
 
 alter table ai_call_log enable row level security;
 
+-- SECURITY (migrations 021 + 022). The analytics views are OPERATOR-only: they are
+-- owned by postgres with security_invoker, and public roles have no SELECT — every
+-- consumer is an /admin handler on SUPABASE_SERVICE_ROLE_KEY, which bypasses both.
+-- Without this they were readable by anyone holding the (public) anon key.
+revoke all on v_daily_revenue, v_daily_signups, v_daily_ai_usage,
+              v_credit_liability, v_ai_failures_daily, v_ai_model_health
+  from anon, authenticated;
+alter view v_daily_revenue     set (security_invoker = true);
+alter view v_daily_signups     set (security_invoker = true);
+alter view v_daily_ai_usage    set (security_invoker = true);
+alter view v_credit_liability  set (security_invoker = true);
+alter view v_ai_failures_daily set (security_invoker = true);
+alter view v_ai_model_health   set (security_invoker = true);
+alter default privileges in schema public revoke select on tables from anon;
+
+-- profiles is NOT a public/social profile — it holds full_name, email, phone,
+-- location, links and toolkit_credits. The Supabase boilerplate policy
+-- ("Public profiles are viewable by everyone.", USING (true)) leaked the whole
+-- user base; own-row only.
+drop policy if exists "Public profiles are viewable by everyone." on profiles;
+create policy "Users can view own profile" on profiles
+  for select using (auth.uid() = id);
+
 create policy "Users can view own ai_call_log" on ai_call_log
   for select using (auth.uid() = user_id);
 
@@ -1400,6 +1423,17 @@ alter table ai_call_log add column if not exists completion_tokens integer;
 alter table ai_call_log add column if not exists cost_usd numeric(12,6);
 alter table ai_call_log add column if not exists status text;
 alter table ai_call_log add column if not exists latency_ms integer;
+-- AI failure diagnosis (migration 020). error_code taxonomy is defined by
+-- GeminiErrorCode in src/infrastructure/ai/GeminiClient.ts and is intentionally
+-- NOT constrained here — logCall() swallows its own errors, so a CHECK
+-- violation would silently drop the row instead of failing loudly.
+alter table ai_call_log add column if not exists error_code text;
+alter table ai_call_log add column if not exists error_message text;
+alter table ai_call_log add column if not exists model_attempts jsonb;
+alter table ai_call_log add column if not exists thought_tokens integer;
+alter table ai_call_log add column if not exists attempt_count smallint;
+create index if not exists ai_call_log_errors_idx
+  on ai_call_log (created_at desc, error_code) where error_code is not null;
 do $$ begin
   if exists (select 1 from pg_constraint where conname='ai_call_log_kind_check' and conrelid='public.ai_call_log'::regclass) then
     alter table ai_call_log drop constraint ai_call_log_kind_check;
@@ -1424,12 +1458,37 @@ create or replace view v_daily_revenue as
   from purchases where status='completed' group by 1;
 create or replace view v_daily_signups as
   select date(created_at) as day, count(*) as signups from profiles group by 1;
+-- Thought tokens count toward the token total (they bill at the output rate),
+-- and each column is coalesced individually: sum(a+b) yields NULL for any row
+-- where either column is null, so sum() skipped those rows entirely and
+-- pre-telemetry rows were silently excluded from total_tokens.
 create or replace view v_daily_ai_usage as
   select date(created_at) as day, count(*) as calls,
          count(*) filter (where status='error') as errors,
          coalesce(sum(cost_usd),0) as cost_usd,
-         coalesce(sum(prompt_tokens+completion_tokens),0) as total_tokens
+         coalesce(sum(coalesce(prompt_tokens,0)+coalesce(completion_tokens,0)+coalesce(thought_tokens,0)),0) as total_tokens,
+         coalesce(sum(coalesce(thought_tokens,0)),0) as thought_tokens
   from ai_call_log group by 1;
+-- "Which calls fail, and why" — the surface the OpenRouter setup never had.
+create or replace view v_ai_failures_daily as
+  select date(created_at) as day, kind, coalesce(error_code,'unclassified') as error_code,
+         count(*) as failures, round(avg(latency_ms)) as avg_latency_ms,
+         round(avg(attempt_count),2) as avg_attempts, max(error_message) as sample_message
+  from ai_call_log where status='error'
+    -- Migration 023: insufficient_credits (402) rows are logged so a rejected
+    -- request still counts toward the daily cap, but no AI call ran behind them.
+    -- Left in, they showed up as 'unclassified' beside real provider failures.
+    and coalesce(error_code,'') <> 'insufficient_credits'
+  group by 1,2,3;
+-- Per-model health from model_attempts (the `model` column records only
+-- whichever model ultimately served the response, hiding failed chain steps).
+create or replace view v_ai_model_health as
+  select a.attempt->>'model' as model, count(*) as attempts,
+         count(*) filter (where (a.attempt->>'ok')::boolean) as successes,
+         count(*) filter (where not (a.attempt->>'ok')::boolean) as failures,
+         round(avg((a.attempt->>'ms')::numeric)) as avg_ms
+  from ai_call_log l cross join lateral jsonb_array_elements(l.model_attempts) as a(attempt)
+  where l.model_attempts is not null group by 1;
 create or replace view v_credit_liability as
   select coalesce(sum(toolkit_credits) filter (where toolkit_credits>0),0) as outstanding_credits,
          count(*) filter (where toolkit_credits<0) as negative_balance_users
@@ -1442,3 +1501,67 @@ language sql security definer set search_path = public as $$
   select u.id, u.email::text from auth.users u where u.id = any(p_ids);
 $$;
 revoke all on function public.admin_auth_emails(uuid[]) from public, anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Atomic AI-call reservation (migration 024)
+-- ─────────────────────────────────────────────────────────────────────────
+-- The daily caps used to be a read-then-write: count ai_call_log, then INSERT
+-- only AFTER the provider returned. The gap between the two was the full provider
+-- latency (5-30s), so a parallel burst all read the same pre-burst count and all
+-- passed. reserve_ai_call closes it by counting and inserting a 'pending' row in
+-- one advisory-locked transaction; finalize_ai_call fills in the outcome later.
+create or replace function reserve_ai_call(
+  p_kind text, p_overall_cap int, p_kind_cap int default 0, p_excluded_kinds text[] default '{}'
+) returns uuid
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_user uuid := auth.uid(); v_overall int; v_kind int; v_id uuid;
+  v_exempt boolean := p_kind = any(p_excluded_kinds);
+begin
+  if v_user is null then raise exception 'not_authenticated'; end if;
+  -- Per-user lock: without it, two concurrent transactions both read the
+  -- pre-burst count under READ COMMITTED. Released automatically at commit.
+  perform pg_advisory_xact_lock(hashtextextended(v_user::text, 0));
+  select count(*) filter (where kind <> all(p_excluded_kinds)),
+         count(*) filter (where kind = p_kind)
+    into v_overall, v_kind
+  from ai_call_log
+  where user_id = v_user and created_at >= now() - interval '24 hours';
+  if not v_exempt and v_overall >= p_overall_cap then
+    raise exception 'rate_limited:%:%:overall', v_overall, p_overall_cap;
+  end if;
+  if p_kind_cap > 0 and v_kind >= p_kind_cap then
+    raise exception 'rate_limited:%:%:%', v_kind, p_kind_cap, p_kind;
+  end if;
+  insert into ai_call_log (user_id, kind, status)
+  values (v_user, p_kind, 'pending') returning id into v_id;
+  return v_id;
+end; $$;
+
+-- A function, NOT an UPDATE policy on ai_call_log: a policy would let a user
+-- rewrite any of their own telemetry rows, destroying the audit trail the caps
+-- depend on. This can only touch the row id it is given, and only if it is theirs.
+create or replace function finalize_ai_call(p_id uuid, p_meta jsonb)
+returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update ai_call_log set
+    provider          = coalesce(p_meta->>'provider', provider),
+    model             = coalesce(p_meta->>'model', model),
+    prompt_tokens     = coalesce((p_meta->>'prompt_tokens')::int, prompt_tokens),
+    completion_tokens = coalesce((p_meta->>'completion_tokens')::int, completion_tokens),
+    thought_tokens    = coalesce((p_meta->>'thought_tokens')::int, thought_tokens),
+    cost_usd          = coalesce((p_meta->>'cost_usd')::numeric, cost_usd),
+    status            = coalesce(p_meta->>'status', status),
+    latency_ms        = coalesce((p_meta->>'latency_ms')::int, latency_ms),
+    error_code        = coalesce(p_meta->>'error_code', error_code),
+    error_message     = coalesce(p_meta->>'error_message', error_message),
+    model_attempts    = coalesce(p_meta->'model_attempts', model_attempts),
+    attempt_count     = coalesce((p_meta->>'attempt_count')::smallint, attempt_count)
+  where id = p_id and user_id = auth.uid();
+end; $$;
+
+revoke all on function reserve_ai_call(text, int, int, text[]) from public, anon;
+revoke all on function finalize_ai_call(uuid, jsonb) from public, anon;
+grant execute on function reserve_ai_call(text, int, int, text[]) to authenticated, service_role;
+grant execute on function finalize_ai_call(uuid, jsonb) to authenticated, service_role;

@@ -112,8 +112,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       BKASH_WEBHOOK_SECRET: Boolean(process.env.BKASH_WEBHOOK_SECRET),
       SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
       CRON_SECRET: Boolean(process.env.CRON_SECRET),
+      // GEMINI_API_KEY is the ONLY AI key now — GROQ_API_KEY was dropped with the
+      // OpenRouter exit. Reporting a key nothing reads would show a permanent
+      // red-looking `false` in the health panel and imply a misconfiguration.
       GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
-      GROQ_API_KEY: Boolean(process.env.GROQ_API_KEY),
     },
     serverTimeUtc: new Date().toISOString(),
   });

@@ -22,6 +22,7 @@ import {
   CONTACT_SEPARATOR,
   type ContactSegment,
 } from '../templates/contactLinks';
+import { formatResumeDate } from '../templates/dateFormat';
 import {
   Download,
   FileText,
@@ -226,20 +227,9 @@ const ContactSegmentsLine: React.FC<{
   </div>
 );
 
-const formatDate = (dateString: string | undefined): string => {
-  if (!dateString) return '';
-  const s = dateString.toLowerCase();
-  if (s === 'present' || s === 'current') return 'Present';
-
-  const match = dateString.match(/^(\d{4})-(\d{2})$/);
-  if (match) {
-    const year = parseInt(match[1], 10);
-    const month = parseInt(match[2], 10) - 1;
-    const date = new Date(year, month);
-    return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-  }
-  return dateString;
-};
+// Single source of truth, shared with PdfResumeExporter so the preview and the
+// download cannot drift (they had: the PDF was printing raw "2022-03").
+const formatDate = formatResumeDate;
 
 interface PreviewProps {
   data: ResumeData;
@@ -740,7 +730,7 @@ export const Preview: React.FC<PreviewProps> = ({
               <div key={cert.id} style={itemBlockStyle}>
                 <div style={itemTitleRowStyle}>
                   <h4 style={itemTitleStyle}>{cert.name}</h4>
-                  <span style={itemMetaStyle}>{cert.date}</span>
+                  <span style={itemMetaStyle}>{formatDate(cert.date)}</span>
                 </div>
                 <div style={italicLineStyle}>{cert.issuer}</div>
               </div>
@@ -787,7 +777,7 @@ export const Preview: React.FC<PreviewProps> = ({
             <div key={award.id} style={itemBlockStyle}>
               <div style={itemTitleRowStyle}>
                 <h4 style={itemTitleStyle}>{award.title}</h4>
-                <span style={itemMetaStyle}>{award.date}</span>
+                <span style={itemMetaStyle}>{formatDate(award.date)}</span>
               </div>
               <div style={bodyTextStyle}>
                 {award.issuer}
@@ -1395,7 +1385,10 @@ export const Preview: React.FC<PreviewProps> = ({
           {activeTab === 'interviewPrep' && (
             <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending) === 'success' ? (
-                <InterviewPrepViewer questions={data.toolkit!.interviewQuestions!} />
+                <InterviewPrepViewer
+                  questions={data.toolkit!.interviewQuestions!}
+                  prepTopics={data.toolkit?.prepTopics}
+                />
               ) : (
                 <ToolkitStatusCard
                   icon={MessageSquare}

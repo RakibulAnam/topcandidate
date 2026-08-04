@@ -7,11 +7,13 @@
     "dev": "vite",
     "dev:full": "vercel dev",
     "typecheck:api": "tsc -p tsconfig.api.json",
+    "ai:selftest": "tsx scripts/ai-probe.ts selftest",
+    "ai:bench": "tsx scripts/ai-probe.ts bench",
     "build": "npm run typecheck:api && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.30.0",
+    "@google/genai": "^2.15.0",
     "@radix-ui/react-popover": "^1.1.15",
     "@supabase/supabase-js": "^2.93.2",
     "@types/validator": "^13.15.10",

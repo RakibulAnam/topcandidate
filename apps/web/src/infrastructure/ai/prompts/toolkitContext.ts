@@ -25,9 +25,11 @@
 //      • assertOutreachSpecificity — outreach + LinkedIn output must
 //        reference both the target company and the candidate's own work
 //        (proper noun) — not just generic JD language.
-//      • assertInterviewAnchor — interview answerStrategy text must point
-//        to a real candidate proper noun (company / role / project /
-//        certification / school) instead of vague "your relevant experience".
+//    NOT a guard, despite the export: assertInterviewAnchorCoverage has NO call
+//    sites. Interview prep deliberately has no fabrication or anchor-coverage
+//    gate (removed 2026-06-10) — questions must be able to probe JD tech the
+//    candidate has not used yet, which is the whole point of rehearsal. Only
+//    countAnchoredStrategies runs, as console.info telemetry.
 
 import { ResumeData } from '../../../domain/entities/Resume.js';
 
@@ -722,9 +724,56 @@ export class ToolkitSpecificityError extends Error {
 // Tokens that look "tech-y" but are genuinely safe to mention without
 // being in evidence — common methodology / generic terms the model uses
 // to describe approaches. Keep this short; over-allowing weakens the guard.
+//
+// CURRENTLY UNREACHABLE BY CONSTRUCTION, and that is fine. detectFabricatedTokens
+// only iterates FABRICATION_TOKEN_DICTIONARY, and none of these 13 words is in
+// it — each appears exactly once in this file, here. So the `has()` check below
+// never fires today. It is a FORWARD guard: it costs nothing and it means adding
+// 'SQL' or 'REST' to the dictionary cannot immediately start rejecting ordinary
+// prose. Do not "clean it up" as dead code, and do not assume it is protecting
+// anything right now either.
 const FABRICATION_SAFELIST = new Set<string>([
   'agile', 'rest', 'sql', 'http', 'json', 'api', 'apis', 'frontend',
   'backend', 'fullstack', 'mobile', 'web', 'cloud',
+]);
+
+/**
+ * Dictionary tokens that are ALSO ordinary English words, matched CASE-SENSITIVELY
+ * against the raw output instead of the lowercased copy.
+ *
+ * The guard lowercases everything before matching, so the whole-word test cannot
+ * tell the product from the plain word. Measured 2026-08-04: a garments
+ * merchandiser's cover letter reading "...plan for lead-time risk rather than
+ * react to it" was rejected as fabricating React. She would never claim React;
+ * she used a verb. The slot lands in the errors map with no reason the user can
+ * act on, and it hits hardest in exactly the non-tech BD industries (garments,
+ * shipping, banking, NGO) the dictionary was extended to serve — "docker" is a
+ * dock worker, "svelte" is an adjective.
+ *
+ * Case is the honest discriminator: prose naming the product capitalises it
+ * ("built with React", "containerised with Docker"), prose using the word does
+ * not. So a genuine fabricated claim is still caught, while the English usage is
+ * not.
+ *
+ * This CONTINUES an intent the dictionary already states. See the "Removed:"
+ * note above the languages block — 'Go', 'Rust', 'Swift' and 'R' were deleted
+ * outright for exactly this collision. Deletion costs all detection for those
+ * tokens; case-sensitivity keeps it, which is why the ones below are handled here
+ * rather than removed too.
+ *
+ * Every entry is verified present in FABRICATION_TOKEN_DICTIONARY — listing a
+ * token that isn't in it would be dead configuration that reads like protection.
+ */
+const AMBIGUOUS_WITH_ENGLISH = new Set<string>([
+  'react',     // "react to a delay"
+  'docker',    // a dock worker — plausible in a shipping or garments CV
+  'angular',   // adjective
+  'svelte',    // adjective (slim, elegant)
+  'terraform', // verb
+  'ansible',   // noun
+  'java',      // the island, and the coffee
+  'python',    // the snake
+  'kotlin', 'scala', 'astro',
 ]);
 
 // Look for each token in the FABRICATION_TOKEN_DICTIONARY as a whole-word,
@@ -804,6 +853,11 @@ const TECH_TOKEN_ALIASES: Record<string, string[]> = {
   'nokia siemens': ['nokia'],
 };
 
+/** Regex-escape a token while preserving its original case. */
+function escapeExact(token: string): string {
+  return token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function detectFabricatedTokens(output: string, evidence: string): string[] {
   const lcOutput = ` ${output.toLowerCase()} `;
   const lcEvidence = evidence; // already lowercased
@@ -817,13 +871,23 @@ export function detectFabricatedTokens(output: string, evidence: string): string
 
     const escaped = lcToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const wordBoundary = /^[a-z0-9]/.test(lcToken) ? '\\b' : '';
-    const re = new RegExp(`${wordBoundary}${escaped}${/[a-z0-9]$/.test(lcToken) ? '\\b' : ''}`, 'i');
-    if (!re.test(lcOutput)) continue;
+    const tail = /[a-z0-9]$/.test(lcToken) ? '\\b' : '';
+    // Tokens that double as English words are matched case-SENSITIVELY against
+    // the raw output, so "React" the framework is caught and "react" the verb is
+    // not. Everything else stays case-insensitive on the lowercased copy.
+    const ambiguous = AMBIGUOUS_WITH_ENGLISH.has(lcToken);
+    const re = new RegExp(`${wordBoundary}${ambiguous ? escapeExact(token) : escaped}${tail}`, ambiguous ? '' : 'i');
+    if (!re.test(ambiguous ? ` ${output} ` : lcOutput)) continue;
 
     seen.add(lcToken);
-    if (lcEvidence.includes(lcToken)) continue;
+    // Word-boundary the EVIDENCE side too. A bare includes() let an unrelated
+    // longer word mask a fabricated claim — evidence saying "moved swiftly" made
+    // a fabricated "Swift" pass — so the guard was strict about the output and
+    // loose about the thing it compares against.
+    const evidenceRe = new RegExp(`${wordBoundary}${escaped}${tail}`, 'i');
+    if (evidenceRe.test(lcEvidence)) continue;
     const aliases = TECH_TOKEN_ALIASES[lcToken] ?? [];
-    if (aliases.some(a => lcEvidence.includes(a))) continue;
+    if (aliases.some(a => new RegExp(`\\b${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(lcEvidence))) continue;
 
     fabricated.push(token);
   }
@@ -942,6 +1006,20 @@ export function countAnchoredStrategies(
   return count;
 }
 
+/**
+ * ⚠️ DEAD BY DESIGN — this has NO call sites and must not be given any.
+ *
+ * Interview prep intentionally has no fabrication or anchor-coverage gate
+ * (removed 2026-06-10 after it blocked legitimate questions in production, e.g.
+ * flagging "Objective-C" because it was absent from the résumé). Questions are
+ * supposed to probe what the JD demands — including tools the candidate has yet
+ * to learn — so a candidate can rehearse honestly. Blocking on absence defeats
+ * the feature.
+ *
+ * Kept, not deleted, so the rationale stays next to the code someone would
+ * otherwise re-add from scratch. Quality is steered by the prompt; observability
+ * by countAnchoredStrategies. See AGENTS.md §4 fit-mode dispatch.
+ */
 export function assertInterviewAnchorCoverage(
   strategies: string[],
   data: ResumeData

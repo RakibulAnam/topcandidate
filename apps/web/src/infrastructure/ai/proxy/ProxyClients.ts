@@ -26,7 +26,7 @@ import { IToolkitGenerator } from '../../../domain/usecases/GenerateToolkitUseCa
 import { ICoverLetterGenerator } from '../../../domain/usecases/GenerateCoverLetterUseCase';
 import { IOutreachEmailGenerator } from '../../../domain/usecases/GenerateOutreachEmailUseCase';
 import { ILinkedInMessageGenerator } from '../../../domain/usecases/GenerateLinkedInMessageUseCase';
-import { IInterviewQuestionsGenerator } from '../../../domain/usecases/GenerateInterviewQuestionsUseCase';
+import { IInterviewQuestionsGenerator, InterviewPrep } from '../../../domain/usecases/GenerateInterviewQuestionsUseCase';
 import { ExtractedProfileData, IResumeExtractor } from '../../../domain/usecases/ExtractResumeUseCase';
 
 // ────────────────────────────────────────────────
@@ -50,7 +50,16 @@ interface ApiError {
 // switch on `code` (e.g. open the purchase modal on 'insufficient_credits')
 // without having to string-match the friendly message.
 export class ApiCallError extends Error {
-  constructor(message: string, public status: number, public code?: string) {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+    // Only present on a 429: how many calls the user has made today and the cap
+    // they hit. Parsed off the body but previously dropped here, so the client
+    // could not tell the user which limit they hit or what the numbers were.
+    public used?: number,
+    public cap?: number,
+  ) {
     super(message);
     this.name = 'ApiCallError';
   }
@@ -113,7 +122,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     // 429s carry a server-built message that already names the limit that was
     // hit (overall daily cap vs the stricter free-resume cap) — pass it
     // through rather than rebuilding a generic one here.
-    throw new ApiCallError(friendly, res.status, errorBody?.code);
+    throw new ApiCallError(friendly, res.status, errorBody?.code, errorBody?.used, errorBody?.cap);
   }
 
   console.info(`[proxy] ${path} 200 rid=${rid} ${elapsed}ms`);
@@ -189,8 +198,13 @@ export class ProxyLinkedInMessageGenerator implements ILinkedInMessageGenerator 
 }
 
 export class ProxyInterviewQuestionsGenerator implements IInterviewQuestionsGenerator {
-  generate(data: ResumeData): Promise<InterviewQuestion[]> {
-    return regenerateItem<InterviewQuestion[]>('interviewQuestions', data);
+  async generate(data: ResumeData): Promise<InterviewPrep> {
+    const result = await regenerateItem<InterviewPrep | InterviewQuestion[]>('interviewQuestions', data);
+    // Back-compat: before prep topics, this endpoint returned a bare question
+    // array. A client running against an older deployment (or a cached function)
+    // must not crash on the old shape.
+    if (Array.isArray(result)) return { questions: result, prepTopics: [] };
+    return { questions: result?.questions ?? [], prepTopics: result?.prepTopics ?? [] };
   }
 }
 

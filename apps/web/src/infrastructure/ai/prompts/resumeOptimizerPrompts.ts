@@ -1,12 +1,16 @@
 // Shared prompt + validation logic for the resume optimizer.
 //
-// Used by GeminiResumeOptimizer (which passes a separate `responseSchema` to
-// the Gemini SDK) and GroqResumeOptimizer (which embeds the JSON shape spec
-// in the user prompt because OpenAI-compatible JSON mode does not enforce a
-// schema). Keeping all prompt text + validation in one place ensures the two
-// providers stay in lockstep on the rules — the rules are the product, not
-// the SDK.
+// Used by GeminiResumeOptimizer, which passes OPTIMIZER_SCHEMA (below) as
+// `responseJsonSchema` AND embeds the shape spec in the user prompt via
+// buildUserPrompt(data, { embedSchemaSpec: true }). Both are needed: a JSON
+// schema cannot express "echo back exactly these input IDs", so the prompt
+// states it and validateOptimizedResponse() is the final gate.
+//
+// Keeping all prompt text + validation here — rather than in the generator —
+// is what let the provider swap from Groq/OpenRouter to direct Gemini without
+// touching a single rule. The rules are the product; the SDK is not.
 
+import { detectFabricatedTokens } from './toolkitContext.js';
 import { ResumeData, OptimizedResumeData } from '../../../domain/entities/Resume.js';
 
 // ────────────────────────────────────────────────
@@ -28,8 +32,11 @@ RULES:
 1. KEYWORD MIRRORING — Use exact JD casing ("JavaScript", "Node.js", "Next.js"). Lift multi-word JD phrases verbatim where the candidate's work supports them ("design system", "distributed systems", "WCAG 2.2 AA", "Core Web Vitals", "Infrastructure as Code", "incident response", "on-call rotation", "feature flags", "stakeholder management"). ATS exact-match scoring penalizes synonyms.
 
 2. ZERO FABRICATION — Never invent metrics, %, $, team sizes, durations, tools, or outcomes. Preserve every number from input verbatim. If no metric exists, write a qualitative impact statement.
-   SKILL HONESTY: a skill may appear in 'skills' ONLY IF it is in the candidate's input skills, an experience description, a project description, or a project 'technologies' field. If the JD demands a tool the candidate never evidenced, DO NOT add it.
-   Bullets: never name a tool unless the candidate evidenced it.
+   SKILL HONESTY — two different tests, do not confuse them:
+   (a) NAMED ASSETS (a specific product, library, framework, platform, brand, employer, certification, licence or degree — "SQLite", "Room", "Kubernetes", "AWS", "Tally", "SAP", "H&M", "CPA", "IELTS"): include ONLY if the candidate NAMED it. Never infer one. If they wrote "local database", the skill is "Local Data Persistence" — NOT "Room" or "SQLite". If they wrote "accounting software", it is not "Tally". If the JD demands a named asset the candidate never named, DO NOT add it, in skills or in bullets. These are checkable facts and a wrong one is caught in the first interview question.
+   (b) COMPETENCY LABELS (the industry-standard NAME for work the candidate actually described — "Medication Administration", "Vital Signs Monitoring", "Bank Reconciliation", "Lesson Planning", "Curriculum Development", "REST API Integration", "Production Planning", "Export Documentation"): you SHOULD supply these. Users describe their work in plain language or Banglish — "injection dei", "bank er statement er shathe khata milai", "ki porabo tar plan banai" — and naming that work the way recruiters and ATS systems search for it is your JOB. Omitting it is a failure, not caution.
+   For EVERY skill whose EXACT label does not appear verbatim in the candidate's own text, add an entry to 'skillEvidence' with the skill and a VERBATIM quote (2-15 words) from their description that entails it. This includes an asset they DID name but informally — they typed "excel", you write "MS Excel": that is not verbatim, so ground it with their word. When in doubt, add the entry; an ungrounded skill is deleted, a grounded one is never penalised. Quote their exact words, in whatever language they wrote — do not translate, do not paraphrase, do not invent. A skill in (b) with no real quote will be DELETED, so ground everything you claim.
+   Bullets: same rule — describe the work in professional terminology, but never name an asset the candidate did not name.
 
 3. BULLETS — Start with a strong past-tense action verb. Present tense is ONLY for ongoing duties in the current role; completed, shipped deliverables keep past tense ("Migrated", "Shipped", "Redesigned") even inside the current role — finished wins must read as finished. Use Led, Owned, Drove, Architected, Built, Designed, Shipped, Launched, Deployed, Refactored, Migrated, Automated, Scaled, Reduced, Increased, Improved, Cut, Accelerated, Established, Standardized, Mentored, Resolved, Eliminated.
    Banned starts (instant reject): "Responsible for", "Worked on", "Helped with/to", "Duties included", "Tasked with", "In charge of", "Assisted with/in", "Involved in", "Participated in", first-person.
@@ -179,7 +186,8 @@ Then emit JSON only.
 
 TASK
 1. summary — Per the SUMMARY rule. SYNTHESIS, not duplication: surface the *pattern* across roles, never restate a single bullet. Aim for differentiation — what about this candidate would make a recruiter (or an LLM ranker) move them past the first cut for THIS specific JD? If the only metric available is a single bullet's number, do NOT use it in the summary; rely on tenure, domain, and stack instead.
-2. skills — JD-matched first (in JD casing), then candidate's. SKILL HONESTY: include only what the candidate evidenced. If you want to add a JD-required skill the candidate doesn't have, DO NOT.
+2. skills — JD-matched first (in JD casing), then candidate's. Apply RULE 2 SKILL HONESTY: name the candidate's described work in industry-standard terms (competency labels), but never infer a specific product/tool/certification they did not name.
+2b. skillEvidence — for each skill whose label is not literally in the candidate's text, {skill, quote} where quote is 5-15 words copied VERBATIM from their description (their language, not translated). Ungrounded skills are deleted.
 3. experience — Build each item's refinedBullets from its canonicalBullets (fall back to "description" when absent): SELECT the most JD-relevant subset, preserve every number. Reorder so the first bullet under each role is the most JD-aligned achievement. Strong verbs only.
 4. projects — Same rules. Integrate "technologies" naturally.
 5. extracurriculars — Same rules.${schemaSpec}`;
@@ -384,21 +392,203 @@ function dedupeStringList(list: unknown[]): string[] {
 // project descriptions + project technologies + education fields +
 // certification names. Substring match (lowercased). Keeps everything that
 // appears in any of those; drops the rest.
+/**
+ * One model-supplied grounding: an industry-standard skill label plus the
+ * candidate's OWN words that entail it. Transient — stripped before the response
+ * leaves this module, never persisted or rendered.
+ */
+export interface SkillGrounding {
+  skill: string;
+  quote: string;
+}
+
+type OptimizerRawResponse = OptimizedResumeData & { skillEvidence?: SkillGrounding[] };
+
+/**
+ * Normalize for quote verification: lowercase, collapse whitespace, drop
+ * punctuation. The model re-types the quote rather than copying bytes, so it
+ * commonly differs in a comma or spacing from the original.
+ */
+function forQuoteMatch(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Is a model-supplied quote really the candidate's own words?
+ *
+ * Verified as a substring of the evidence corpus, so the model cannot invent a
+ * premise. Requires ≥3 significant words so a quote like "the" can't ground
+ * anything. Works in any language — the candidate's Banglish
+ * ("injection dei, saline lagai") is as valid a premise as English.
+ */
+function quoteIsReal(quote: string, evidenceNorm: string): boolean {
+  if (typeof quote !== 'string') return false;
+  const q = forQuoteMatch(quote);
+  // Two words and 10 characters, NOT three words. Banglish is dense: "injection
+  // dei" (I give injections) and "saline lagai" (I put up saline drips) are two
+  // words each and are complete, unambiguous premises for "Medication
+  // Administration" and "IV Therapy". A three-word floor measured as an
+  // English-language assumption that silently deleted correct nursing skills off
+  // a Bengali speaker's résumé. The character floor is what stops a junk quote
+  // ("ar o", "kaj kori") from grounding anything.
+  const words = q.split(' ').filter((w) => w.length >= 2);
+  if (words.length < 2 || q.length < 10) return false;
+  return evidenceNorm.includes(q);
+}
+
+/**
+ * Does this skill label name a specific ASSET the candidate never named?
+ *
+ * The line that matters. There are two different kinds of thing in a skills list
+ * and the old filter treated them identically:
+ *
+ *   • A NAMED ASSET is a checkable fact — a product, library, brand, employer or
+ *     credential ("SQLite", "Room", "Kubernetes", "AWS Certified", "H&M"). You
+ *     either used it or you didn't. Claiming one the candidate never named is
+ *     fabrication, and no amount of entailment fixes that: a candidate who wrote
+ *     "local database e save kore rakhi" did use SOME local store, but naming
+ *     Room specifically is a guess that collapses in the first interview
+ *     question.
+ *
+ *   • A COMPETENCY LABEL is the industry-standard NAME for work that was
+ *     described ("Medication Administration", "Bank Reconciliation", "Lesson
+ *     Planning", "Production Planning", "REST API integration"). It is not an
+ *     asset you possess; it is what the described activity is CALLED. Requiring
+ *     the label itself to appear in the evidence is backwards — the candidate
+ *     wrote "injection dei", and supplying "Medication Administration" is exactly
+ *     the translation this product exists to perform.
+ *
+ * Only the first kind needs literal evidence. Reuses detectFabricatedTokens so
+ * the asset dictionary has one definition shared with the toolkit guards.
+ */
+// English builds competency nouns with a small set of suffixes ("Reconciliation",
+// "Merchandising", "Procurement", "Preceptorship", "Compliance", "Mathematics").
+// Product and brand names essentially never carry them: Tally, SAP, Kubernetes,
+// Figma, Kotlin, Epic, Primavera. That asymmetry is what lets a single-token skill
+// be classified without a dictionary of every product on earth.
+const COMPETENCY_SUFFIXES = /(?:ing|ment|tion|sion|ity|ance|ence|ship|ery|ics|ology|ism|ure|age|al|cy)$/i;
+
+// Single-token competency nouns that carry no such suffix. Short and stable by
+// design — the escape hatch for the suffix rule, not a second dictionary.
+const COMMON_COMPETENCY_WORDS = new Set([
+  'sales', 'tax', 'audit', 'design', 'research', 'payroll', 'budget', 'finance',
+  'logistics', 'procurement', 'inventory', 'quality', 'safety', 'hygiene',
+  'compliance', 'outreach', 'fundraising', 'copywriting', 'bookkeeping',
+  'nursing', 'teaching', 'tutoring', 'catering', 'retail', 'wholesale',
+  'export', 'import', 'costing', 'pricing', 'invoicing', 'dispatch',
+  'welding', 'plumbing', 'masonry', 'tailoring', 'embroidery', 'cutting',
+  'triage', 'phlebotomy', 'radiology', 'pharmacy', 'physiotherapy',
+]);
+
+/**
+ * Does this skill label name a specific ASSET the candidate never named?
+ *
+ * The line that matters. There are two different kinds of thing in a skills list
+ * and the old filter treated them identically:
+ *
+ *   • A NAMED ASSET is a checkable fact — a product, library, brand, employer or
+ *     credential ("SQLite", "Room", "Kubernetes", "Tally", "SAP", "AWS Certified",
+ *     "H&M"). You either used it or you didn't. Claiming one the candidate never
+ *     named is fabrication, and no amount of entailment fixes it: a candidate who
+ *     wrote "local database e save kore rakhi" did use SOME local store, but
+ *     naming Room specifically is a guess that collapses on the first interview
+ *     question. This is the dishonesty that actually costs someone the job.
+ *
+ *   • A COMPETENCY LABEL is the industry-standard NAME for work that WAS
+ *     described ("Medication Administration", "Bank Reconciliation", "Lesson
+ *     Planning", "Production Planning", "REST API Integration"). It is not an
+ *     asset you possess; it is what the described activity is CALLED. Requiring
+ *     the label itself to appear in the evidence was backwards — the candidate
+ *     wrote "injection dei", and supplying "Medication Administration" is exactly
+ *     the translation this product exists to perform.
+ *
+ * Three tests, cheapest first. Deliberately NOT dictionary-only: the shared
+ * FABRICATION_TOKEN_DICTIONARY is tech-centric, so it blocks Kubernetes but sails
+ * past Tally and SAP — which would have quietly re-created the whole problem for
+ * every non-tech user, the exact blind spot this rework exists to remove.
+ */
+function namesUnevidencedAsset(skill: string, evidence: string): boolean {
+  // 1. Credentials: verifiable, and claiming one you lack is disqualifying.
+  if (/certif|licen|diploma|degree|award|accredit/i.test(skill)) return true;
+
+  // 2. Curated proper nouns (tech tools, brands, employers) absent from evidence.
+  if (detectFabricatedTokens(skill, evidence).length > 0) return true;
+
+  // 3. Structural fallback for products no dictionary lists. A one-token label
+  //    with no competency morphology, absent from the candidate's own words, is a
+  //    product name far more often than a skill. Multi-word labels are exempt:
+  //    those are overwhelmingly competency phrases, and any brand token inside one
+  //    ("MS Excel", "Adobe Photoshop") is what test 2 is for.
+  const tokens = skill.trim().split(/[\s/&,-]+/).filter(Boolean);
+  if (tokens.length !== 1) return false;
+  const word = tokens[0];
+  const lc = word.toLowerCase();
+  if (evidence.includes(lc)) return false;
+  if (COMMON_COMPETENCY_WORDS.has(lc)) return false;
+  if (COMPETENCY_SUFFIXES.test(lc)) return false;
+  return true;
+}
+
 export function filterFabricatedSkills(
   parsed: OptimizedResumeData,
   candidate: ResumeData
 ): { kept: string[]; fabricated: string[] } {
   const evidence = buildEvidenceText(candidate).toLowerCase();
+  const evidenceNorm = forQuoteMatch(buildEvidenceText(candidate));
+  const raw = parsed as OptimizerRawResponse;
+
+  // skill (lowercased) -> the candidate's own words the model says entail it.
+  const groundings = new Map<string, string>();
+  for (const g of raw.skillEvidence ?? []) {
+    if (g && typeof g.skill === 'string' && typeof g.quote === 'string') {
+      groundings.set(g.skill.trim().toLowerCase(), g.quote);
+    }
+  }
+
   const kept: string[] = [];
   const fabricated: string[] = [];
+  const inferred: string[] = [];
   for (const skill of parsed.skills ?? []) {
     if (typeof skill !== 'string') continue;
     const trimmed = skill.trim();
     if (!trimmed) continue;
-    if (skillEvidenced(trimmed, evidence)) kept.push(trimmed);
-    else fabricated.push(trimmed);
+
+    // Fast path: the label itself is in the evidence.
+    if (skillEvidenced(trimmed, evidence)) { kept.push(trimmed); continue; }
+
+    // THE ONLY HARD BLOCK: a checkable asset the candidate never named.
+    //
+    // The default here is deliberately "keep", which is the reverse of the
+    // original filter, and the reversal is the whole point. Measured across five
+    // career fields, requiring proof-of-label deleted 13 skills from a mobile
+    // dev, 11 from a nurse, and ALL 8 from an accountant — shipping a résumé with
+    // an empty skills section. The bullets already stated the same work, so
+    // nothing was made more honest; the deletions only stripped the ATS keywords
+    // out of the section ATS weights most heavily.
+    //
+    // The asymmetry decides it. Deleting a real competency is silent, invisible to
+    // the user, and costs them the interview. Keeping a competency label the
+    // candidate can defend — "Bank Reconciliation" for someone who wrote "bank er
+    // statement er shathe amader khata milai" — costs nothing, because it is a NAME
+    // for work they described, not a claim to an asset they lack. Only assets are
+    // checkable, and only assets are blocked.
+    if (namesUnevidencedAsset(trimmed, evidence)) { fabricated.push(trimmed); continue; }
+
+    kept.push(trimmed);
+    // Not a gate any more — telemetry. A grounding proves the model could point at
+    // the candidate's own words; its absence means we kept a label on the model's
+    // judgement alone. Worth watching, not worth deleting over: the model supplies
+    // groundings inconsistently, and gating on them lost 5 legitimate merchandiser
+    // skills to a missing array entry.
+    const quote = groundings.get(trimmed.toLowerCase());
+    if (!quote || !quoteIsReal(quote, evidenceNorm)) inferred.push(trimmed);
   }
   parsed.skills = kept;
+  if (inferred.length) {
+    console.info(`[optimizer] ${inferred.length} skill(s) kept on inference without a verified quote: ${inferred.join(', ')}`);
+  }
+  // Transient scaffolding — must never reach ResumeData, the DB, or a renderer.
+  delete raw.skillEvidence;
 
   // Mirror the same filter inside category buckets, then drop any bucket
   // left empty. Categories must stay a strict regrouping of the flat list.
@@ -436,7 +626,45 @@ function skillEvidenced(skill: string, evidence: string): boolean {
   for (let n = words.length - 1; n >= 2; n--) {
     if (evidence.includes(words.slice(0, n).join(' '))) return true;
   }
+  // Order- and inflection-tolerant fallback for MULTI-WORD skills.
+  //
+  // Everything above is order-sensitive and exact, which systematically deletes
+  // accurate skills from non-tech résumés. Tech skills are single verbatim tokens
+  // ("Kafka", "Go"), so they always match; professional skills are noun phrases
+  // the model naturally re-orders into idiomatic labels. Measured on a garments
+  // merchandiser profile (2026-08-04), the filter stripped "Shipment
+  // documentation" purely because the evidence said "documentation for shipment
+  // clearance", and "Pricing negotiation" because the evidence said
+  // "negotiated ... yarn pricing". Both are the candidate's real experience, and
+  // the user had paid a credit for that résumé.
+  //
+  // So: accept when EVERY significant word is evidenced, ignoring order and light
+  // inflection. This deliberately does NOT accept synonym leaps — "WIP monitoring"
+  // against "tracked WIP", or "BGMEA liaison" against "coordinated BGMEA
+  // documentation", still fail, because those are embellishments of the stated
+  // fact rather than re-phrasings of it. The credential guard above still runs
+  // first, so "Kubernetes Certification" cannot sneak in on "Kubernetes".
+  if (words.length >= 2) {
+    const significant = words.filter((w) => w.length >= 3 && !SKILL_STOPWORDS.has(w));
+    if (significant.length >= 2 && significant.every((w) => evidence.includes(stemForEvidence(w)))) {
+      return true;
+    }
+  }
   return false;
+}
+
+const SKILL_STOPWORDS = new Set(['and', 'the', 'for', 'with', 'of', 'in', 'on', 'to', 'a', 'an']);
+
+/**
+ * Crude single-pass suffix strip so a noun/verb pair of the SAME word matches:
+ * "negotiation" and "negotiated" both reduce to "negotiat". Intentionally
+ * conservative — it must not collapse two genuinely different words together,
+ * so only the endings that mark an inflection of one stem are removed, and the
+ * result is never shortened below 4 characters.
+ */
+function stemForEvidence(word: string): string {
+  const stripped = word.replace(/(ations|ation|ings|ing|ers|er|ed|es|s)$/, '');
+  return stripped.length >= 4 ? stripped : word;
 }
 
 const SKILL_ALIASES: Record<string, string[]> = {
@@ -481,7 +709,154 @@ const SKILL_ALIASES: Record<string, string[]> = {
   'e-commerce': ['shopify', 'woocommerce', 'daraz', 'magento'],
 };
 
-function buildEvidenceText(c: ResumeData): string {
+/**
+ * Report high-signal tokens that appear in the optimizer's PROSE (summary +
+ * refined bullets) without support in the candidate's evidence.
+ *
+ * Deliberately REPORTS rather than enforces. The asymmetry it exposes is real —
+ * the free toolkit runs detectFabricatedTokens over its prose while the PAID
+ * résumé only ever filtered the flat skills array, so an invented tool inside a
+ * bullet reached the employer unchallenged. But the optimizer has no per-slot
+ * degradation: every content check in this module THROWS, which fails the whole
+ * generation and refunds the credit. Wiring a dictionary that has demonstrated
+ * false positives (see AMBIGUOUS_WITH_ENGLISH in toolkitContext) into that path
+ * as a hard gate would trade a fabrication risk for a "your paid generation
+ * failed" risk, which is worse for the user and harder to diagnose.
+ *
+ * So this warns, the operator can grep it, and the decision to promote it to a
+ * gate can be made on observed rates rather than on a guess.
+ */
+export function reportFabricatedProse(parsed: OptimizedResumeData, candidate: ResumeData): string[] {
+  const evidence = buildEvidenceText(candidate).toLowerCase();
+  const prose = [
+    parsed.summary ?? '',
+    ...(parsed.experience ?? []).flatMap((e) => e.refinedBullets ?? []),
+    ...(parsed.projects ?? []).flatMap((e) => e.refinedBullets ?? []),
+    ...(parsed.extracurriculars ?? []).flatMap((e) => e.refinedBullets ?? []),
+  ].join('\n');
+  return prose.trim() ? detectFabricatedTokens(prose, evidence) : [];
+}
+
+// ────────────────────────────────────────────────
+// 🚫 BANNED BULLET OPENERS (deterministic enforcement of RULE 3)
+// ────────────────────────────────────────────────
+//
+// RULE 3 calls these "instant reject", but for a long time that existed ONLY as
+// prompt text — nothing checked. Measured over 6 optimizer runs on one messy
+// profile (72 bullets): 4 bullets opened with "Participated in", every one of
+// them the same standup/Jira line, in 4 of the 6 runs.
+//
+// The leak was upstream. The normalizer emitted "Participated in daily standup
+// meetings…", and the optimizer is told to treat canonicalBullets as PRIMARY
+// evidence and SELECT from them — so a weak opener produced one stage earlier
+// passes straight through to the résumé. The normalizer prompt now forbids these
+// too, but prompts are probabilistic and this is the recruiter's first impression,
+// so it also gets a deterministic backstop.
+//
+// Dropping rather than rewriting is deliberate: a bullet whose only content is
+// "attended the standup" has no achievement to salvage, and a mechanical reword
+// ("Participated in X" → "Drove X") would silently upgrade attendance into
+// ownership — the exact fabrication RULE 2 forbids. An item is never emptied,
+// because validateOptimizedResponse requires ≥1 bullet.
+const BANNED_BULLET_OPENERS: RegExp[] = [
+  /^\s*responsible for\b/i,
+  /^\s*worked on\b/i,
+  /^\s*helped (?:with|to)\b/i,
+  /^\s*duties included\b/i,
+  /^\s*tasked with\b/i,
+  /^\s*in charge of\b/i,
+  /^\s*assisted (?:with|in)\b/i,
+  /^\s*involved in\b/i,
+  /^\s*participated in\b/i,
+];
+
+function hasBannedOpener(bullet: string): boolean {
+  return BANNED_BULLET_OPENERS.some((re) => re.test(bullet));
+}
+
+/**
+ * Strip bullets that open with a RULE 3 instant-reject phrase. Returns what was
+ * dropped, for telemetry. Keeps the first bullet of an item even if it is banned,
+ * rather than leaving the item empty — a weak line beats a validation failure that
+ * costs the user their whole generation.
+ */
+export function dropBannedOpenerBullets(parsed: OptimizedResumeData): string[] {
+  const dropped: string[] = [];
+  const groups = [parsed.experience, parsed.projects, parsed.extracurriculars];
+  for (const group of groups) {
+    for (const item of group ?? []) {
+      const bullets = item.refinedBullets;
+      if (!Array.isArray(bullets) || bullets.length === 0) continue;
+      const kept = bullets.filter((b) => !hasBannedOpener(b));
+      if (kept.length === bullets.length) continue;
+      if (kept.length === 0) {
+        // Every bullet was banned — keep one so the item stays valid.
+        dropped.push(...bullets.slice(1));
+        item.refinedBullets = [bullets[0]];
+        continue;
+      }
+      dropped.push(...bullets.filter((b) => hasBannedOpener(b)));
+      item.refinedBullets = kept;
+    }
+  }
+  return dropped;
+}
+
+export class ResumeFabricationError extends Error {
+  constructor(public readonly tokens: string[]) {
+    super(
+      `Résumé prose claimed tool(s) the same guard already stripped from the skills list: ${tokens.join(', ')}`,
+    );
+    this.name = 'ResumeFabricationError';
+  }
+}
+
+/**
+ * The one fabrication case on the paid path that must NOT ship: a token that
+ * `filterFabricatedSkills` DELETED from `skills` and that still appears in a
+ * bullet or the summary.
+ *
+ * Why this specific intersection, and not all of reportFabricatedProse:
+ *
+ * A prose-only hit is treated as a warning because the dictionary can
+ * false-positive on ordinary English (see AMBIGUOUS_WITH_ENGLISH in
+ * toolkitContext) and killing a paid generation over one ambiguous word is
+ * worse for the user than shipping it. But when the SAME token was independently
+ * flagged in the structured skills array — where there is no surrounding prose to
+ * make it ambiguous — the false-positive reading collapses. Two independent hits
+ * on one token is a real fabrication, not a dictionary artifact.
+ *
+ * It is also the only case that produces a self-contradicting document. Left
+ * unblocked, the pipeline deletes "Kubernetes" from the skills list and keeps
+ * "Architected Kafka-backed event pipelines on Kubernetes" in the experience
+ * bullet — so the résumé simultaneously claims and disclaims the same tool. That
+ * is worse than either shipping or stripping it consistently, and it is the
+ * artifact most likely to be caught in an interview.
+ *
+ * Throwing is the right shape here: `withRetry` rotates to the next model and
+ * tries once more (temperature is 0.3, so a different model often does not
+ * fabricate), and `api/optimize` refunds the credit if it ultimately fails. That
+ * is exactly the treatment the toolkit path already gives its own artifacts.
+ */
+export function assertProseMatchesStrippedSkills(
+  parsed: OptimizedResumeData,
+  candidate: ResumeData,
+  strippedSkills: string[],
+): void {
+  if (strippedSkills.length === 0) return;
+  const inProse = reportFabricatedProse(parsed, candidate);
+  if (inProse.length === 0) return;
+  const stripped = new Set(strippedSkills.map((s) => s.toLowerCase()));
+  const both = inProse.filter((t) => stripped.has(t.toLowerCase()));
+  if (both.length > 0) throw new ResumeFabricationError(both);
+}
+
+/**
+ * The candidate's own words, concatenated — the corpus every honesty check reads.
+ * Exported so brand-spelling repair can align generated prose to the spelling the
+ * candidate actually used.
+ */
+export function buildEvidenceText(c: ResumeData): string {
   const parts: string[] = [...(c.skills ?? [])];
   // Polished-profile bullets/skills count as evidence too — they are
   // AI-verified renderings of the raw text (e.g. "PostgreSQL" where the
@@ -760,3 +1135,67 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// ─── Structured-output schema (Gemini `responseJsonSchema`) ──────────────────
+//
+// Lifted from OpenRouterResumeOptimizer during the direct-Gemini port so the
+// optimizer's shape contract lives beside the prompt that describes it.
+//
+// Strict mode requires every property to appear in `required`, so the optional
+// sections are required-as-empty-arrays; validateOptimizedResponse() still
+// checks counts and IDs against the input afterwards. The schema cannot express
+// "echo back exactly these input IDs" — that is why buildUserPrompt() also
+// embeds the shape spec, and why the validator remains the final gate.
+const REFINED_SECTION = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      refinedBullets: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['id', 'refinedBullets'],
+    additionalProperties: false,
+  },
+} as const;
+
+export const OPTIMIZER_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    skills: { type: 'array', items: { type: 'string' } },
+    // Grounding for skills whose LABEL is not literally in the candidate's text.
+    // Consumed and deleted by filterFabricatedSkills — never persisted, never
+    // rendered. This is what lets an accountant who wrote "bank er statement er
+    // shathe amader khata milai" legitimately list "Bank Reconciliation".
+    skillEvidence: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          skill: { type: 'string' },
+          quote: { type: 'string' },
+        },
+        required: ['skill', 'quote'],
+        additionalProperties: false,
+      },
+    },
+    skillCategories: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          category: { type: 'string' },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['category', 'items'],
+        additionalProperties: false,
+      },
+    },
+    experience: REFINED_SECTION,
+    projects: REFINED_SECTION,
+    extracurriculars: REFINED_SECTION,
+  },
+  required: ['summary', 'skills', 'skillCategories', 'skillEvidence', 'experience', 'projects', 'extracurriculars'],
+  additionalProperties: false,
+};

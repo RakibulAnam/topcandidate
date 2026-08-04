@@ -2,8 +2,10 @@
 // Effectiveness test for the resume optimizer.
 // Run: npx tsx tests/resume-effectiveness.test.ts
 //
-// Mirrors production wiring: tries Groq first, falls back to Gemini, via
-// MultiProviderResumeOptimizer. Whichever provider answers gets evaluated.
+// Mirrors production wiring: the direct-Gemini optimizer, which owns its own
+// ordered model chain internally (gemini-3.5-flash-lite → 3.6-flash →
+// 3.1-flash-lite) walked by GeminiClient. The old Groq-then-Gemini
+// MultiProviderResumeOptimizer arrangement is gone along with OpenRouter.
 //
 // One mock candidate, three different JDs (Backend / Frontend / DevOps).
 // For each JD we call the real optimizer, then score:
@@ -16,8 +18,6 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GeminiResumeOptimizer } from '../src/infrastructure/ai/GeminiResumeOptimizer';
-import { GroqResumeOptimizer } from '../src/infrastructure/ai/GroqResumeOptimizer';
-import { MultiProviderResumeOptimizer, NamedOptimizer } from '../src/infrastructure/ai/MultiProviderResumeOptimizer';
 import type { IResumeOptimizer } from '../src/domain/usecases/OptimizeResumeUseCase';
 import type { ResumeData, OptimizedResumeData } from '../src/domain/entities/Resume';
 
@@ -499,24 +499,21 @@ async function main() {
   // migration) or VITE_-prefixed (legacy). Local .env is the only place
   // these still live for tests; production reads them server-side via
   // process.env.{GROQ,GEMINI}_API_KEY in Vercel Functions.
-  const groqKey = env.GROQ_API_KEY || env.VITE_GROQ_API_KEY;
   const geminiKey = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY;
-  // Optional model override for either provider (rarely needed; e.g. testing
-  // gemini-2.5-flash-lite when 2.5-flash daily quota is exhausted).
-  const modelOverride = process.env.MODEL;
+  // The MODEL override is gone. GeminiResumeOptimizer owns an ordered model chain
+  // internally (gemini-3.5-flash-lite → 3.6-flash → 3.1-flash-lite) which
+  // GeminiClient walks on failure, so there is no single model to override — and
+  // the old default this override existed to escape, gemini-2.5-flash, is now
+  // HTTP 404 "no longer available to new users" on our key.
+  if (process.env.MODEL) {
+    console.warn(`MODEL=${process.env.MODEL} ignored — the optimizer owns its own model chain now.`);
+  }
 
-  const providers: NamedOptimizer[] = [];
-  if (!isPlaceholder(groqKey)) {
-    providers.push({ name: 'groq', optimizer: new GroqResumeOptimizer(groqKey, modelOverride) });
+  if (isPlaceholder(geminiKey)) {
+    throw new Error('No GEMINI_API_KEY found in .env (or VITE_GEMINI_API_KEY)');
   }
-  if (!isPlaceholder(geminiKey)) {
-    providers.push({ name: 'gemini', optimizer: new GeminiResumeOptimizer(geminiKey, modelOverride) });
-  }
-  if (!providers.length) {
-    throw new Error('No AI provider key found in .env (VITE_GROQ_API_KEY or VITE_GEMINI_API_KEY)');
-  }
-  console.log(`Provider order: ${providers.map(p => p.name).join(' → ')}${modelOverride ? `   model=${modelOverride}` : ''}`);
-  const optimizer: IResumeOptimizer = new MultiProviderResumeOptimizer(providers);
+  console.log('Provider: gemini (direct) — chain 3.5-flash-lite → 3.6-flash → 3.1-flash-lite');
+  const optimizer: IResumeOptimizer = new GeminiResumeOptimizer(geminiKey);
 
   const outDir = path.join(ROOT, 'tests', 'out');
   fs.mkdirSync(outDir, { recursive: true });

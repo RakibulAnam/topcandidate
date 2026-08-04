@@ -1,5 +1,38 @@
 # TOP CANDIDATE — OpenRouter Migration & Production AI Strategy
 
+> # ⛔ SUPERSEDED — HISTORICAL RECORD ONLY
+>
+> **OpenRouter was removed on 2026-08-04.** The AI layer now runs on the **direct
+> Google Gemini API** with a single `GEMINI_API_KEY`. Nothing described below is
+> the current architecture. **Do not follow any instruction in this document.**
+>
+> **Read [`../AGENTS.md`](../AGENTS.md) §9 instead** for the live provider map.
+>
+> **Why OpenRouter was abandoned:** its Gemini traffic ran on OpenRouter's
+> *pooled* Google credentials, so roughly 30% of calls failed with a shared-pool
+> 429 that arrived as HTTP 200 + `finish_reason='error'` — a shape OpenRouter's
+> own `models[]` fallback never routed around. Buying OpenRouter credits does not
+> buy Google quota. Every mitigation in this doc (the `rotateModels` chain
+> rotation, the `finish_reason=error` detector, the retry budgets) was an attempt
+> to work around that, and none of them addressed the cause.
+>
+> **What replaced it:** `src/infrastructure/ai/GeminiClient.ts` walks a model
+> chain client-side (Google has no server-side `models[]`), targeting Gemini 3.x
+> only — `gemini-2.5-flash` and `-flash-lite` now return HTTP 404 "no longer
+> available to new users" on a current key, so **the model choices below are not
+> even reachable any more**.
+>
+> **Also invalidated below:** the cost analysis in §3 (its ~0.5%-of-revenue COGS
+> figure was a DeepSeek projection that never applied to the Gemini-primary stack
+> it shipped with — the measured figure is ~3% of net revenue), and the Phase 6b
+> plan to drop `@google/genai` — that package is now the *active* dependency, not
+> the legacy one.
+>
+> Kept because the model-selection evidence, the Vercel-60s deadline reasoning,
+> and the structured-output lessons (`json_object` truncates large bilingual
+> payloads) all carried forward and explain why the current code is shaped as it is.
+
+
 > **STATUS: SHIPPED — live in production (cutover complete).** The AI layer migrated from Groq + Gemini direct to a single OpenRouter key. All phases (0–6) are merged to `master` and live: `api/_lib/aiFactory.ts` gates on `OPENROUTER_API_KEY` and, when set, serves the entire AI surface through the `OpenRouter*` generators (`OpenRouterResumeOptimizer`, `OpenRouterToolkitGenerator`, the four single-artifact generators, `OpenRouterResumeExtractor`, plus the later `OpenRouterProfileNormalizer`). The legacy Groq/Gemini classes remain as the no-key fallback (panic switch); `@google/genai` is still a dependency. This doc is now the *as-built reference* (model choices, cost, routing, lessons) — the phased steps below are the historical execution plan, kept for context. The phase-internal "not wired into aiFactory yet" notes are historical; the cutover is done.
 >
 > **Live state (updated 2026-06-10):** Phases 0–6 merged to `master` and live in production with `OPENROUTER_API_KEY` set. **Post-launch hotfix (2026-06-10):** the first real toolkit build 504'd (FUNCTION_INVOCATION_TIMEOUT) — DeepSeek V3.2 on the **optimizer** both failed the strict ID-preserving JSON validation *and* timed out >45s on a real multi-experience resume, then a `withRetry` retry pushed past Vercel's 60s cap. **Fixes shipped:** (1) optimizer → **Gemini 2.5 Flash primary** (DeepSeek dropped from the optimizer chain — it stays a toolkit fallback only); (2) `withRetry` is now **deadline-bounded** (total wall time per generator hard-capped; timeouts never retried) so the parallel optimizer(30s) ‖ toolkit(48s) hot path always fits 60s. Re-tested 4× on a realistic profile: 21–44s, 0 failures. `@google/genai` still kept one cycle as the panic switch.

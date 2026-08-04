@@ -162,7 +162,7 @@ export const en = {
     tabCoverLetter: 'Cover Letter',
     tabOutreachEmail: 'Outreach Email',
     tabLinkedIn: 'LinkedIn Note',
-    tabQuestionPrep: 'Question Prep',
+    tabQuestionPrep: 'Prep Guide',
     sidebarFootnote: 'All resume templates are single-column, real-text, and pass ATS keyword extraction.',
     sectionSummary: 'Professional Summary',
     sectionExperience: 'Experience',
@@ -228,9 +228,17 @@ export const en = {
     linkedinTrim: '— trim before sending',
     linkedinNote: 'Note',
 
-    interviewEyebrow: 'Interview prep',
-    interviewTitle: 'Must-know interview questions',
-    interviewDesc: 'The questions you are most likely to be asked for this role, with what interviewers are scoring and how to structure a great answer using your actual experience.',
+    interviewEyebrow: 'Preparation guide',
+    interviewTitle: 'Walk in ready',
+    interviewDesc: 'The questions you are most likely to be asked for this role — what interviewers are scoring, and how to answer using your actual experience. Plus the few topics worth revising before you go in.',
+    // Study topics from the JD gap. Framed as a short, finishable list — one
+    // concrete action each, never a syllabus. The point is that nothing in the
+    // room is a surprise.
+    prepTopicsHeading: 'Worth revising before the interview',
+    prepTopicsLead: 'This role asks for a few things your profile does not cover yet. Each one has a single, concrete way to get ready.',
+    prepTopicsWhy: 'Why it comes up',
+    prepTopicsAction: 'Do this',
+    prepTopicsBrief: 'Revision list',
     interviewQCount: '{n} questions tailored to your JD',
     interviewCollapseAll: 'Collapse all',
     interviewExpandAll: 'Expand all',
@@ -616,6 +624,22 @@ export const en = {
     secLanguagesHint: 'Strongly recommended for Bangladesh, MNCs, or any client-facing role with international scope.',
     secRefsLabel: 'References',
     secRefsHint: "Common on Bangladeshi CVs (banks, conglomerates, gov't). Skip for most international resumes.",
+  },
+  // Server-side AI failures, keyed by the stable `code` in the JSON body
+  // (api/_lib/aiErrorResponse.ts). The server deliberately sends a CODE rather
+  // than prose: it used to return the provider's raw error text, which meant a
+  // Bengali user saw an English JSON blob from Google. Localize here, never
+  // there.
+  apiError: {
+    rateLimited: "You've hit today's generation limit ({used}/{cap}). It resets about 24 hours after your first one today.",
+    rateLimitedNoCount: "You've hit today's generation limit. It resets about 24 hours after your first one today.",
+    providerBusy: 'Our AI service is busy right now. Please wait a minute and try again.',
+    providerTimeout: 'The AI took too long to respond. Please try again.',
+    providerDown: "Our AI service is temporarily unavailable. This is on our side — please try again in a few minutes.",
+    badOutput: 'The AI returned an incomplete result. Please try again.',
+    blocked: "The AI wouldn't process this content. Try rephrasing the job description.",
+    guardRejected: "We couldn't produce a version we're confident in — it didn't hold to your real experience. Please try again.",
+    generationFailed: "Something went wrong on our side. Please try again.",
   },
   builder: {
     serviceNotInit: 'Service not initialized. Please refresh the page.',

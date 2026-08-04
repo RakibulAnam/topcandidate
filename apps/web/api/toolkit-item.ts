@@ -9,8 +9,9 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate } from './_lib/auth.js';
-import { assertWithinLimit, logCall, RateLimitError } from './_lib/rateLimit.js';
-import { resolveCost } from './_lib/aiCost.js';
+import { reserveCall, logCall, RateLimitError } from './_lib/rateLimit.js';
+import { buildCallMeta } from './_lib/aiTelemetry.js';
+import { publicAiError } from './_lib/aiErrorResponse.js';
 import {
   coverLetterGenerator,
   outreachEmailGenerator,
@@ -18,6 +19,7 @@ import {
   interviewQuestionsGenerator,
 } from './_lib/aiFactory.js';
 import type { ResumeData } from '../src/domain/entities/Resume';
+import type { UsageSink } from '../src/infrastructure/ai/usage';
 
 type Kind = 'coverLetter' | 'outreachEmail' | 'linkedInMessage' | 'interviewQuestions';
 
@@ -43,14 +45,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Missing kind or resume data' });
     return;
   }
+  // 503 BEFORE the rate-limit gate, matching every sibling AI endpoint
+  // (optimize 66/71, optimize-general 33/38, toolkit 49/54, extract-resume
+  // 34/58, normalize-item 46/67). This endpoint used to be the only one that
+  // checked its generator INSIDE runItem — i.e. after the gate — so a
+  // deployment with GEMINI_API_KEY unset spent one of the caller's 8 daily
+  // toolkit_item slots to tell them the server is misconfigured. A config
+  // problem must never be billed to the user's quota.
+  if (!generatorFor(kind)) {
+    console.error(`[toolkit-item ${rid}] 503 no AI provider configured kind=${kind}`);
+    res.status(503).json({ error: 'No AI provider configured on server' });
+    return;
+  }
+
   console.info(`[toolkit-item ${rid}] start user=${auth.userId.slice(0, 8)} kind=${kind}`);
 
+  // Reserved BEFORE the provider call so a parallel burst cannot overshoot the
+  // daily caps; null means reservation was unavailable and we failed open.
+  let reservation: string | null = null;
   try {
-    await assertWithinLimit(auth.userId, auth.jwt);
+    // The 'toolkit_item' kind MUST be passed: the cap check only consults
+    // KIND_DAILY_CAPS for the kind it is given, so omitting it silently skipped
+    // the 8/day per-kind cap entirely and left this endpoint bounded only by the
+    // overall 20/day — which was the whole exposure the cap exists to close.
+    reservation = await reserveCall(auth.userId, auth.jwt, 'toolkit_item');
   } catch (err) {
     if (err instanceof RateLimitError) {
       console.warn(`[toolkit-item ${rid}] 429 rate-limited used=${err.used}/${err.cap}`);
-      res.status(429).json({ error: err.message, used: err.used, cap: err.cap });
+      res.status(429).json({ error: err.message, used: err.used, cap: err.cap, code: 'rate_limited' });
       return;
     }
     throw err;
@@ -58,64 +80,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // C5 (audit): one ai_call_log row per attempt past the rate-limit gate so
   // failed calls still count toward the daily cap. Logged at each terminal
-  // point so the row carries telemetry. These per-item generators all run on
-  // Gemini 2.5 Flash and don't surface SDK usage, so token counts are
-  // estimated from the input (JD) + output text (~4 chars/token).
+  // point so the row carries telemetry.
+  //
+  // The provider/model were previously HARDCODED to 'gemini-2.5-flash' here
+  // because runItem() discarded the generators' UsageSink — so this endpoint
+  // reported a model it might not have used and never reported real tokens. The
+  // sink is now threaded through, so the row carries the model that actually
+  // served, real token counts, and the attempt chain. (It also mattered more
+  // than it looked: gemini-2.5-flash is now 404 on this account, so the
+  // hardcoded value would have priced every row against an unreachable model.)
   const tAI = Date.now();
-  const PROVIDER = 'gemini';
-  const MODEL = 'gemini-2.5-flash';
+  const usage: UsageSink = {};
   try {
-    const result = await runItem(kind, data);
+    const result = await runItem(kind, data, usage);
     const latencyMs = Date.now() - tAI;
     const outText = typeof result === 'string' ? result : JSON.stringify(result ?? '');
-    const cost = resolveCost(
-      { provider: PROVIDER, model: MODEL },
-      data.targetJob.description,
-      outText
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'toolkit_item',
+      buildCallMeta({ usage, latencyMs, fallbackInputText: data.targetJob.description, fallbackOutputText: outText }),
+      reservation,
     );
-    await logCall(auth.userId, auth.jwt, 'toolkit_item', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'success',
-      latencyMs,
-    });
     console.info(`[toolkit-item ${rid}] 200 kind=${kind} total=${Date.now() - t0}ms`);
     res.status(200).json({ result });
   } catch (err) {
     const latencyMs = Date.now() - tAI;
     const msg = err instanceof Error ? err.message : 'Generation failed';
-    const cost = resolveCost({ provider: PROVIDER, model: MODEL }, data.targetJob.description);
-    await logCall(auth.userId, auth.jwt, 'toolkit_item', {
-      provider: cost.provider,
-      model: cost.model,
-      promptTokens: cost.promptTokens,
-      completionTokens: cost.completionTokens,
-      costUsd: cost.costUsd,
-      status: 'error',
-      latencyMs,
-    });
+    await logCall(
+      auth.userId,
+      auth.jwt,
+      'toolkit_item',
+      buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: data.targetJob.description }),
+      reservation,
+    );
     console.error(`[toolkit-item ${rid}] 502 kind=${kind} total=${Date.now() - t0}ms: ${msg}`);
-    res.status(502).json({ error: msg });
+    res.status(502).json(publicAiError(err));
   }
 }
 
-async function runItem(kind: Kind, data: ResumeData): Promise<unknown> {
+// One place that maps a kind to its generator, so the pre-gate 503 check above
+// and runItem below can never disagree about what "configured" means.
+function generatorFor(kind: Kind) {
+  switch (kind) {
+    case 'coverLetter': return coverLetterGenerator;
+    case 'outreachEmail': return outreachEmailGenerator;
+    case 'linkedInMessage': return linkedInMessageGenerator;
+    case 'interviewQuestions': return interviewQuestionsGenerator;
+    default: return null;
+  }
+}
+
+// `usage` is filled in-place by whichever generator runs, so the caller can log
+// the real model/tokens/attempt-chain instead of a hardcoded guess.
+async function runItem(kind: Kind, data: ResumeData, usage: UsageSink): Promise<unknown> {
+  const gen = generatorFor(kind);
+  // Unreachable via the handler (guarded pre-gate) but kept as a real check so a
+  // future caller can't skip it.
+  if (!gen) throw new Error(`No generator configured for toolkit item kind: ${kind}`);
   switch (kind) {
     case 'coverLetter':
-      if (!coverLetterGenerator) throw new Error('Cover letter generator not configured');
-      return coverLetterGenerator.generate(data);
+      return coverLetterGenerator!.generate(data, usage);
     case 'outreachEmail':
-      if (!outreachEmailGenerator) throw new Error('Outreach email generator not configured');
-      return outreachEmailGenerator.generate(data);
+      return outreachEmailGenerator!.generate(data, usage);
     case 'linkedInMessage':
-      if (!linkedInMessageGenerator) throw new Error('LinkedIn message generator not configured');
-      return linkedInMessageGenerator.generate(data);
+      return linkedInMessageGenerator!.generate(data, usage);
     case 'interviewQuestions':
-      if (!interviewQuestionsGenerator) throw new Error('Interview questions generator not configured');
-      return interviewQuestionsGenerator.generate(data);
+      return interviewQuestionsGenerator!.generate(data, usage);
     default:
       throw new Error(`Unknown toolkit item kind: ${kind}`);
   }

@@ -212,6 +212,28 @@ export interface InterviewQuestion {
   answerStrategyBn?: string;
 }
 
+/**
+ * A topic the candidate should study before the interview, derived from a JD
+ * requirement their evidence does NOT support.
+ *
+ * Deliberately sourced from the GAP, not from what they already have. A "revise
+ * what you're good at" list is filler; the honest value is telling someone the
+ * three things this specific employer will probe that they cannot currently
+ * answer. This is also why the résumé does NOT need to overclaim: the gap is
+ * addressed by preparation, not by a résumé line the candidate can't defend in
+ * the room.
+ */
+export interface PrepTopic {
+  topic: string;         // The subject to study, named as the JD names it.
+  whyItMatters: string;  // Which JD requirement it maps to and what gets probed.
+  howToPrepare: string;  // One concrete, finishable action — not "learn X".
+  // Bengali, same rationale as InterviewQuestion above: this is the candidate's
+  // own study material, which is exactly where their first language helps most.
+  topicBn?: string;
+  whyItMattersBn?: string;
+  howToPrepareBn?: string;
+}
+
 export type ToolkitItem =
   | 'coverLetter'
   | 'outreachEmail'
@@ -235,6 +257,10 @@ export interface JobToolkit {
   outreachEmail?: OutreachEmail;
   linkedInMessage?: string;        // <= 280 chars.
   interviewQuestions?: InterviewQuestion[];
+  /** Study topics from the JD gap. Rendered with the questions as one
+   *  "Preparation Guide" section. Optional: absent on resumes generated before
+   *  prep topics landed, and a weak/empty topics list never fails the section. */
+  prepTopics?: PrepTopic[];
   errors?: ToolkitErrors;
 }
 
@@ -260,6 +286,10 @@ export interface GeneratedToolkit {
   outreachEmail?: OutreachEmail;
   linkedInMessage?: string;
   interviewQuestions?: InterviewQuestion[];
+  /** Study topics from the JD gap. Rendered with the questions as one
+   *  "Preparation Guide" section. Optional: absent on resumes generated before
+   *  prep topics landed, and a weak/empty topics list never fails the section. */
+  prepTopics?: PrepTopic[];
   errors: ToolkitErrors;
 }
 

@@ -13,7 +13,7 @@
 
 4. **Respect Clean Architecture layering.** Domain depends on nothing. Infrastructure implements domain interfaces. Presentation goes through `ResumeService`, never direct-imports a Gemini class. If you think you need to break this, stop and ask.
 
-5. **New AI generator? Use the established recipe, and respect the 2-call hot path.** Domain interface → use case → **provider impl in `infrastructure/ai/`** (active path = an `OpenRouter*Generator` on `OpenRouterClient`, reusing the shared `prompts/` + `withRetry`; legacy `Gemini*` sibling only if you also want the fallback) → wire in `api/_lib/aiFactory.ts` (gated on `OPENROUTER_API_KEY`) → inject into `ResumeService`. Initial generation is capped at **two concurrent AI calls** (optimizer + combined toolkit), carried since 2026-06-11 by **two parallel HTTP requests** — `/api/optimize` (optimizer, charges the credit) and `/api/toolkit` (combined bundle, free) — so each fits its own Vercel 60s window and the resume renders before the toolkit lands. Do not re-fan toolkit-like artifacts into parallel AI calls — extend the combined generator's schema/prompt instead. Per-item retry flows (`regenerateToolkitItem`) may call single-artifact generators. Full provider map: `AGENTS.md` §9 + `docs/OPENROUTER_MIGRATION.md`.
+5. **New AI generator? Use the established recipe, and respect the 2-call hot path.** Domain interface → use case → **provider impl in `infrastructure/ai/`** (a `Gemini*Generator` on `GeminiClient`, reusing the shared `prompts/` + `withRetry` + `rotateModels`; put its response schema in `prompts/`, never module-local) → wire in `api/_lib/aiFactory.ts` (gated on `GEMINI_API_KEY`) → inject into `ResumeService`. **Three things that will bite you:** pass `responseJsonSchema`, never `responseSchema` (that type has no `additionalProperties`); never set `thinkingBudget` (400s on 3.5-flash-lite and 3.6-flash — the client defaults `thinkingLevel` to MINIMAL); and the `UsageSink` fields are camelCase incl. `thoughtTokens`/`attempts` — `vite build` does not type-check `src/`, so a snake_case slip fails silently and cost telemetry degrades to a char estimate. Initial generation is capped at **two concurrent AI calls** (optimizer + combined toolkit), carried since 2026-06-11 by **two parallel HTTP requests** — `/api/optimize` (optimizer, charges the credit) and `/api/toolkit` (combined bundle, free) — so each fits its own Vercel 60s window and the resume renders before the toolkit lands. Do not re-fan toolkit-like artifacts into parallel AI calls — extend the combined generator's schema/prompt instead. Per-item retry flows (`regenerateToolkitItem`) may call single-artifact generators. Full provider map: `AGENTS.md` §9. (`docs/OPENROUTER_MIGRATION.md` is a superseded historical record — do not follow it.)
 
 6. **Database changes ship with a migration file.** Add `supabase/migrations/<nnn>_<name>.sql` (idempotent — use `if not exists`). Also reflect the change in `supabase/schema.sql`. Tell the user to run it in the Supabase SQL editor.
 
@@ -52,9 +52,20 @@ npm run typecheck:api  # run the api/ type-check alone (fast feedback while edit
 
 # Smoke-test that the server-only API code path imports cleanly. `vite build`
 # only bundles client code and tree-shakes server-only files (api/_lib/aiFactory
-# and the OpenRouter / Gemini / Groq generators), so a syntax error in those files passes
+# and the Gemini generators), so a syntax error in those files passes
 # `npm run build` undetected. This catches it.
-node_modules/.bin/tsx -e "await import('./api/_lib/aiFactory.ts'); console.log('ok')"
+#
+# NOTE: must use .then(), NOT top-level await — `tsx -e` compiles the eval as CJS
+# and top-level await throws "not supported with the cjs output format". The
+# previously documented `await import(...)` form never worked.
+node_modules/.bin/tsx -e "import('./api/_lib/aiFactory.ts').then(m=>console.log('ok — all constructed:', Object.values(m).every(v=>v!==null)))"
+
+# Gemini probes (scripts/ai-probe.ts). selftest is free + offline for the
+# classifier regression; the rest hit the live API and cost real money.
+npm run ai:selftest    # classifier regression (offline) + live error taxonomy
+npm run ai:bench       # cost/latency/quality per model
+node_modules/.bin/tsx scripts/ai-probe.ts e2e    # all 8 real generators
+node_modules/.bin/tsx scripts/ai-probe.ts tier   # free vs paid tier check
 ```
 
 For UI changes: start `npm run dev`, exercise the flow yourself, and report what you tested. If you couldn't test the UI from this environment, say so explicitly — don't claim success. **A shared test account for logging in (pre-seeded with toolkits/purchases/credits) lives in [`TEST_ACCOUNT.md`](TEST_ACCOUNT.md).**
