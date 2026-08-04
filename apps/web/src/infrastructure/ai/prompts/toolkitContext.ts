@@ -25,9 +25,11 @@
 //      • assertOutreachSpecificity — outreach + LinkedIn output must
 //        reference both the target company and the candidate's own work
 //        (proper noun) — not just generic JD language.
-//      • assertInterviewAnchor — interview answerStrategy text must point
-//        to a real candidate proper noun (company / role / project /
-//        certification / school) instead of vague "your relevant experience".
+//    NOT a guard, despite the export: assertInterviewAnchorCoverage has NO call
+//    sites. Interview prep deliberately has no fabrication or anchor-coverage
+//    gate (removed 2026-06-10) — questions must be able to probe JD tech the
+//    candidate has not used yet, which is the whole point of rehearsal. Only
+//    countAnchoredStrategies runs, as console.info telemetry.
 
 import { ResumeData } from '../../../domain/entities/Resume.js';
 
@@ -996,6 +998,20 @@ export function countAnchoredStrategies(
   return count;
 }
 
+/**
+ * ⚠️ DEAD BY DESIGN — this has NO call sites and must not be given any.
+ *
+ * Interview prep intentionally has no fabrication or anchor-coverage gate
+ * (removed 2026-06-10 after it blocked legitimate questions in production, e.g.
+ * flagging "Objective-C" because it was absent from the résumé). Questions are
+ * supposed to probe what the JD demands — including tools the candidate has yet
+ * to learn — so a candidate can rehearse honestly. Blocking on absence defeats
+ * the feature.
+ *
+ * Kept, not deleted, so the rationale stays next to the code someone would
+ * otherwise re-add from scratch. Quality is steered by the prompt; observability
+ * by countAnchoredStrategies. See AGENTS.md §4 fit-mode dispatch.
+ */
 export function assertInterviewAnchorCoverage(
   strategies: string[],
   data: ResumeData
