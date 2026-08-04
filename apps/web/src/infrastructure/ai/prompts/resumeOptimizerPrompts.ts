@@ -10,6 +10,7 @@
 // is what let the provider swap from Groq/OpenRouter to direct Gemini without
 // touching a single rule. The rules are the product; the SDK is not.
 
+import { detectFabricatedTokens } from './toolkitContext.js';
 import { ResumeData, OptimizedResumeData } from '../../../domain/entities/Resume.js';
 
 // ────────────────────────────────────────────────
@@ -521,6 +522,34 @@ const SKILL_ALIASES: Record<string, string[]> = {
   'data analysis': ['power bi', 'tableau', 'pandas', 'pivot table'],
   'e-commerce': ['shopify', 'woocommerce', 'daraz', 'magento'],
 };
+
+/**
+ * Report high-signal tokens that appear in the optimizer's PROSE (summary +
+ * refined bullets) without support in the candidate's evidence.
+ *
+ * Deliberately REPORTS rather than enforces. The asymmetry it exposes is real —
+ * the free toolkit runs detectFabricatedTokens over its prose while the PAID
+ * résumé only ever filtered the flat skills array, so an invented tool inside a
+ * bullet reached the employer unchallenged. But the optimizer has no per-slot
+ * degradation: every content check in this module THROWS, which fails the whole
+ * generation and refunds the credit. Wiring a dictionary that has demonstrated
+ * false positives (see AMBIGUOUS_WITH_ENGLISH in toolkitContext) into that path
+ * as a hard gate would trade a fabrication risk for a "your paid generation
+ * failed" risk, which is worse for the user and harder to diagnose.
+ *
+ * So this warns, the operator can grep it, and the decision to promote it to a
+ * gate can be made on observed rates rather than on a guess.
+ */
+export function reportFabricatedProse(parsed: OptimizedResumeData, candidate: ResumeData): string[] {
+  const evidence = buildEvidenceText(candidate).toLowerCase();
+  const prose = [
+    parsed.summary ?? '',
+    ...(parsed.experience ?? []).flatMap((e) => e.refinedBullets ?? []),
+    ...(parsed.projects ?? []).flatMap((e) => e.refinedBullets ?? []),
+    ...(parsed.extracurriculars ?? []).flatMap((e) => e.refinedBullets ?? []),
+  ].join('\n');
+  return prose.trim() ? detectFabricatedTokens(prose, evidence) : [];
+}
 
 function buildEvidenceText(c: ResumeData): string {
   const parts: string[] = [...(c.skills ?? [])];

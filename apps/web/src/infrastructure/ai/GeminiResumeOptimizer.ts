@@ -53,6 +53,7 @@ import {
   validateOptimizedResponse,
   normalizeSkills,
   filterFabricatedSkills,
+  reportFabricatedProse,
   reorderLeadBulletByJDFit,
   reorderProjectsByJDFit,
   enforceBulletDensity,
@@ -122,6 +123,12 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
           const fabResult = filterFabricatedSkills(parsed, data);
           if (fabResult.fabricated.length) {
             console.warn(`[gemini] stripped ${fabResult.fabricated.length} fabricated skill(s):`, fabResult.fabricated.join(', '));
+          }
+          // Visibility only — see reportFabricatedProse for why this warns
+          // instead of throwing on the paid path.
+          const proseFab = reportFabricatedProse(parsed, data);
+          if (proseFab.length) {
+            console.warn(`[gemini] UNVERIFIED token(s) in résumé prose (not blocked):`, proseFab.join(', '));
           }
           reorderLeadBulletByJDFit(parsed, data.targetJob.description);
           reorderProjectsByJDFit(parsed, data.targetJob.description);
