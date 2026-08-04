@@ -551,6 +551,71 @@ export function reportFabricatedProse(parsed: OptimizedResumeData, candidate: Re
   return prose.trim() ? detectFabricatedTokens(prose, evidence) : [];
 }
 
+// ────────────────────────────────────────────────
+// 🚫 BANNED BULLET OPENERS (deterministic enforcement of RULE 3)
+// ────────────────────────────────────────────────
+//
+// RULE 3 calls these "instant reject", but for a long time that existed ONLY as
+// prompt text — nothing checked. Measured over 6 optimizer runs on one messy
+// profile (72 bullets): 4 bullets opened with "Participated in", every one of
+// them the same standup/Jira line, in 4 of the 6 runs.
+//
+// The leak was upstream. The normalizer emitted "Participated in daily standup
+// meetings…", and the optimizer is told to treat canonicalBullets as PRIMARY
+// evidence and SELECT from them — so a weak opener produced one stage earlier
+// passes straight through to the résumé. The normalizer prompt now forbids these
+// too, but prompts are probabilistic and this is the recruiter's first impression,
+// so it also gets a deterministic backstop.
+//
+// Dropping rather than rewriting is deliberate: a bullet whose only content is
+// "attended the standup" has no achievement to salvage, and a mechanical reword
+// ("Participated in X" → "Drove X") would silently upgrade attendance into
+// ownership — the exact fabrication RULE 2 forbids. An item is never emptied,
+// because validateOptimizedResponse requires ≥1 bullet.
+const BANNED_BULLET_OPENERS: RegExp[] = [
+  /^\s*responsible for\b/i,
+  /^\s*worked on\b/i,
+  /^\s*helped (?:with|to)\b/i,
+  /^\s*duties included\b/i,
+  /^\s*tasked with\b/i,
+  /^\s*in charge of\b/i,
+  /^\s*assisted (?:with|in)\b/i,
+  /^\s*involved in\b/i,
+  /^\s*participated in\b/i,
+];
+
+function hasBannedOpener(bullet: string): boolean {
+  return BANNED_BULLET_OPENERS.some((re) => re.test(bullet));
+}
+
+/**
+ * Strip bullets that open with a RULE 3 instant-reject phrase. Returns what was
+ * dropped, for telemetry. Keeps the first bullet of an item even if it is banned,
+ * rather than leaving the item empty — a weak line beats a validation failure that
+ * costs the user their whole generation.
+ */
+export function dropBannedOpenerBullets(parsed: OptimizedResumeData): string[] {
+  const dropped: string[] = [];
+  const groups = [parsed.experience, parsed.projects, parsed.extracurriculars];
+  for (const group of groups) {
+    for (const item of group ?? []) {
+      const bullets = item.refinedBullets;
+      if (!Array.isArray(bullets) || bullets.length === 0) continue;
+      const kept = bullets.filter((b) => !hasBannedOpener(b));
+      if (kept.length === bullets.length) continue;
+      if (kept.length === 0) {
+        // Every bullet was banned — keep one so the item stays valid.
+        dropped.push(...bullets.slice(1));
+        item.refinedBullets = [bullets[0]];
+        continue;
+      }
+      dropped.push(...bullets.filter((b) => hasBannedOpener(b)));
+      item.refinedBullets = kept;
+    }
+  }
+  return dropped;
+}
+
 export class ResumeFabricationError extends Error {
   constructor(public readonly tokens: string[]) {
     super(

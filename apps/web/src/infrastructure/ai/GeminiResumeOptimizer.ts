@@ -55,6 +55,7 @@ import {
   filterFabricatedSkills,
   reportFabricatedProse,
   assertProseMatchesStrippedSkills,
+  dropBannedOpenerBullets,
   reorderLeadBulletByJDFit,
   reorderProjectsByJDFit,
   enforceBulletDensity,
@@ -139,6 +140,12 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
           // assertProseMatchesStrippedSkills for why the intersection is the
           // confident signal and a prose-only hit is not.
           assertProseMatchesStrippedSkills(parsed, data, fabResult.fabricated);
+          // Before the lead-bullet choice, so a banned-opener line can never be
+          // promoted into the recruiter's highest-attention slot.
+          const droppedOpeners = dropBannedOpenerBullets(parsed);
+          if (droppedOpeners.length) {
+            console.warn(`[gemini] dropped ${droppedOpeners.length} bullet(s) with a RULE 3 banned opener:`, droppedOpeners.map((b) => b.slice(0, 60)).join(' | '));
+          }
           reorderLeadBulletByJDFit(parsed, data.targetJob.description);
           reorderProjectsByJDFit(parsed, data.targetJob.description);
           enforceBulletDensity(parsed, data.targetJob.description);

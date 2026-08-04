@@ -220,7 +220,7 @@ const fmtAttempts = (a: GeminiAttempt[]) =>
 // deterministic — and unlike a live RPM test it keeps working on a paid tier,
 // where 300 RPM makes the throttle impractical to provoke.
 import { publicAiError } from '../api/_lib/aiErrorResponse.js';
-import { ResumeFabricationError } from '../src/infrastructure/ai/prompts/resumeOptimizerPrompts.js';
+import { ResumeFabricationError, dropBannedOpenerBullets } from '../src/infrastructure/ai/prompts/resumeOptimizerPrompts.js';
 import { trimToLinkedInLimit } from '../src/infrastructure/ai/prompts/toolkitPrompts.js';
 
 const RECORDED: Array<{ name: string; status: number; body: string; expect: string; expectDelayMs?: number }> = [
@@ -401,13 +401,58 @@ function linkedInTrimRegression(): boolean {
   return ok;
 }
 
+
+// RULE 3 calls these openers "instant reject", but that was prompt text only:
+// measured 4/72 bullets opening with "Participated in" across 6 optimizer runs
+// before dropBannedOpenerBullets existed.
+function bannedOpenerRegression(): boolean {
+  console.log('\n=== BANNED BULLET OPENERS (offline) ===\n');
+  const parsed: any = {
+    experience: [
+      { id: 'e1', refinedBullets: [
+        'Engineered an inventory system end-to-end using PHP and Laravel.',
+        'Participated in daily standup meetings and updated Jira tickets.',
+        'Reduced report generation from 40 minutes to 5 minutes.',
+      ] },
+      // Every bullet banned — must keep exactly one so the item stays valid.
+      { id: 'e2', refinedBullets: [
+        'Responsible for the checkout page.',
+        'Worked on bug fixes.',
+      ] },
+    ],
+    projects: [{ id: 'p1', refinedBullets: ['Helped with the deployment pipeline.', 'Built a ticket booking app in Laravel.'] }],
+    extracurriculars: [],
+  };
+  const dropped = dropBannedOpenerBullets(parsed);
+  const e1 = parsed.experience[0].refinedBullets;
+  const e2 = parsed.experience[1].refinedBullets;
+  const p1 = parsed.projects[0].refinedBullets;
+  const checks: Array<[string, boolean]> = [
+    ['drops the banned bullet, keeps the good ones', e1.length === 2 && !e1.some((b: string) => /^participated/i.test(b))],
+    ['never empties an item (all-banned keeps 1)', e2.length === 1],
+    ['drops a banned opener in projects too', p1.length === 1 && /^Built/.test(p1[0])],
+    ['reports every dropped bullet', dropped.length === 3],
+    // e2 is EXCLUDED on purpose: every one of its bullets was banned, so keeping
+    // bullets[0] is the documented "never empty an item" behaviour — an item with
+    // zero bullets fails validateOptimizedResponse and costs the user the whole
+    // generation, which is worse than one weak line.
+    ['no banned opener survives where a good bullet existed', ![...e1, ...p1].some((b: string) => /^\s*(responsible for|worked on|helped (with|to)|duties included|tasked with|in charge of|assisted (with|in)|involved in|participated in)\b/i.test(b))],
+    ['the all-banned item keeps its FIRST bullet, not an arbitrary one', e2[0] === 'Responsible for the checkout page.'],
+  ];
+  let ok = true;
+  for (const [name, pass] of checks) { if (!pass) ok = false; console.log(`  ${pass ? '✓' : '✗'} ${name}`); }
+  console.log(`\n  ${ok ? 'RULE 3 is enforced, not just requested' : 'REGRESSION DETECTED'}`);
+  return ok;
+}
+
 // ── selftest: prove the error taxonomy is real ──────────────────────────────
 async function selftest(client: GeminiClient) {
   const regressionOk = classifierRegression();
   const publicOk = publicErrorRegression();
   const trimOk = linkedInTrimRegression();
+  const openerOk = bannedOpenerRegression();
   console.log('\n=== SELFTEST: error taxonomy + fallback chain (live) ===\n');
-  if (!regressionOk || !publicOk || !trimOk) process.exitCode = 1;
+  if (!regressionOk || !publicOk || !trimOk || !openerOk) process.exitCode = 1;
   // `expect` is ASSERTED, not decorative: 'ok' means the call must succeed,
   // anything else is the GeminiErrorCode it must produce.
   const cases: Array<{ name: string; expect: string; run: () => Promise<unknown> }> = [
