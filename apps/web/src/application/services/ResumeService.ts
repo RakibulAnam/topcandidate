@@ -165,6 +165,13 @@ export class ResumeService {
       toolkit.outreachEmail = value.outreachEmail;
       toolkit.linkedInMessage = value.linkedInMessage;
       toolkit.interviewQuestions = value.interviewQuestions;
+      // Prep topics ride with the questions as one Preparation Guide. This
+      // assembly copies slot-by-slot rather than spreading `value`, so a NEW
+      // toolkit field is silently dropped unless it is named here — which is
+      // exactly what happened when prepTopics was added: the generator produced
+      // them, the API returned them, and this line's absence meant the UI never
+      // saw a single one. If you add a toolkit artifact, add it here too.
+      toolkit.prepTopics = value.prepTopics;
       if (Object.keys(value.errors).length > 0) {
         toolkit.errors = { ...value.errors };
         console.warn(`[resume-service] toolkit partial — errors=${JSON.stringify(value.errors)}`);
