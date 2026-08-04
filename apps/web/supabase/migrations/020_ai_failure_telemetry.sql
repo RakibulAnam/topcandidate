@@ -18,7 +18,7 @@
 -- src/infrastructure/ai/GeminiClient.ts:
 --   rate_limit | quota_exhausted | timeout | schema_invalid | json_parse
 --   | guard_rejected | safety_blocked | truncated | empty_response
---   | model_unavailable | auth | upstream_error | unknown
+--   | model_unavailable | auth | billing_required | upstream_error | unknown
 -- ('guard_rejected' = the provider succeeded but OUR fabrication/specificity
 --  guards refused the content; set in api/_lib/aiTelemetry.ts, not by the client.)
 

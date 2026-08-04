@@ -77,6 +77,10 @@ export type GeminiErrorCode =
   | 'empty_response'    // 200 with no candidate text
   | 'model_unavailable' // 404 — e.g. the gemini-2.5-* gating
   | 'auth'              // 401/403 — bad or unauthorized key
+  | 'billing_required'  // 400 FAILED_PRECONDITION — billing off / spend cap hit.
+                        // Deliberately NOT quota_exhausted: a per-model daily
+                        // quota should advance the chain, this must not (no model
+                        // and no retry can spend money the account cannot spend).
   | 'upstream_error'    // 500/503
   | 'unknown';
 
@@ -91,6 +95,12 @@ const ADVANCE_TO_NEXT_MODEL: ReadonlySet<GeminiErrorCode> = new Set([
   // message is logged so a genuine schema bug is still visible.
   'schema_invalid',
   'empty_response',
+  // By definition we do not know what this was, so the robust move is to let a
+  // different model try rather than give up. Previously 'unknown' was in neither
+  // set and hit the catch-all `throw`, so ONE unrecognized provider response
+  // ended the call even though the next model might have answered. The per-attempt
+  // message is still recorded, so a systemic bug stays diagnosable.
+  'unknown',
 ]);
 
 /**
@@ -119,6 +129,7 @@ const REFUSAL_FINISH_REASONS: ReadonlySet<string> = new Set([
  */
 const STOP_CHAIN: ReadonlySet<GeminiErrorCode> = new Set([
   'auth',
+  'billing_required',
   'safety_blocked',
   'truncated',
 ]);
@@ -136,6 +147,7 @@ const STOP_CHAIN: ReadonlySet<GeminiErrorCode> = new Set([
  */
 const NO_OUTER_RETRY: ReadonlySet<GeminiErrorCode> = new Set([
   'auth',
+  'billing_required',
   'safety_blocked',
 ]);
 
@@ -207,6 +219,18 @@ export function classifyGeminiError(
   if (err instanceof GeminiError) {
     return { code: err.code, status: err.status, retryDelayMs: err.retryDelayMs };
   }
+  // Unwrap ONE level of `cause`. Generators wrap failures for a readable message
+  // (GeminiResumeOptimizer.buildFinalError does exactly this, deliberately
+  // attaching `{ cause }`), which hides the GeminiError from the check above. The
+  // wrapper's message still contains the original text, so prose matching kept
+  // limping along — but the structured signal was lost, meaning every PAID
+  // optimizer failure forfeited its rate_limit-vs-quota_exhausted distinction and
+  // its retryDelayMs. One level is enough for every wrap site we have, and it
+  // cannot loop.
+  if (err instanceof Error && err.cause instanceof GeminiError) {
+    const c = err.cause;
+    return { code: c.code, status: c.status, retryDelayMs: c.retryDelayMs };
+  }
   if (err instanceof Error && err.name === 'AbortError') return { code: 'timeout' };
 
   const status: number | undefined =
@@ -236,7 +260,14 @@ export function classifyGeminiError(
     if (id) {
       code = /perday|daily/.test(id) ? 'quota_exhausted' : 'rate_limit';
     } else {
-      code = /per\s?day|daily|exhaust/.test(msg) ? 'quota_exhausted' : 'rate_limit';
+      // Prose fallback, used only when the structured details are missing.
+      // It must test for a PER-DAY signal and nothing else. An earlier version
+      // also matched /exhaust/, which is present in EVERY 429 via the
+      // "RESOURCE_EXHAUSTED" status string — so it re-created, inside the
+      // fallback, the exact misclassification the quotaId lookup above exists to
+      // prevent. Default to rate_limit: assuming the recoverable case is the
+      // safer error, since it keeps the retry path open.
+      code = /per\s?-?day|daily|per\s?day\s?quota/.test(msg) ? 'quota_exhausted' : 'rate_limit';
     }
     return { code, status, retryDelayMs };
   }
@@ -252,6 +283,19 @@ export function classifyGeminiError(
     msg.includes('api_key_invalid')
   ) {
     return { code: 'auth', status };
+  }
+  // Before the generic 400: Google reports a disabled billing account or a
+  // tripped spend cap as 400 FAILED_PRECONDITION. Left in the schema_invalid
+  // bucket it would be an advance-to-next-model code, so the moment the $20 cap
+  // fires every request would walk all three models before failing — burning the
+  // chain on a condition no model can satisfy.
+  if (
+    msg.includes('failed_precondition') ||
+    msg.includes('billing') ||
+    msg.includes('has not been used in project') ||
+    msg.includes('is not enabled')
+  ) {
+    return { code: 'billing_required', status };
   }
   if (status === 400 || msg.includes('invalid_argument')) return { code: 'schema_invalid', status };
   if (status === 404 || msg.includes('not_found')) return { code: 'model_unavailable', status };

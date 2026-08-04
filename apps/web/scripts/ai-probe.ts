@@ -1,12 +1,20 @@
 // Local Gemini probe — no browser, no credits, no real user data.
 //
-// Two modes:
-//   selftest  Exercises GeminiClient's error taxonomy and fallback chain against
-//             the live API, so "which calls fail and why" is answerable BEFORE a
-//             failure happens in production rather than after.
-//   bench     Runs realistic-size payloads across the candidate models and
-//             reports tokens, thought tokens, cost, latency and output quality,
-//             so the model assignment is chosen on measurements, not vibes.
+// Five modes:
+//   selftest  An OFFLINE regression over recorded real Google error payloads,
+//             then a live walk of the error taxonomy and fallback chain. Both
+//             halves ASSERT — an earlier version printed a tick in both branches
+//             and so reported 6/6 whatever the classifier returned, which is worse
+//             than no test because it manufactures confidence.
+//   bench     Realistic-size payloads across the candidate models: tokens,
+//             thought tokens, cost, latency, quality. Picks the model assignment
+//             on measurements rather than vibes.
+//   tier      Infers free vs paid tier from throughput (20 concurrent beats the
+//             15 RPM free ceiling). Matters because the free tier trains on
+//             prompts, which contradicts ToS §3.
+//   e2e       All eight REAL generators with their real schemas and guards.
+//   gaps      The two paths e2e cannot reach: the extractor's multimodal
+//             inlineData branch, and gemini-3.6-flash at a full payload.
 //
 // Fixtures are SYNTHETIC on purpose. Google's free tier trains on prompts and
 // human reviewers may read them (paid tier does not), and TermsOfService §3
@@ -243,7 +251,49 @@ const RECORDED: Array<{ name: string; status: number; body: string; expect: stri
     expect: 'schema_invalid',
     body: '{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}',
   },
+  {
+    // Must NOT be schema_invalid: that advances the chain, so the moment the $20
+    // spend cap fires every request would walk all three models before failing.
+    name: '400 FAILED_PRECONDITION — billing off / spend cap hit',
+    status: 400,
+    expect: 'billing_required',
+    body: '{"error":{"code":400,"message":"Gemini API has not been used in project 123 before or it is disabled. Enable billing to continue.","status":"FAILED_PRECONDITION"}}',
+  },
+  {
+    // The prose fallback, exercised by stripping the structured details. It must
+    // NOT match on "exhaust" — RESOURCE_EXHAUSTED is in every 429's status, so
+    // that re-created the exact misclassification quotaId exists to prevent.
+    name: '429 with NO quotaId details — must default to rate_limit',
+    status: 429,
+    expect: 'rate_limit',
+    body: '{"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details.","status":"RESOURCE_EXHAUSTED"}}',
+  },
+  {
+    // Genuine per-day signal in prose, still no structured details.
+    name: '429 prose says per day — quota_exhausted',
+    status: 429,
+    expect: 'quota_exhausted',
+    body: '{"error":{"code":429,"message":"Quota exceeded for quota metric generate_requests per day.","status":"RESOURCE_EXHAUSTED"}}',
+  },
 ];
+
+/**
+ * Generators wrap failures for a readable message (GeminiResumeOptimizer's
+ * buildFinalError) which hides the GeminiError. classifyGeminiError unwraps one
+ * `cause` level; without that, every PAID optimizer failure forfeited its
+ * structured code and its retryDelayMs.
+ */
+function causeUnwrapRegression(): boolean {
+  const inner = new GeminiError('rate_limit', 429, 'gemini-3.5-flash-lite: throttled', [], 53_000);
+  const wrapped = new Error(`Resume optimization failed: ${inner.message}`, { cause: inner });
+  const got = classifyGeminiError(wrapped);
+  const ok = got.code === 'rate_limit' && got.retryDelayMs === 53_000;
+  console.log(
+    `  ${ok ? '✓' : '✗'} ${'wrapped error unwraps one `cause` level'.padEnd(54)} -> ${got.code}` +
+    `  retryDelayMs=${got.retryDelayMs ?? 'none'}${ok ? '' : '  EXPECTED rate_limit / 53000'}`,
+  );
+  return ok;
+}
 
 function classifierRegression(): boolean {
   console.log('\n=== CLASSIFIER REGRESSION (recorded payloads, offline) ===\n');
@@ -260,8 +310,10 @@ function classifierRegression(): boolean {
       `${c.expectDelayMs !== undefined ? `  retryDelayMs=${got.retryDelayMs ?? 'none'}${delayOk ? '' : ` (EXPECTED ${c.expectDelayMs})`}` : ''}`
     );
   }
-  console.log(`\n  ${ok ? 'all recorded payloads classify correctly' : 'REGRESSION DETECTED'}`);
-  return ok;
+  const causeOk = causeUnwrapRegression();
+  const allOk = ok && causeOk;
+  console.log(`\n  ${allOk ? 'all recorded payloads classify correctly' : 'REGRESSION DETECTED'}`);
+  return allOk;
 }
 
 // ── selftest: prove the error taxonomy is real ──────────────────────────────
@@ -269,6 +321,8 @@ async function selftest(client: GeminiClient) {
   const regressionOk = classifierRegression();
   console.log('\n=== SELFTEST: error taxonomy + fallback chain (live) ===\n');
   if (!regressionOk) process.exitCode = 1;
+  // `expect` is ASSERTED, not decorative: 'ok' means the call must succeed,
+  // anything else is the GeminiErrorCode it must produce.
   const cases: Array<{ name: string; expect: string; run: () => Promise<unknown> }> = [
     {
       name: 'happy path, structured JSON',
@@ -283,7 +337,7 @@ async function selftest(client: GeminiClient) {
     },
     {
       name: 'fallback: dead 2.5 model first, 3.5-flash-lite second',
-      expect: 'ok, after model_unavailable',
+      expect: 'ok',
       run: () =>
         client.generate({
           models: ['gemini-2.5-flash', GEMINI_MODELS.FLASH_LITE_35],
@@ -313,7 +367,7 @@ async function selftest(client: GeminiClient) {
     },
     {
       name: 'timeout (budget below MIN_ATTEMPT_MS)',
-      expect: 'chain exhausted / timeout',
+      expect: 'timeout',
       run: () =>
         client.generate(
           { models: [GEMINI_MODELS.FLASH_LITE_35], contents: 'Write a long essay.', maxOutputTokens: 4096 },
@@ -334,18 +388,29 @@ async function selftest(client: GeminiClient) {
 
   let pass = 0;
   for (const c of cases) {
+    let actual: string;
+    let chain = '-';
     try {
       const r: any = await c.run();
-      console.log(`  ✓ ${c.name.padEnd(46)} -> ok   [${fmtAttempts(r.attempts)}]`);
-      pass++;
+      actual = 'ok';
+      chain = fmtAttempts(r.attempts);
     } catch (e) {
-      const code = e instanceof GeminiError ? e.code : classifyGeminiError(e).code;
-      const chain = e instanceof GeminiError ? fmtAttempts(e.attempts) : '-';
-      console.log(`  ✓ ${c.name.padEnd(46)} -> ${code.padEnd(18)} [${chain}]`);
-      pass++;
+      actual = e instanceof GeminiError ? e.code : classifyGeminiError(e).code;
+      if (e instanceof GeminiError) chain = fmtAttempts(e.attempts);
     }
+    const ok = actual === c.expect;
+    if (ok) pass++;
+    else process.exitCode = 1;
+    console.log(
+      `  ${ok ? '✓' : '✗'} ${c.name.padEnd(46)} -> ${actual.padEnd(18)}` +
+      `${ok ? '' : ` EXPECTED ${c.expect}`} [${chain}]`,
+    );
   }
-  console.log(`\n  ${pass}/${cases.length} cases produced a classified outcome (expected column above).`);
+  // An earlier version printed ✓ and incremented `pass` in BOTH branches, so it
+  // reported 6/6 no matter what the classifier returned — a test that cannot fail
+  // is worse than no test, because it manufactures confidence.
+  console.log(`\n  ${pass}/${cases.length} live cases matched their expected outcome.`);
+  if (pass < cases.length) console.log('  ^ a mismatch means the error taxonomy regressed.');
 }
 
 // ── bench: real cost / latency / quality per model ──────────────────────────
