@@ -1474,7 +1474,12 @@ create or replace view v_ai_failures_daily as
   select date(created_at) as day, kind, coalesce(error_code,'unclassified') as error_code,
          count(*) as failures, round(avg(latency_ms)) as avg_latency_ms,
          round(avg(attempt_count),2) as avg_attempts, max(error_message) as sample_message
-  from ai_call_log where status='error' group by 1,2,3;
+  from ai_call_log where status='error'
+    -- Migration 023: insufficient_credits (402) rows are logged so a rejected
+    -- request still counts toward the daily cap, but no AI call ran behind them.
+    -- Left in, they showed up as 'unclassified' beside real provider failures.
+    and coalesce(error_code,'') <> 'insufficient_credits'
+  group by 1,2,3;
 -- Per-model health from model_attempts (the `model` column records only
 -- whichever model ultimately served the response, hiding failed chain steps).
 create or replace view v_ai_model_health as

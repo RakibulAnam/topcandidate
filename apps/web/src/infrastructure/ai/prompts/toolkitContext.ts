@@ -724,6 +724,14 @@ export class ToolkitSpecificityError extends Error {
 // Tokens that look "tech-y" but are genuinely safe to mention without
 // being in evidence — common methodology / generic terms the model uses
 // to describe approaches. Keep this short; over-allowing weakens the guard.
+//
+// CURRENTLY UNREACHABLE BY CONSTRUCTION, and that is fine. detectFabricatedTokens
+// only iterates FABRICATION_TOKEN_DICTIONARY, and none of these 13 words is in
+// it — each appears exactly once in this file, here. So the `has()` check below
+// never fires today. It is a FORWARD guard: it costs nothing and it means adding
+// 'SQL' or 'REST' to the dictionary cannot immediately start rejecting ordinary
+// prose. Do not "clean it up" as dead code, and do not assume it is protecting
+// anything right now either.
 const FABRICATION_SAFELIST = new Set<string>([
   'agile', 'rest', 'sql', 'http', 'json', 'api', 'apis', 'frontend',
   'backend', 'fullstack', 'mobile', 'web', 'cloud',

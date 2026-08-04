@@ -126,8 +126,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (creditError) {
     if (creditError.message?.includes('insufficient_credits')) {
       console.info(`[optimize ${rid}] 402 insufficient_credits (rpc=${Date.now() - tCredit}ms)`);
-      // Counts toward the daily cap (C5) — no AI ran, so no telemetry.
-      await logCall(auth.userId, auth.jwt, 'optimize', { status: 'error' });
+      // Counts toward the daily cap (C5) — no AI ran, so no usage telemetry.
+      // But it MUST carry an error_code: without one, v_ai_failures_daily
+      // grouped these under 'unclassified' alongside real provider failures, so
+      // a user running out of credits looked like the AI breaking.
+      await logCall(auth.userId, auth.jwt, 'optimize', {
+        status: 'error',
+        errorCode: 'insufficient_credits',
+      });
       res.status(402).json({
         error: 'No toolkit credits remaining. Purchase a pack to continue.',
         code: 'insufficient_credits',

@@ -108,7 +108,14 @@ const HANDLERS: Record<string, Handler> = {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const raw = req.query.action;
   const action = Array.isArray(raw) ? raw[0] : raw;
-  if (!action || !(action in HANDLERS)) {
+  // hasOwnProperty, NOT `action in HANDLERS`. HANDLERS is a plain object literal,
+  // so `in` walks Object.prototype: 'constructor', 'toString', 'valueOf',
+  // '__proto__' and friends all passed this check and fell through to
+  // HANDLERS[action](req, res), which then threw on a non-function (or, for
+  // '__proto__', silently did nothing useful) — a 500 where the caller should
+  // have got a clean 404. No auth was bypassed (every handler calls
+  // requireAdmin itself), but an unknown action must 404, not fault.
+  if (!action || !Object.prototype.hasOwnProperty.call(HANDLERS, action)) {
     res.status(404).json({ error: `Unknown admin action: ${action ?? '(empty)'}` });
     return;
   }
