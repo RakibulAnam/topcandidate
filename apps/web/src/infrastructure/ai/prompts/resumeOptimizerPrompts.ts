@@ -851,7 +851,12 @@ export function assertProseMatchesStrippedSkills(
   if (both.length > 0) throw new ResumeFabricationError(both);
 }
 
-function buildEvidenceText(c: ResumeData): string {
+/**
+ * The candidate's own words, concatenated — the corpus every honesty check reads.
+ * Exported so brand-spelling repair can align generated prose to the spelling the
+ * candidate actually used.
+ */
+export function buildEvidenceText(c: ResumeData): string {
   const parts: string[] = [...(c.skills ?? [])];
   // Polished-profile bullets/skills count as evidence too — they are
   // AI-verified renderings of the raw text (e.g. "PostgreSQL" where the

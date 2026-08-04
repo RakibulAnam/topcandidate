@@ -35,7 +35,7 @@ import {
   InterviewQuestion,
   InterviewQuestionCategory,
 } from '../../domain/entities/Resume.js';
-import { IInterviewQuestionsGenerator } from '../../domain/usecases/GenerateInterviewQuestionsUseCase.js';
+import { IInterviewQuestionsGenerator, InterviewPrep } from '../../domain/usecases/GenerateInterviewQuestionsUseCase.js';
 import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
@@ -44,6 +44,7 @@ import {
   INTERVIEW_SCHEMA,
 } from './prompts/toolkitPrompts.js';
 import { classifyFitMode } from './prompts/toolkitContext.js';
+import { sanitizePrepTopics } from './GeminiToolkitGenerator.js';
 
 const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
 
@@ -62,7 +63,7 @@ export class GeminiInterviewQuestionsGenerator implements IInterviewQuestionsGen
     this.client = new GeminiClient(apiKey);
   }
 
-  async generate(data: ResumeData, usage?: UsageSink): Promise<InterviewQuestion[]> {
+  async generate(data: ResumeData, usage?: UsageSink): Promise<InterviewPrep> {
     const fit = classifyFitMode(data);
     console.info(`[gemini-interview-gen] fit=${fit.mode} overlap=${fit.overlap.toFixed(2)} matched=${fit.matched}/${fit.jdVocabSize}`);
     // Retry once on transient malformed JSON / guard failure (the schema
@@ -127,7 +128,11 @@ export class GeminiInterviewQuestionsGenerator implements IInterviewQuestionsGen
         // toolkit generator): questions intentionally probe the JD — including tech
         // the candidate hasn't used — so they can rehearse. The prompt handles
         // honest answer coaching; we don't block the artifact.
-        return questions;
+        //
+        // Study topics ride along so a regenerate refreshes the WHOLE Preparation
+        // Guide. Sanitizer is shared with the bundle, and an empty list is fine —
+        // the section degrades to questions only rather than failing.
+        return { questions, prepTopics: sanitizePrepTopics(parsed.prepTopics) };
       } catch (err) {
         // Preserve the attempt chain on failure too, so ai_call_log can show
         // which models were tried on a call that ultimately failed.
@@ -150,10 +155,16 @@ export class GeminiInterviewQuestionsGenerator implements IInterviewQuestionsGen
     return match ?? 'Role-specific';
   }
 
-  private safeJsonParse(text: string): { questions?: Array<{
-    question?: string; category?: string; whyAsked?: string; answerStrategy?: string;
-    questionBn?: string; whyAskedBn?: string; answerStrategyBn?: string;
-  }> } {
+  private safeJsonParse(text: string): {
+    questions?: Array<{
+      question?: string; category?: string; whyAsked?: string; answerStrategy?: string;
+      questionBn?: string; whyAskedBn?: string; answerStrategyBn?: string;
+    }>;
+    prepTopics?: Array<{
+      topic?: string; whyItMatters?: string; howToPrepare?: string;
+      topicBn?: string; whyItMattersBn?: string; howToPrepareBn?: string;
+    }>;
+  } {
     try {
       return JSON.parse(text);
     } catch {

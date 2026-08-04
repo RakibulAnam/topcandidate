@@ -162,7 +162,7 @@ export const en = {
     tabCoverLetter: 'Cover Letter',
     tabOutreachEmail: 'Outreach Email',
     tabLinkedIn: 'LinkedIn Note',
-    tabQuestionPrep: 'Question Prep',
+    tabQuestionPrep: 'Prep Guide',
     sidebarFootnote: 'All resume templates are single-column, real-text, and pass ATS keyword extraction.',
     sectionSummary: 'Professional Summary',
     sectionExperience: 'Experience',
@@ -228,9 +228,17 @@ export const en = {
     linkedinTrim: '— trim before sending',
     linkedinNote: 'Note',
 
-    interviewEyebrow: 'Interview prep',
-    interviewTitle: 'Must-know interview questions',
-    interviewDesc: 'The questions you are most likely to be asked for this role, with what interviewers are scoring and how to structure a great answer using your actual experience.',
+    interviewEyebrow: 'Preparation guide',
+    interviewTitle: 'Walk in ready',
+    interviewDesc: 'The questions you are most likely to be asked for this role — what interviewers are scoring, and how to answer using your actual experience. Plus the few topics worth revising before you go in.',
+    // Study topics from the JD gap. Framed as a short, finishable list — one
+    // concrete action each, never a syllabus. The point is that nothing in the
+    // room is a surprise.
+    prepTopicsHeading: 'Worth revising before the interview',
+    prepTopicsLead: 'This role asks for a few things your profile does not cover yet. Each one has a single, concrete way to get ready.',
+    prepTopicsWhy: 'Why it comes up',
+    prepTopicsAction: 'Do this',
+    prepTopicsBrief: 'Revision list',
     interviewQCount: '{n} questions tailored to your JD',
     interviewCollapseAll: 'Collapse all',
     interviewExpandAll: 'Expand all',

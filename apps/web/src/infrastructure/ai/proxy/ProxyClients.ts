@@ -26,7 +26,7 @@ import { IToolkitGenerator } from '../../../domain/usecases/GenerateToolkitUseCa
 import { ICoverLetterGenerator } from '../../../domain/usecases/GenerateCoverLetterUseCase';
 import { IOutreachEmailGenerator } from '../../../domain/usecases/GenerateOutreachEmailUseCase';
 import { ILinkedInMessageGenerator } from '../../../domain/usecases/GenerateLinkedInMessageUseCase';
-import { IInterviewQuestionsGenerator } from '../../../domain/usecases/GenerateInterviewQuestionsUseCase';
+import { IInterviewQuestionsGenerator, InterviewPrep } from '../../../domain/usecases/GenerateInterviewQuestionsUseCase';
 import { ExtractedProfileData, IResumeExtractor } from '../../../domain/usecases/ExtractResumeUseCase';
 
 // ────────────────────────────────────────────────
@@ -198,8 +198,13 @@ export class ProxyLinkedInMessageGenerator implements ILinkedInMessageGenerator 
 }
 
 export class ProxyInterviewQuestionsGenerator implements IInterviewQuestionsGenerator {
-  generate(data: ResumeData): Promise<InterviewQuestion[]> {
-    return regenerateItem<InterviewQuestion[]>('interviewQuestions', data);
+  async generate(data: ResumeData): Promise<InterviewPrep> {
+    const result = await regenerateItem<InterviewPrep | InterviewQuestion[]>('interviewQuestions', data);
+    // Back-compat: before prep topics, this endpoint returned a bare question
+    // array. A client running against an older deployment (or a cached function)
+    // must not crash on the old shape.
+    if (Array.isArray(result)) return { questions: result, prepTopics: [] };
+    return { questions: result?.questions ?? [], prepTopics: result?.prepTopics ?? [] };
   }
 }
 

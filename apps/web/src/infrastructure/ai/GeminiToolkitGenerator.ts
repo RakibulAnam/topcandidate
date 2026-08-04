@@ -43,6 +43,7 @@ import {
   GeneratedToolkit,
   InterviewQuestion,
   InterviewQuestionCategory,
+  PrepTopic,
   ToolkitErrors,
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
@@ -86,6 +87,41 @@ interface RawToolkitResponse {
     whyAskedBn?: string;
     answerStrategyBn?: string;
   }>;
+  prepTopics?: Array<{
+    topic?: string;
+    whyItMatters?: string;
+    howToPrepare?: string;
+    topicBn?: string;
+    whyItMattersBn?: string;
+    howToPrepareBn?: string;
+  }>;
+}
+
+/**
+ * Sanitize the study-topics list. Shared with the single-artifact interview
+ * generator so a regenerate produces the same shape as the bundle.
+ *
+ * Never throws and never fails its slot: prep topics are additive help, so an
+ * empty list degrades to "questions only" rather than costing the user the whole
+ * Preparation Guide.
+ */
+export function sanitizePrepTopics(
+  raw: RawToolkitResponse['prepTopics'],
+  cap = 5,
+): PrepTopic[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t) => ({
+      topic: (t?.topic ?? '').trim(),
+      whyItMatters: (t?.whyItMatters ?? '').trim(),
+      howToPrepare: (t?.howToPrepare ?? '').trim(),
+      topicBn: (t?.topicBn ?? '').trim() || undefined,
+      whyItMattersBn: (t?.whyItMattersBn ?? '').trim() || undefined,
+      howToPrepareBn: (t?.howToPrepareBn ?? '').trim() || undefined,
+    }))
+    // A topic with no action is just an accusation — drop it.
+    .filter((t) => t.topic && t.whyItMatters && t.howToPrepare)
+    .slice(0, cap);
 }
 
 export class GeminiToolkitGenerator implements IToolkitGenerator {
@@ -263,11 +299,18 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       console.warn('[gemini-toolkit-gen] interviewQuestions validation failed:', errors.interviewQuestions);
     }
 
+    // Study topics from the JD gap — the other half of the Preparation Guide.
+    // Assigned OUTSIDE the interview try/catch on purpose: a weak topics list must
+    // never take the questions down with it, and vice versa.
+    out.prepTopics = sanitizePrepTopics(parsed.prepTopics);
+    console.info(`[gemini-toolkit-gen] prep topics: ${out.prepTopics.length}`);
+
     const ok = {
       coverLetter: !!out.coverLetter,
       outreachEmail: !!out.outreachEmail,
       linkedInMessage: !!out.linkedInMessage,
       interviewQuestions: !!out.interviewQuestions && out.interviewQuestions.length > 0,
+      prepTopics: out.prepTopics.length,
     };
     console.info(`[gemini-toolkit-gen] done total=${Date.now() - t0}ms slots=${JSON.stringify(ok)} errorKeys=${Object.keys(errors).join(',') || '(none)'}`);
 

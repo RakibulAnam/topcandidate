@@ -223,8 +223,12 @@ export class ResumeService {
         nextToolkit.linkedInMessage = v;
       } else if (item === 'interviewQuestions') {
         const v = await this.withRetry(() => this.interviewQuestionsUseCase.execute(data));
-        if (!v?.length) throw new Error('Generator returned no interview questions');
-        nextToolkit.interviewQuestions = v;
+        if (!v?.questions?.length) throw new Error('Generator returned no interview questions');
+        nextToolkit.interviewQuestions = v.questions;
+        // Only overwrite study topics when the regenerate actually produced some —
+        // an empty list means the model skipped them, and keeping the previous
+        // topics beats blanking half the Preparation Guide on a retry.
+        if (v.prepTopics.length > 0) nextToolkit.prepTopics = v.prepTopics;
       }
       delete nextErrors[item];
       console.info(`[resume-service] regenerateToolkitItem ok item=${item} took=${Math.round(performance.now() - t0)}ms`);

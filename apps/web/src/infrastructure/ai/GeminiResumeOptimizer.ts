@@ -46,6 +46,7 @@
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
 import { resetUsageAttempt, type UsageSink } from './usage.js';
+import { fixBrandSpellings, fixBrandSpellingsInAll } from './prompts/brandFidelity.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   buildSystemInstruction,
@@ -56,6 +57,7 @@ import {
   reportFabricatedProse,
   assertProseMatchesStrippedSkills,
   dropBannedOpenerBullets,
+  buildEvidenceText,
   reorderLeadBulletByJDFit,
   reorderProjectsByJDFit,
   enforceBulletDensity,
@@ -140,6 +142,29 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
           // assertProseMatchesStrippedSkills for why the intersection is the
           // confident signal and a prose-only hit is not.
           assertProseMatchesStrippedSkills(parsed, data, fabResult.fabricated);
+          // Brand-spelling safety net on the PAID artifact. The normalizer already
+          // repaired the stored bullets, but the optimizer re-types prose (the
+          // summary, and bullets it rewords per JD) and can re-introduce a
+          // corruption. Can only ever fix a brand the candidate themselves wrote —
+          // see brandFidelity's safety rule.
+          {
+            const ev = buildEvidenceText(data);
+            const sum = fixBrandSpellings(parsed.summary ?? '', ev);
+            parsed.summary = sum.text;
+            const fixes = [...sum.corrections];
+            for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
+              for (const item of group ?? []) {
+                if (!Array.isArray(item.refinedBullets)) continue;
+                const r = fixBrandSpellingsInAll(item.refinedBullets, ev);
+                item.refinedBullets = r.values;
+                fixes.push(...r.corrections);
+              }
+            }
+            if (fixes.length) {
+              console.info(`[gemini] corrected ${fixes.length} brand spelling(s) in résumé prose: ${fixes.map((c) => `${c.from}->${c.to}`).join(', ')}`);
+            }
+          }
+
           // Before the lead-bullet choice, so a banned-opener line can never be
           // promoted into the recruiter's highest-attention slot.
           const droppedOpeners = dropBannedOpenerBullets(parsed);

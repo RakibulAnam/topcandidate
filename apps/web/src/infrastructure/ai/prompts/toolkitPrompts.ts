@@ -179,8 +179,31 @@ BILINGUAL PREP (REQUIRED) — for EACH question, also produce the Bengali (Bangl
   • Banking / finance terminology stays bilingual-natural: "credit analysis" → "ক্রেডিট অ্যানালাইসিস", "interest rate" → "সুদের হার", "loan portfolio" → "লোন পোর্টফোলিও". Use whichever form a real BD banker would say out loud.
   • Numbers, dates, and currency stay as written (5 crore taka stays "5 crore taka" or "৫ কোটি টাকা" — pick whichever reads naturally for that sentence).
   • Length parity: Bengali version should be roughly the same depth as English — not a one-sentence summary. The candidate needs a full prep brief in either language.
-  • Category labels (Behavioral / Technical / Role-specific / Values & Culture / Situational) stay in English — they are categorisation tokens, not narrative copy.`;
+  • Category labels (Behavioral / Technical / Role-specific / Values & Culture / Situational) stay in English — they are categorisation tokens, not narrative copy.
+
+${PREP_TOPICS_BLOCK}`;
 }
+
+// Shared by the combined toolkit generator and the single-artifact interview
+// generator, so a regenerate produces the same contract as the bundle.
+export const PREP_TOPICS_BLOCK = `═══════════════════════════════════════════════
+ARTIFACT 5 — PREPARATION TOPICS (array, prepTopics)
+═══════════════════════════════════════════════
+COUNT — 3–5 topics. Fewer good ones beat five padded ones.
+
+SOURCE — THE GAP, and only the gap. Read the JD's requirements, compare against the candidate evidence above, and list what THIS employer will probe that the candidate's evidence does NOT currently support. A topic the candidate has already demonstrated is worthless here — they do not need to revise their own work. If the JD names a tool, framework, regulation, methodology or certification absent from their evidence, that is a topic. If the JD demands a seniority behaviour they have not evidenced (leading a team, owning a budget, presenting to executives), that is a topic.
+
+DO NOT invent a gap to fill the count. If the candidate genuinely matches nearly everything, return the 3 areas where this employer will push DEEPEST on what they do have — labelled honestly as depth, not as a hole.
+
+TOPIC — Name it the way the JD names it, so the candidate can search it. "Kubernetes deployments and rollbacks", not "container stuff".
+
+WHY IT MATTERS — 1–2 sentences: which JD requirement this maps to, and what the interviewer will actually ask about it. Be concrete about the question they should expect.
+
+HOW TO PREPARE — ONE concrete, finishable action, sized to a few evenings before an interview. "Deploy a two-service app to a local k3s cluster and practise describing a rollback" — NOT "learn Kubernetes". Never recommend a paid course. Never suggest claiming experience they lack.
+
+TONE — Level with them like a senior colleague who wants them to walk in ready. No shaming, no hedging, no "you may wish to consider". This is the honest counterpart to the résumé: the résumé states what they HAVE done in the strongest true terms, and this section names what they still need — so nothing in the interview is a surprise.
+
+BILINGUAL (REQUIRED) — also produce topicBn, whyItMattersBn, howToPrepareBn under the same Bengali rules as the interview questions: natural professional register, English/Roman script kept for proper nouns, tool names, and canonical industry terms.`;
 
 export function buildToolkitUserPrompt(data: ResumeData, mode: FitMode = 'match'): string {
   const candidateContext = buildCandidateContext(data);
@@ -478,7 +501,9 @@ BILINGUAL PREP (REQUIRED) — for EACH question also produce the Bengali (Bangla
   • Proper nouns: keep employer names, product names, certifications, and English-canonical industry terms (Basel III, IFRS 9, KYC, SWIFT, NPL, ECL, CFA, BBA, MBA, SME, CV, KPI, ROI) in English / Roman script inline. Bangla speakers in professional contexts read these as English tokens.
   • Banking / finance and other domain terminology stays bilingual-natural — use whichever form a real BD professional in that field would say out loud.
   • Length parity: Bengali version should match English depth.
-  • Do NOT translate the category label; it stays English.`;
+  • Do NOT translate the category label; it stays English.
+
+${PREP_TOPICS_BLOCK}`;
 
 export function buildInterviewUserPrompt(data: ResumeData, mode: 'match' | 'stretch' = 'match'): string {
   const candidateContext = buildCandidateContext(data);
@@ -536,6 +561,33 @@ RULES
 // `additionalProperties` field, so it is both a TS error and a likely 400.
 
 /** Combined toolkit bundle: cover letter + outreach + LinkedIn + interview Qs. */
+/**
+ * prepTopics, shared verbatim by TOOLKIT_SCHEMA and INTERVIEW_SCHEMA so a
+ * per-item regenerate returns the same contract as the bundle. One definition:
+ * two drifting copies of a required schema is how a regenerate silently starts
+ * dropping half a section.
+ *
+ * Declared ABOVE both schemas on purpose — these are module-level consts
+ * initialised at import time, so a schema referencing it from above would hit the
+ * temporal dead zone and throw before any generator could run.
+ */
+const PREP_TOPICS_SCHEMA_ITEMS: Record<string, unknown> = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      topic: { type: 'string' },
+      whyItMatters: { type: 'string' },
+      howToPrepare: { type: 'string' },
+      topicBn: { type: 'string' },
+      whyItMattersBn: { type: 'string' },
+      howToPrepareBn: { type: 'string' },
+    },
+    required: ['topic', 'whyItMatters', 'howToPrepare', 'topicBn', 'whyItMattersBn', 'howToPrepareBn'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLKIT_SCHEMA: Record<string, unknown> = {
   type: 'object',
   properties: {
@@ -564,8 +616,9 @@ export const TOOLKIT_SCHEMA: Record<string, unknown> = {
         additionalProperties: false,
       },
     },
+    prepTopics: PREP_TOPICS_SCHEMA_ITEMS,
   },
-  required: ['coverLetter', 'outreachEmail', 'linkedInMessage', 'interviewQuestions'],
+  required: ['coverLetter', 'outreachEmail', 'linkedInMessage', 'interviewQuestions', 'prepTopics'],
   additionalProperties: false,
 };
 
@@ -590,8 +643,9 @@ export const INTERVIEW_SCHEMA: Record<string, unknown> = {
         additionalProperties: false,
       },
     },
+    prepTopics: PREP_TOPICS_SCHEMA_ITEMS,
   },
-  required: ['questions'],
+  required: ['questions', 'prepTopics'],
   additionalProperties: false,
 };
 

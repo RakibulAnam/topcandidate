@@ -1385,7 +1385,10 @@ export const Preview: React.FC<PreviewProps> = ({
           {activeTab === 'interviewPrep' && (
             <div className="p-4 md:py-12 w-full">
               {getItemStatus(data, 'interviewQuestions', regeneratingItem, toolkitPending) === 'success' ? (
-                <InterviewPrepViewer questions={data.toolkit!.interviewQuestions!} />
+                <InterviewPrepViewer
+                  questions={data.toolkit!.interviewQuestions!}
+                  prepTopics={data.toolkit?.prepTopics}
+                />
               ) : (
                 <ToolkitStatusCard
                   icon={MessageSquare}
