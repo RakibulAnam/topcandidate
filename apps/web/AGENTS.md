@@ -647,7 +647,7 @@ Per-generator deadlines: optimizer 50s (`/api/optimize`), toolkit 52s (`/api/too
 
 ## 10. Brand & design
 
-**Name:** TOP CANDIDATE (two-word wordmark: ink + saffron). No "R" badge, no square mark.
+**Name:** TOP CANDIDATE (two-word wordmark: ink + saffron). No "R" badge, no square mark — with ONE scoped exception, the app icon (below).
 
 **Palette** (defined in `src/index.css` under the Tailwind v4 `@theme` directive — `--color-<group>-<shade>` tokens; no `tailwind.config`):
 - `brand-*` — Editorial Ink (warm near-black, 700 = `#1A1812`). Primary text, buttons, ink.
@@ -662,6 +662,12 @@ Per-generator deadlines: optimizer 50s (`/api/optimize`), toolkit 52s (`/api/too
 **Scoped exception — bKash magenta (`#E2136E`):** `PurchaseModal.tsx` is a bKash **payment surface**, so bKash's brand magenta is the action color for that ONE component — the trust chip, the numbered step markers, the copy-number button, and the primary "Submit" CTA all use `#E2136E` (deep `#B80E5D` on hover); emerald `#10B981` marks valid/success. Saffron is intentionally NOT used inside this modal so the user feels they're in a bKash-branded flow. Layout: a two-column **split-sheet on desktop** (cream receipt panel + white action panel) and a **keyboard-aware bottom sheet on mobile** (receipt collapses to a one-line disclosure ribbon; the sheet is sized to `window.visualViewport` so the TrxID input + docked CTA stay above the soft keyboard). Do NOT extend bKash magenta to any other screen, button, or component.
 
 **Scoped exception — dashboard hero gradients + toolkit tints (2026 redesign):** the dashboard area (`DashboardScreen` Home, `components/dashboard/*`) uses a deliberate, narrow set of gradients: the dark "Start a new application" CTA card's animated amber glint (`@keyframes glintMove` in `index.css`) and its amber icon square (`linear-gradient(135deg,#E8960F,#C7590E)`), plus the cream Master Resume banner (`linear-gradient(120deg,#FFFDF8,#FBF4E4)`). The same exception covers the **5 muted per-artifact toolkit-chip tints** on that dark card — Tailored Resume (amber), Cover Letter (coral), Recruiter Email (green), LinkedIn Message (blue `#9DB8DF`), Interview Prep (purple `#B7A3D8`) — the only place blue/purple appear, always as low-opacity semantic labels on the dark surface. Everywhere else the flat Saffron/Ink/Stone rules hold; do NOT extend gradients or blue/purple to other surfaces.
+
+**Scoped exception — the app icon is a square "TC" monogram (approved 2026-08-11):** the favicon / apple-touch-icon is the ONE place a square mark is allowed, because the slot is a square by definition and the two-word wordmark is illegible at 16–32px. `public/favicon.svg` is the master: a `brand-700` (`#1A1812`) rounded tile (rx 112/512 ≈ 22%), a `charcoal-50` (`#FAFAF7`) "T" and an `accent-400` (`#E59321`) "C". Shipped as `favicon.svg` + `favicon.ico` (32px PNG-in-ICO) + `apple-touch-icon.png` (180px, **square and unrounded** — iOS masks it itself and a pre-rounded tile gets rounded twice), wired with three `<link>` tags in `index.html`.
+
+The letterforms are the real Source Serif 4 semibold glyphs **converted to SVG paths** (extracted with `fontTools`, `SVGPathPen`), so the file carries the brand typeface with no font dependency at render time and every raster size is identical to the vector. To regenerate: pull Source Serif 4 semibold, dump the `T`/`C` outlines, place them on a 512 canvas (cap height ≈ 210px, ~22px gap, baseline `(512 + cap) / 2`), then rasterise the SVG to 32/180 (`qlmanage -t -s <n>` works on macOS) and wrap the 32 in an ICO container. Do NOT re-author the mark with `<text>` — a webfont the viewer lacks silently falls back to a different serif.
+
+**This exception is the ICON SLOT ONLY.** In-product the logo is always the two-word wordmark; never a TC tile in the top bar, a nav element, an avatar, a loading state, or an empty state. Alternatives B (single saffron "C"), C ("TC" on cream) and D (tile-free saffron "TC", the only variant that keeps the no-square-mark rule literally) were built and compared before A was chosen.
 
 **Fonts** (Google Fonts, loaded in `index.html`):
 - `Instrument Sans` — UI and body (default `font-sans`) — Latin script (adopted with the 2026 dashboard redesign, replacing Inter)
