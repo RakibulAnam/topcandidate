@@ -11,8 +11,39 @@
 // the optimizer's `buildSystemInstruction` in resumeOptimizerPrompts.ts — they
 // are different prompts for different generators.
 
-import { buildCandidateContext, type FitMode } from './toolkitContext.js';
+import { buildCandidateAnchors, buildCandidateContext, type FitMode } from './toolkitContext.js';
 import type { ResumeData } from '../../../domain/entities/Resume.js';
+
+/**
+ * The literal strings the specificity gate will accept, handed to the model.
+ *
+ * Why this exists: `assertOutreachSpecificity` is a plain substring match over
+ * `buildCandidateAnchors(data)`, but the prompt used to describe the
+ * requirement in prose ("reference a candidate proper noun"). The model read
+ * that as "be specific" and wrote specific-sounding DESCRIPTIONS — "a software
+ * engineer who ported a legacy codebase" — which name nothing and fail the
+ * match. Measured 2026-08-11: the outreach email was discarded on 3 of 3 runs,
+ * and 0 of 6–7 interview answer strategies named an item, while the candidate's
+ * employer sat plainly in the evidence block the whole time. Three rounds of
+ * strengthening the prose changed nothing.
+ *
+ * So the prompt now carries the validator's own list. The gate and the
+ * instruction can no longer disagree about what counts, because they read from
+ * the same function.
+ */
+function buildAnchorDirective(data: ResumeData): string {
+  const anchors = [...new Set(buildCandidateAnchors(data))].slice(0, 12);
+  if (anchors.length === 0) return '';
+  return `
+═══════════════════════════════════════════════
+NAMES YOU MUST USE (copy verbatim — these are matched as literal strings)
+═══════════════════════════════════════════════
+${anchors.map(a => `  • ${a}`).join('\n')}
+
+The outreach email body and the LinkedIn note EACH have to contain at least one of the strings above, spelled exactly as written. This is machine-checked: an artifact that fails is thrown away and the user sees a retry button instead of their email. Paraphrase does not count — "my current company", "a mobile app I shipped", "a leading software firm" all fail. Write the name.
+Interview answerStrategies use them too: name the employer or project the candidate would tell the story from, so they are not hunting for one mid-interview.
+Prefer an EMPLOYER or a PRODUCT/PROJECT name. A school satisfies the check but wastes the opening line on the weakest credential a working candidate has.`;
+}
 
 // HARD character limit for the LinkedIn connection note. Used by both the
 // prompt (as a stated limit) and the generator's post-validation truncation.
@@ -111,6 +142,13 @@ OUTPUT FORMAT — Valid JSON matching the schema. No markdown, no code fences, n
 
 VOICE — Where the candidate's own raw words (VOICE REFERENCE block) carry a natural framing or phrasing, let it color tone — but never lift facts that aren't also in the polished bullets.
 
+DECIDE THE CASE BEFORE YOU WRITE — Read the JD past its boilerplate and settle three things first: what this employer is actually hiring for (ranked), which of the candidate's real evidence is the strongest proof of each, and the one-sentence case for this candidate in this role. Then write every artifact to serve that case. This matters because of what these documents are: for most applications they are the only impression the candidate gets to make, and they are read fast by someone holding two hundred others. Evidence chosen because it is the strongest proof beats evidence chosen because it came first in the profile — and a reader can tell the difference immediately. Every paragraph, every question, every sentence should be doing a job; if you cannot say which requirement a line is addressing, it is the wrong line.
+
+LEAD WITH THE STRONGEST PROOF — In every artifact, the opening is the only part guaranteed to be read: the first line of the cover letter, the subject and first sentence of the email, the whole LinkedIn note. Those go to the candidate's single most decisive qualification for THIS job. Not their most recent role by default, not the biggest number they have — the one that best answers what this employer is worried about. The same candidate should open differently for different JDs; if the opening would work unchanged for another posting, it is too generic.
+  Specifically: a DEGREE OR SCHOOL is almost never the strongest proof for anyone who has professional experience, and must not open any artifact for such a candidate. Education leads only for a student or fresh graduate with no work history. Naming a school to satisfy a specificity requirement is the wrong way to satisfy it — name the employer, the product, or the project instead.
+
+KEEP PROVENANCE — Where the candidate evidence marks something as a demo, learning exercise, side project, coursework, thesis or volunteer work, that qualifier travels with it into every artifact. First-person prose is where this leaks: "I built and deployed a CI/CD pipeline on AWS" reads as production work when the evidence says a demo app built to learn. Write "a demo e-commerce app I built to learn the stack" — still impressive, and it survives the follow-up question. Never present personal or academic work as professional delivery, and never blur the two by listing them in the same breath without distinction.
+
 Each artifact has its own rules. Follow them in isolation — treat them as four separate deliverables that happen to ship in one response.
 
 ═══════════════════════════════════════════════
@@ -137,7 +175,9 @@ BODY — 110–170 words, 3 short paragraphs, no greeting, no signoff:
   2. ${mode === 'stretch' ? '2–3 sentences mapping transferable skills from candidate evidence to JD priorities. Mirror 1–2 JD keywords verbatim if truthful. JD-named tools may appear as growth targets — never claimed as past experience.' : '2–3 sentences of concrete evidence drawn from the candidate evidence, tied to the JD (mirror 1–2 JD keywords verbatim where truthful).'}
   3. A soft specific ask ("Would a 15-minute chat next week be useful?" / "Happy to share a short write-up of <X candidate-evidenced topic> if helpful.") — never generic "let me know".
 
-GROUNDING (enforced — failure surfaces a retry button): ${mode === 'stretch' ? 'body MUST mention the target company by name OR reference at least one candidate proper noun (either is fine in stretch mode — one anchor is enough).' : 'body MUST mention the target company by name AND reference at least one candidate proper noun (the candidate\'s own company / role / project / cert / award / school).'}
+GROUNDING (MACHINE-CHECKED — if this fails the artifact is DISCARDED and the user is shown a retry button instead of an email): ${mode === 'stretch' ? 'the body must contain the target company name OR at least one candidate proper noun, spelled literally.' : 'the body must contain BOTH (a) the target company name and (b) at least one candidate proper noun, each spelled out literally.'}
+  A "candidate proper noun" means a name copied from the candidate evidence — their EMPLOYER ("Brain Station 23"), a PRODUCT or PROJECT they built ("MediTrack"), a certification, or an award. It is a literal string match: "my current company", "a fintech client", "a mobile app I shipped" all FAIL. Describing the work without naming it FAILS.
+  Do this in sentence 1, where it is also the strongest opening: name the employer or the product the candidate actually built. Do not satisfy it with their school — that passes the check and wastes the opening (see LEAD WITH THE STRONGEST PROOF). Before you emit, re-read the body and confirm you can point at both literal strings.
 
 TONE — Direct, respectful of reader's time, warm but not fawning. No clichés ("hope this finds you well", "quick question", "synergies"). No hedging.
 
@@ -154,7 +194,13 @@ SHAPE —
   1. One sentence naming the role / company + the candidate's single strongest credential that maps to it (a real proper noun from the candidate evidence).
   2. One sentence with a soft specific reason to connect ("would love to learn how your team approaches X"). No referral asks. No "quick chat?" phrasing.
 
-GROUNDING (enforced): the note must reference EITHER the target company by name OR at least one candidate proper noun. Within 280 chars you usually need both.
+BANNED CONTENT — this note has ~280 characters and every one has to earn its place:
+  - "I recently applied for <role>" and any variant. It is the least interesting thing the candidate could say, it gives the reader nothing to respond to, and it reads as chasing.
+  - Opening with a degree or university for anyone who has work experience. A school name is the weakest anchor available and it burns the only sentence that gets read.
+  - Restating the candidate's job title with no proof attached ("As an experienced software engineer…").
+  What goes there instead: the concrete thing they did that this team would care about — "spent the last two years porting a legacy Objective-C app to SwiftUI" beats every one of the above.
+
+GROUNDING (enforced): the note must reference EITHER the target company by name OR at least one candidate proper noun, spelled literally. Within 280 chars you usually need both. An employer or product name satisfies this; so does a school, but see BANNED CONTENT — passing the check is not the same as using the space well.
 
 TONE — Direct, human, low-pressure. Mirror at most ONE JD keyword that is not already an evidenced candidate skill — the candidate's own evidenced tools and skills never count against this cap (naming your own stack is specificity, not stuffing). Never invent employers, tools, or metrics.
 
@@ -163,11 +209,16 @@ ARTIFACT 4 — INTERVIEW QUESTIONS (array, interviewQuestions)
 ═══════════════════════════════════════════════
 COUNT — 6–8 questions. Span these categories where relevant to the JD: "Behavioral", "Technical", "Role-specific", "Values & Culture", "Situational".
 
+ORDER — Not the order they occurred to you. Lead with the questions this specific panel is most likely to open on and most likely to decide on — usually the JD's top competency probed against the candidate's thinnest supporting evidence, because that is the exchange the offer turns on. Put the questions the candidate can answer in their sleep later; they need the least rehearsal. The candidate prepares top-down and may not reach the end, so the ordering itself is part of the coaching.
+
 QUESTION — Specific to THIS JD and THIS candidate's background. Banned: "Tell me about yourself." Write exactly as spoken.
 
 WHY ASKED — 2–3 sentences naming the signal the interviewer is scoring.
 
 ANSWER STRATEGY — 3–5 sentences with explicit structure (STAR, trade-off framing, brief-then-deep). ${mode === 'stretch' ? 'For questions about candidate experience the AI cannot anchor in target-field proper nouns, structure the answer around a TRANSFERABLE-SKILL BRIDGE: name a real candidate item (company, project, school) where the underlying skill was exercised, then explicitly map it to how the same skill applies in the target role. For questions about JD-specific tools/frameworks the candidate has not yet used, coach an honest "here is how I would approach learning / applying X" answer; never coach a fake-it answer.' : 'Anchor the answer in a named candidate item where the question maps to the candidate\'s real experience (the company, role, project, certification, school) — not "your relevant experience". For JD-required tools/topics the candidate has NOT used (expected — interviewers probe gaps), coach an honest "here is how I\'d approach / ramp on X" answer; NEVER coach claiming experience they don\'t have. Flag common failure modes to avoid.'}
+
+NAME THE ITEM, LITERALLY — Measured 2026-08-11: across two runs, ZERO of 7 answer strategies named a single candidate item, and the coaching was generic enough to have been written without reading the profile ("walk through your debugging methodology"). That is the failure mode to avoid, and it is not fixed by describing the item — it is fixed by writing its NAME. Where a question maps to something the candidate actually did, the answer strategy must contain the literal proper noun: the employer ("Brain Station 23"), the product or project ("MediTrack", "ShopSphere"), the certification, the school. "Open with the payment-module race condition you fixed at Brain Station 23, then…" — not "open with a relevant debugging example from your experience". The candidate is rehearsing from this under pressure; a strategy that does not name the story leaves them to find one mid-interview.
+  Aim for at least half the questions carrying a named item. The exceptions are legitimate: a pure culture-fit question, or a JD topic the candidate genuinely has not touched — there, the honest learning-posture answer is correct and needs no anchor. But if NONE of the strategies name anything, the prep sheet is generic and has failed.
 
 GROUNDING (quality guidance, not a hard gate) — anchor answers in real candidate items where the question maps to their experience; for JD topics the candidate hasn't used, an honest learning-posture answer is the right call.
 
@@ -189,7 +240,7 @@ ${PREP_TOPICS_BLOCK}`;
 export const PREP_TOPICS_BLOCK = `═══════════════════════════════════════════════
 ARTIFACT 5 — PREPARATION TOPICS (array, prepTopics)
 ═══════════════════════════════════════════════
-COUNT — 3–5 topics. Fewer good ones beat five padded ones.
+COUNT — 3–5 topics. THREE IS A FLOOR, not a target to undercut: measured 2026-08-11, two consecutive runs returned only 2 against a JD naming on-call support, operational metrics and dashboards, PaaS/SaaS service ownership, TDD and pair programming — at least four probeable gaps were on the page. Quality still beats padding, but if you have fewer than three you have not finished reading the JD: re-read its responsibilities and competencies sections, which is where the probeable material usually is, rather than only its technology list. The DO NOT invent rule below tells you what to do in the rare case a candidate genuinely matches nearly everything — it does not license returning two.
 
 SOURCE — THE GAP, and only the gap. Read the JD's requirements, compare against the candidate evidence above, and list what THIS employer will probe that the candidate's evidence does NOT currently support. A topic the candidate has already demonstrated is worthless here — they do not need to revise their own work. If the JD names a tool, framework, regulation, methodology or certification absent from their evidence, that is a topic. If the JD demands a seniority behaviour they have not evidenced (leading a team, owning a budget, presenting to executives), that is a topic.
 
@@ -218,6 +269,7 @@ ${modeBlock}
 CANDIDATE EVIDENCE (source of truth — every artifact must hook into named items from below)
 ═══════════════════════════════════════════════
 ${candidateContext}
+${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
 TARGET ROLE${mode === 'stretch' ? ' (this is a STRETCH application — the JD field differs from the candidate\'s experience)' : ' (filter & ordering signal — NOT a content source)'}
@@ -296,6 +348,7 @@ ${stretchPreamble}
 CANDIDATE EVIDENCE (source of truth — use ONLY what's here)
 ═══════════════════════════════════════════════
 ${candidateContext}
+${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
 TARGET ROLE (filter & ordering signal — NOT a content source)
@@ -381,6 +434,7 @@ ${stretchPreamble}
 CANDIDATE EVIDENCE (source of truth — use ONLY what's here)
 ═══════════════════════════════════════════════
 ${candidateContext}
+${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
 TARGET ROLE (filter & ordering signal)
@@ -443,6 +497,7 @@ ${stretchHint}
 CANDIDATE EVIDENCE
 ═══════════════════════════════════════════════
 ${candidateContext}
+${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
 TARGET ROLE (filter — pick ONE keyword to mirror)
@@ -525,6 +580,7 @@ ${stretchPreamble}
 CANDIDATE EVIDENCE (source of truth — every answerStrategy must hook into a named item from below${mode === 'stretch' ? ', via a transferable-skill bridge where direct experience is absent' : ''})
 ═══════════════════════════════════════════════
 ${candidateContext}
+${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
 TARGET ROLE (filter & ordering signal)

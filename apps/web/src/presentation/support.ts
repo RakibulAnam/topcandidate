@@ -1,10 +1,14 @@
 // Single source of truth for how customers reach us.
 //
 // Update the address here and it propagates everywhere — the Terms of Service
-// contact section, the bKash purchase-status pill, and the dispute dialog all
-// import from this module. Don't hard-code the email anywhere else.
+// contact section, the dashboard "Need a hand?" row, the bKash purchase-status
+// pill, and the dispute dialog all import from this module. Don't hard-code the
+// email or the Facebook page anywhere else.
 
 export const CONTACT_EMAIL = 'topcandidatebd@gmail.com';
+
+/** Our public Facebook page — the second contact channel, alongside email. */
+export const CONTACT_FACEBOOK_URL = 'https://www.facebook.com/topcandidatebd';
 
 /**
  * Builds a `mailto:` link, optionally prefilled with a subject and body.

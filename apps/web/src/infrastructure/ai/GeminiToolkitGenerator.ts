@@ -52,16 +52,21 @@ import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } fro
 import {
   buildToolkitSystemInstruction,
   buildToolkitUserPrompt,
+  buildOutreachUserPrompt,
   trimToLinkedInLimit,
+  OUTREACH_SYSTEM_INSTRUCTION,
+  OUTREACH_SCHEMA,
   TOOLKIT_SCHEMA,
 } from './prompts/toolkitPrompts.js';
 import {
   buildToolkitEvidenceCorpus,
   detectFabricatedTokens,
   ToolkitFabricationError,
+  ToolkitSpecificityError,
   assertOutreachSpecificity,
   classifyFitMode,
   countAnchoredStrategies,
+  type FitMode,
 } from './prompts/toolkitContext.js';
 
 const TOOLKIT_MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
@@ -133,6 +138,10 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
   // stays under the cap. One slow attempt may use the whole budget; a fast
   // parse-fail leaves room for one bounded retry.
   private readonly deadlineMs = 52_000;
+  // Budget for the focused outreach repair (see repairOutreach). Small and
+  // separate from deadlineMs, which the combined call has already spent most of
+  // by the time a repair is considered.
+  private readonly repairDeadlineMs = 20_000;
 
   constructor(apiKey: string) {
     this.client = new GeminiClient(apiKey);
@@ -237,6 +246,29 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     } catch (err) {
       errors.outreachEmail = this.errorMessage(err);
       console.warn('[gemini-toolkit-gen] outreachEmail validation failed:', errors.outreachEmail);
+
+      // One focused retry, because losing this slot is the most common way the
+      // toolkit ships incomplete. Measured 2026-08-11: the combined call failed
+      // the specificity gate on 4 of 5 runs — never for want of evidence (the
+      // employer name sat in the prompt throughout), but because the outreach
+      // slot competes for attention with the cover letter, the LinkedIn note and
+      // a bilingual interview block in one payload, and the anchor is what gets
+      // dropped. The single-artifact prompt passes cleanly on the same input, so
+      // asking again with only this artifact in view recovers it.
+      //
+      // Deliberately narrow: SPECIFICITY only. A fabrication failure means the
+      // model invented a tool or employer, and re-rolling that is how you ship a
+      // lie on the second try — those stay failed and surface the retry button.
+      if (err instanceof ToolkitSpecificityError) {
+        try {
+          const repaired = await this.repairOutreach(data, fit.mode, pitchEvidence, outreachSpecificityMode);
+          out.outreachEmail = repaired;
+          delete errors.outreachEmail;
+          console.info('[gemini-toolkit-gen] outreachEmail recovered by focused retry');
+        } catch (repairErr) {
+          console.warn('[gemini-toolkit-gen] outreachEmail repair also failed:', this.errorMessage(repairErr));
+        }
+      }
     }
 
     // ── LinkedIn message ────────────────────────────────────────────────────
@@ -315,6 +347,46 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     console.info(`[gemini-toolkit-gen] done total=${Date.now() - t0}ms slots=${JSON.stringify(ok)} errorKeys=${Object.keys(errors).join(',') || '(none)'}`);
 
     return out;
+  }
+
+  /**
+   * Re-ask for the outreach email alone, using the single-artifact prompt.
+   *
+   * Same guards as the combined path — a repaired email that fabricates a tool
+   * or still names nothing is discarded, so this can only ever turn a failure
+   * into a pass, never lower the bar. One attempt: if a focused prompt cannot
+   * name the employer sitting in front of it, another roll will not help, and
+   * the user still has the retry button.
+   */
+  private async repairOutreach(
+    data: ResumeData,
+    mode: FitMode,
+    pitchEvidence: string,
+    specificityMode: 'both' | 'either',
+  ): Promise<{ subject: string; body: string }> {
+    const result = await this.client.generate(
+      {
+        models: [TOOLKIT_MODELS[0]],
+        systemInstruction: OUTREACH_SYSTEM_INSTRUCTION,
+        contents: buildOutreachUserPrompt(data, mode === 'stretch' ? 'stretch' : 'match'),
+        responseJsonSchema: OUTREACH_SCHEMA,
+        temperature: mode === 'stretch' ? 0.55 : 0.45,
+        maxOutputTokens: 900,
+      },
+      this.repairDeadlineMs,
+    );
+    if (!result.text) throw new Error('No response from AI');
+    const parsed = JSON.parse(result.text.replace(/^```(?:json)?\s*|\s*```$/g, '')) as {
+      subject?: string;
+      body?: string;
+    };
+    const subject = (parsed.subject ?? '').trim();
+    const body = (parsed.body ?? '').trim();
+    if (!subject || !body) throw new Error('Outreach email is empty');
+    const fabricated = detectFabricatedTokens(`${subject}\n${body}`, pitchEvidence);
+    if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
+    assertOutreachSpecificity(`${subject}\n${body}`, data, specificityMode);
+    return { subject, body };
   }
 
   private errorMessage(err: unknown): string {

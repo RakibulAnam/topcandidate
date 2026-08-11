@@ -8,7 +8,7 @@
 // App's handleStartFromDashboard, which prefills from the profile and enters
 // the builder past the Target Job step. See App.tsx.
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy, AlertTriangle } from 'lucide-react';
+import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy, AlertTriangle, Mail, Facebook } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { createResumeService, profileRepository } from '../infrastructure/config/dependencies';
@@ -16,7 +16,7 @@ import { ResumeService } from '../application/services/ResumeService';
 import type { ResumeListItem } from '../domain/repositories/IResumeRepository';
 import type { NavScreen } from './hooks/useBrowserNav';
 import { useT, useLocale } from './i18n/LocaleContext';
-import { contactMailto } from './support';
+import { CONTACT_FACEBOOK_URL, contactMailto } from './support';
 import { ToolkitCard } from './components/dashboard/ToolkitCard';
 import { useRelativeTime } from './components/dashboard/relativeTime';
 import { useDashboardShell } from './components/dashboard/DashboardShell';
@@ -346,12 +346,25 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
             <strong className="text-brand-700">{t('dashboard.helpTitle')}</strong>{' '}
             <span className="text-charcoal-500">{t('dashboard.helpBody')}</span>
           </span>
-          <a
-            href={contactMailto(t('help.emailSubject'))}
-            className="text-[13px] font-semibold text-charcoal-500 transition-colors hover:text-accent-600"
-          >
-            {t('dashboard.helpEmail')}
-          </a>
+          <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold">
+            <a
+              href={contactMailto(t('help.emailSubject'))}
+              className="inline-flex items-center gap-1.5 text-charcoal-500 transition-colors hover:text-accent-600"
+            >
+              <Mail size={14} className="shrink-0" aria-hidden="true" />
+              {t('dashboard.helpEmail')}
+            </a>
+            <span aria-hidden="true" className="text-charcoal-300">·</span>
+            <a
+              href={CONTACT_FACEBOOK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-charcoal-500 transition-colors hover:text-accent-600"
+            >
+              <Facebook size={14} className="shrink-0" aria-hidden="true" />
+              {t('dashboard.helpFacebook')}
+            </a>
+          </span>
         </div>
       </section>
     </div>

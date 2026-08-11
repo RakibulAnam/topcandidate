@@ -107,6 +107,44 @@ const Wordmark = () => (
     </div>
 );
 
+/**
+ * "Already have a resume?" — the re-entry point to the import step.
+ *
+ * Every new user lands on IMPORT_RESUME first, so this is not first-run
+ * discovery; it is the way back for someone who skipped past it and then
+ * started typing everything by hand. That makes placement the whole job: it has
+ * to stay in view while they are filling the form, which is why it now sits at
+ * the TOP of the rail rather than under a twelve-item nav.
+ *
+ * One component, two mounts (rail on desktop, inline above the form on mobile,
+ * where the rail does not render at all) so the two can never drift apart.
+ */
+const ImportResumeCard: React.FC<{
+    onImport: () => void;
+    t: (key: string, vars?: Record<string, string | number>) => string;
+    className?: string;
+}> = ({ onImport, t, className = '' }) => (
+    <div className={`rounded-2xl bg-brand-700 text-charcoal-100 p-5 ${className}`}>
+        <div className="flex items-center gap-2 mb-2">
+            <FileText size={14} className="text-accent-400" />
+            <p className="text-[11px] uppercase tracking-[0.2em] text-accent-400 font-semibold">
+                {t('profileSetup.importCardEyebrow')}
+            </p>
+        </div>
+        <p className="text-sm text-charcoal-200 leading-relaxed mb-3">
+            {t('profileSetup.importCardBody')}
+        </p>
+        <button
+            type="button"
+            onClick={onImport}
+            className="text-sm text-accent-300 hover:text-accent-200 font-semibold inline-flex items-center gap-1 transition-colors"
+        >
+            {t('profileSetup.importCardCta')}
+            <ChevronRight size={14} />
+        </button>
+    </div>
+);
+
 export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService }) => {
     const { user, signOut } = useAuth();
     const t = useT();
@@ -877,18 +915,39 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             {/* Main grid */}
             <div className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
                 <div className="grid lg:grid-cols-12 gap-6 lg:gap-10">
-                    {/* Left rail — desktop only */}
+                    {/* Left rail — desktop only.
+                        The sticky box is TALLER than the viewport (measured 1074px of
+                        content against ~629px of room at 1440x725), and the step nav
+                        sits between the intro and everything below it. Two consequences
+                        it has to defend against: `overflow-y-auto` + a bounded max-height
+                        so the tail is scrollable rather than simply unreachable, and
+                        bottom padding that clears the FIXED bottom nav bar — `main` has
+                        `pb-24` for exactly that reason and the rail used to have nothing,
+                        so its last ~29px sat under the bar permanently. */}
                     <aside className="hidden lg:block lg:col-span-4 xl:col-span-3">
-                        <div className="sticky top-24">
+                        <div className="sticky top-24 max-h-[calc(100vh-11rem)] overflow-y-auto pb-6">
                             <p className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold mb-2">
                                 {t('profileSetup.railEyebrow')}
                             </p>
                             <h1 className="font-display text-2xl font-semibold text-brand-700 leading-tight mb-6">
                                 {t('profileSetup.railTitle')}
                             </h1>
-                            <p className="text-sm text-brand-500 leading-relaxed mb-8">
+                            <p className="text-sm text-brand-500 leading-relaxed mb-6">
                                 {t('profileSetup.railBody')}
                             </p>
+
+                            {/* ABOVE the step nav, deliberately. This is the fastest route
+                                to a filled profile, so it has to be the first thing in the
+                                rail — at the bottom it was both below the fold and clipped
+                                by the fixed bottom bar. Hidden on the import step itself,
+                                where it would advertise the page already open. */}
+                            {!isFirstStep && (
+                                <ImportResumeCard
+                                    onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
+                                    t={t}
+                                    className="mb-8"
+                                />
+                            )}
 
                             <nav className="space-y-6">
                                 {phaseGroups.map((group, gIdx) => {
@@ -960,30 +1019,23 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                                 })}
                             </nav>
 
-                            <div className="mt-10 rounded-2xl bg-brand-700 text-charcoal-100 p-5">
-                                <div className="flex items-center gap-2 mb-2">
-                                    <FileText size={14} className="text-accent-400" />
-                                    <p className="text-[11px] uppercase tracking-[0.2em] text-accent-400 font-semibold">
-                                        {t('profileSetup.importCardEyebrow')}
-                                    </p>
-                                </div>
-                                <p className="text-sm text-charcoal-200 leading-relaxed mb-3">
-                                    {t('profileSetup.importCardBody')}
-                                </p>
-                                <button
-                                    type="button"
-                                    onClick={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
-                                    className="text-sm text-accent-300 hover:text-accent-200 font-semibold inline-flex items-center gap-1 transition-colors"
-                                >
-                                    {t('profileSetup.importCardCta')}
-                                    <ChevronRight size={14} />
-                                </button>
-                            </div>
                         </div>
                     </aside>
 
                     {/* Right content */}
                     <main className="lg:col-span-8 xl:col-span-9 pb-24">
+                        {/* Mobile gets the rail's import card inline, because the rail is
+                            `hidden lg:block` — below lg there was previously NO way back
+                            to the import step at all once it had been skipped. Hidden on
+                            the import step itself, where it would point at the current
+                            page. */}
+                        {!isFirstStep && (
+                            <ImportResumeCard
+                                onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
+                                t={t}
+                                className="lg:hidden mb-6"
+                            />
+                        )}
                         <div className="bg-white border border-charcoal-200 rounded-2xl shadow-sm p-6 sm:p-8 lg:p-10">
                             {renderCurrentStep()}
                         </div>
