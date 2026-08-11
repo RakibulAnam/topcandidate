@@ -222,7 +222,6 @@ const fmtAttempts = (a: GeminiAttempt[]) =>
 import { publicAiError } from '../api/_lib/aiErrorResponse.js';
 import { ResumeFabricationError, dropBannedOpenerBullets, filterFabricatedSkills } from '../src/infrastructure/ai/prompts/resumeOptimizerPrompts.js';
 import { trimToLinkedInLimit } from '../src/infrastructure/ai/prompts/toolkitPrompts.js';
-import { fixBrandSpellings } from '../src/infrastructure/ai/prompts/brandFidelity.js';
 
 const RECORDED: Array<{ name: string; status: number; body: string; expect: string; expectDelayMs?: number }> = [
   {
@@ -495,43 +494,6 @@ function skillsFilterRegression(): boolean {
   return ok;
 }
 
-// Local brand spelling. "bkash" came back from the normalizer as "bakesh" about
-// 1 run in 10 — zeroing the ATS match on a BD fintech candidate's best keyword.
-// The repair must never INJECT a brand the candidate did not write.
-function brandFidelityRegression(): boolean {
-  console.log('\n=== BRAND SPELLING (offline) ===\n');
-  const ev = 'bkash payment gateway integrate korlam. nagad o add korechi. grameenphone er jonno dashboard banaisi. brac bank er portal e kaj korechi.';
-  const cases: Array<[string, string, string]> = [
-    // [name, model output, expected]
-    ['repairs a corrupted transliteration', 'Integrated the bakesh payment gateway', 'Integrated the bKash payment gateway'],
-    ['canonicalises casing the user typed loosely', 'Integrated bkash and nagad gateways', 'Integrated bKash and Nagad gateways'],
-    ['fixes ALL-CAPS to canonical', 'Integrated BKASH for payments', 'Integrated bKash for payments'],
-    ['recases a longer brand', 'Built a dashboard for grameenphone', 'Built a dashboard for Grameenphone'],
-    ['leaves correct spelling untouched', 'Integrated the bKash payment gateway', 'Integrated the bKash payment gateway'],
-    ['leaves ordinary prose untouched', 'Reduced report generation from 40 minutes to 5 minutes', 'Reduced report generation from 40 minutes to 5 minutes'],
-  ];
-  let ok = true;
-  for (const [name, input, want] of cases) {
-    const got = fixBrandSpellings(input, ev).text;
-    const pass = got === want;
-    if (!pass) ok = false;
-    console.log(`  ${pass ? '✓' : '✗'} ${name}`);
-    if (!pass) console.log(`      got:  ${got}\n      want: ${want}`);
-  }
-  // THE SAFETY RULE: a brand absent from the candidate's own words must never be
-  // introduced, however close the near-miss. Otherwise "spelling repair" becomes a
-  // fabrication vector.
-  const noPathao = fixBrandSpellings('Integrated the pathaoo delivery API', ev).text;
-  const safe1 = !/Pathao/.test(noPathao);
-  const noNagadInject = fixBrandSpellings('Worked with Nagd', 'only bkash was mentioned here by the user').text;
-  const safe2 = !/Nagad/.test(noNagadInject);
-  if (!safe1 || !safe2) ok = false;
-  console.log(`  ${safe1 ? '✓' : '✗'} never introduces a brand absent from evidence (pathaoo)`);
-  console.log(`  ${safe2 ? '✓' : '✗'} never introduces a brand absent from evidence (Nagd)`);
-  console.log(`\n  ${ok ? 'brands repaired, none invented' : 'REGRESSION DETECTED'}`);
-  return ok;
-}
-
 // ── selftest: prove the error taxonomy is real ──────────────────────────────
 async function selftest(client: GeminiClient) {
   const regressionOk = classifierRegression();
@@ -539,9 +501,8 @@ async function selftest(client: GeminiClient) {
   const trimOk = linkedInTrimRegression();
   const openerOk = bannedOpenerRegression();
   const skillsOk = skillsFilterRegression();
-  const brandOk = brandFidelityRegression();
   console.log('\n=== SELFTEST: error taxonomy + fallback chain (live) ===\n');
-  if (!regressionOk || !publicOk || !trimOk || !openerOk || !skillsOk || !brandOk) process.exitCode = 1;
+  if (!regressionOk || !publicOk || !trimOk || !openerOk || !skillsOk) process.exitCode = 1;
   // `expect` is ASSERTED, not decorative: 'ok' means the call must succeed,
   // anything else is the GeminiErrorCode it must produce.
   const cases: Array<{ name: string; expect: string; run: () => Promise<unknown> }> = [

@@ -46,7 +46,6 @@
 import { ResumeData, OptimizedResumeData } from '../../domain/entities/Resume.js';
 import { IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase.js';
 import { resetUsageAttempt, type UsageSink } from './usage.js';
-import { fixBrandSpellings, fixBrandSpellingsInAll } from './prompts/brandFidelity.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   buildSystemInstruction,
@@ -57,7 +56,7 @@ import {
   reportFabricatedProse,
   assertProseMatchesStrippedSkills,
   dropBannedOpenerBullets,
-  buildEvidenceText,
+  takeOptimizerPlan,
   reorderLeadBulletByJDFit,
   reorderProjectsByJDFit,
   enforceBulletDensity,
@@ -77,7 +76,16 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
   // credit RPC + telemetry overhead and buys a second attempt after a slow
   // first one.
   private readonly deadlineMs = 50_000;
-  private readonly temperature = 0.3;
+  // Lowered 0.3 → 0.15 on 2026-08-11. Ordering is now a product decision the
+  // model makes (RULE 4 + the `plan` field), and at 0.3 it was unstable: three
+  // runs on identical input produced two different project orders (one led with
+  // a self-described learning demo over a shipped app with 5k users) and two
+  // different skill orderings (one led with the candidate's weakest language
+  // because the JD named it). Sampling variance in phrasing is harmless;
+  // sampling variance in *which evidence leads* is the product being wrong half
+  // the time. Not 0 — greedy decoding on these models tends to flatten phrasing
+  // and lean harder on stock résumé constructions.
+  private readonly temperature = 0.15;
 
   constructor(apiKey: string) {
     this.client = new GeminiClient(apiKey);
@@ -126,6 +134,21 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
 
           // Identical post-pipeline to the optimizers this replaces.
           const parsed = safeJsonParse<OptimizedResumeData>(result.text);
+          // Off the object before anything else touches it: the plan is the
+          // model's pre-writing deliberation (see PLAN_SCHEMA), useful for
+          // debugging a bad résumé but never part of one. Every downstream step
+          // — validation, honesty checks, merge, persistence, render — must see
+          // the same shape it always has.
+          const plan = takeOptimizerPlan(parsed);
+          if (plan?.thesis) {
+            console.info(`[gemini] résumé thesis: ${plan.thesis}`);
+            if (plan.orderPlan?.length) {
+              console.info(`[gemini] ordering: ${plan.orderPlan.join(' | ')}`);
+            }
+            if (plan.weakSpots?.length) {
+              console.info(`[gemini] de-emphasised gaps: ${plan.weakSpots.join(' | ')}`);
+            }
+          }
           normalizeSkills(parsed);
           const fabResult = filterFabricatedSkills(parsed, data);
           if (fabResult.fabricated.length) {
@@ -142,28 +165,6 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
           // assertProseMatchesStrippedSkills for why the intersection is the
           // confident signal and a prose-only hit is not.
           assertProseMatchesStrippedSkills(parsed, data, fabResult.fabricated);
-          // Brand-spelling safety net on the PAID artifact. The normalizer already
-          // repaired the stored bullets, but the optimizer re-types prose (the
-          // summary, and bullets it rewords per JD) and can re-introduce a
-          // corruption. Can only ever fix a brand the candidate themselves wrote —
-          // see brandFidelity's safety rule.
-          {
-            const ev = buildEvidenceText(data);
-            const sum = fixBrandSpellings(parsed.summary ?? '', ev);
-            parsed.summary = sum.text;
-            const fixes = [...sum.corrections];
-            for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
-              for (const item of group ?? []) {
-                if (!Array.isArray(item.refinedBullets)) continue;
-                const r = fixBrandSpellingsInAll(item.refinedBullets, ev);
-                item.refinedBullets = r.values;
-                fixes.push(...r.corrections);
-              }
-            }
-            if (fixes.length) {
-              console.info(`[gemini] corrected ${fixes.length} brand spelling(s) in résumé prose: ${fixes.map((c) => `${c.from}->${c.to}`).join(', ')}`);
-            }
-          }
 
           // Before the lead-bullet choice, so a banned-opener line can never be
           // promoted into the recruiter's highest-attention slot.

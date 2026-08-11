@@ -32,7 +32,6 @@ import {
   ProfileItemContext,
 } from '../../domain/usecases/NormalizeProfileItemUseCase.js';
 import { resetUsageAttempt, type UsageSink } from './usage.js';
-import { fixBrandSpellingsInAll } from './prompts/brandFidelity.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   NORMALIZER_SYSTEM_INSTRUCTION,
@@ -103,25 +102,6 @@ export class GeminiProfileNormalizer implements IProfileItemNormalizer {
         const isAward = context.kind === 'award';
         parsed.bullets = parsed.bullets.map((b) => b.trim()).filter(Boolean).slice(0, isAward ? 1 : 20);
         parsed.skills = (parsed.skills ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 20);
-
-        // Repair local brand names against the candidate's OWN spelling. Done
-        // HERE rather than downstream because these bullets are STORED as the
-        // polished profile — the optimizer, cover letter, outreach and LinkedIn
-        // note all build on them, so a corruption saved here is inherited by
-        // every artifact the user ever generates. Measured 2026-08-04: "bkash"
-        // came back as "bakesh" roughly 1 run in 10, which zeroes the ATS match
-        // on the single best keyword a BD fintech candidate has.
-        {
-          const evidence = `${text} ${context.title ?? ''} ${context.organization ?? ''} ${context.technologies ?? ''}`;
-          const b = fixBrandSpellingsInAll(parsed.bullets, evidence);
-          parsed.bullets = b.values;
-          const k = fixBrandSpellingsInAll(parsed.skills, evidence);
-          parsed.skills = k.values;
-          const fixes = [...b.corrections, ...k.corrections];
-          if (fixes.length) {
-            console.info(`[normalizer] corrected ${fixes.length} brand spelling(s): ${fixes.map((c) => `${c.from}->${c.to}`).join(', ')}`);
-          }
-        }
 
         // Subtle coaching only: a single hint at most — the polish itself is
         // the product; we never pile instructions on the user.
