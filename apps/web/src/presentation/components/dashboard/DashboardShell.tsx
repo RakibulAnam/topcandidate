@@ -1,12 +1,14 @@
-// DashboardShell — the redesigned sticky top bar + footer that wraps the three
-// dashboard-area screens (Home, All Toolkits, Purchase History). App renders
+// DashboardShell — the redesigned sticky top bar + footer + bottom tab bar that
+// wrap the three dashboard-area screens (Home, All Toolkits, Purchase History).
+// Navigation is one list (`DESTINATIONS`) rendered two ways: header pills from
+// lg up, a fixed bottom tab bar below it. App renders
 // ONE shell and swaps the body, so shared state (credits, the master/general
 // resume, the ⌘K palette, and the bKash PurchaseModal) is fetched once and
 // survives navigation between the three.
 //
 // Children reach the shared state via `useDashboardShell()`.
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { Search, User, LogOut } from 'lucide-react';
+import { Search, User, LogOut, Home, LayoutGrid, FileText, Receipt } from 'lucide-react';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { createResumeService, profileRepository } from '../../../infrastructure/config/dependencies';
 import { ResumeService } from '../../../application/services/ResumeService';
@@ -45,7 +47,7 @@ const Wordmark = () => (
 );
 
 interface Props {
-  active: 'home' | 'applications' | null;
+  active: 'home' | 'applications' | 'purchases' | null;
   onNavigate: (screen: NavScreen) => void;
   onEditProfile: () => void;
   onOpenResume: (id: string) => void;
@@ -122,7 +124,8 @@ export const DashboardShell: React.FC<Props> = ({
     <a
       href="#"
       onClick={(e) => { e.preventDefault(); on(); }}
-      className={`rounded-lg px-3 py-1.5 text-[13.5px] transition-colors ${
+      aria-current={isActive ? 'page' : undefined}
+      className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-[13.5px] transition-colors ${
         isActive ? 'bg-charcoal-200 font-semibold text-brand-700' : 'font-medium text-charcoal-500 hover:bg-charcoal-100 hover:text-brand-700'
       }`}
     >
@@ -130,11 +133,22 @@ export const DashboardShell: React.FC<Props> = ({
     </a>
   );
 
+  // The four dashboard destinations, shared by the header pills (lg and up) and
+  // the bottom tab bar (below lg). Master Resume opens the Preview screen, which
+  // lives OUTSIDE this shell, so that entry is never the active one.
+  const DESTINATIONS = [
+    { key: 'home', icon: Home, label: t('dashboard.navHome'), tabLabel: t('dashboard.navHome'), on: () => onNavigate('DASHBOARD'), isActive: active === 'home' },
+    { key: 'applications', icon: LayoutGrid, label: t('dashboard.navApplications'), tabLabel: t('dashboard.navApplications'), on: () => onNavigate('APPLICATIONS'), isActive: active === 'applications' },
+    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false },
+    { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
+  ];
+
   const ctx: ShellCtx = { credits, refreshCredits, openPurchase, openSearch, generalResume, setGeneralResume, loadingShell };
 
   return (
     <Ctx.Provider value={ctx}>
-      <div className="flex min-h-screen flex-col" style={{ background: '#F6F4EE' }}>
+      {/* Bottom padding below lg keeps the footer clear of the fixed tab bar. */}
+      <div className="flex min-h-screen flex-col pb-[calc(56px+env(safe-area-inset-bottom))] lg:pb-0" style={{ background: '#F6F4EE' }}>
         {/* Top bar */}
         <header className="sticky top-0 z-40 border-b border-charcoal-200 bg-[rgba(246,244,238,0.88)] backdrop-blur-[12px]">
           <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-1.5 px-[clamp(10px,3vw,32px)] sm:gap-4">
@@ -142,10 +156,13 @@ export const DashboardShell: React.FC<Props> = ({
               <Wordmark />
             </a>
 
-            <nav className="ml-2 hidden items-center gap-1 sm:flex">
-              {navLink(t('dashboard.navHome'), () => onNavigate('DASHBOARD'), active === 'home')}
-              {navLink(t('dashboard.navApplications'), () => onNavigate('APPLICATIONS'), active === 'applications')}
-              {navLink(t('dashboard.navMasterResume'), onMasterResume, false)}
+            {/* Header pills only from lg up: at 640–1023px four pills plus the
+                240px search field overflow the bar (they used to wrap mid-word).
+                Below lg the bottom tab bar carries the same four destinations. */}
+            <nav className="ml-2 hidden items-center gap-1 lg:flex">
+              {DESTINATIONS.map((d) => (
+                <React.Fragment key={d.key}>{navLink(d.label, d.on, d.isActive)}</React.Fragment>
+              ))}
             </nav>
 
             <div className="flex-1" />
@@ -159,14 +176,17 @@ export const DashboardShell: React.FC<Props> = ({
             >
               <Search size={15} />
             </button>
+            {/* w-44 until xl, and the placeholder truncates rather than wraps:
+                with four nav pills the bar is ~40px over budget at exactly lg,
+                which used to break the placeholder onto a second line. */}
             <button
               type="button"
               onClick={openSearch}
-              className="hidden w-60 items-center gap-2 rounded-[10px] border border-charcoal-300 bg-white px-3 py-[7px] text-[13px] text-charcoal-400 shadow-[0_1px_2px_rgba(25,23,18,0.03)] transition-colors hover:border-charcoal-400 sm:flex"
+              className="hidden w-44 min-w-0 items-center gap-2 rounded-[10px] border border-charcoal-300 bg-white px-3 py-[7px] text-[13px] text-charcoal-400 shadow-[0_1px_2px_rgba(25,23,18,0.03)] transition-colors hover:border-charcoal-400 sm:flex xl:w-60"
             >
-              <Search size={14} className="text-charcoal-400" />
-              <span className="flex-1 text-left">{t('dashboard.searchNavPlaceholder')}</span>
-              <span className="rounded-[5px] border border-charcoal-300 px-1.5 text-[11px]">⌘K</span>
+              <Search size={14} className="shrink-0 text-charcoal-400" />
+              <span className="min-w-0 flex-1 truncate text-left">{t('dashboard.searchNavPlaceholder')}</span>
+              <span className="shrink-0 rounded-[5px] border border-charcoal-300 px-1.5 text-[11px]">⌘K</span>
             </button>
 
             <VerifyingPurchasePill onResubmit={openPurchase} onCredited={() => { void refreshCredits(); }} />
@@ -223,6 +243,33 @@ export const DashboardShell: React.FC<Props> = ({
             <span className="text-[12.5px] text-charcoal-400">{t('dashboard.footerLine', { year: new Date().getFullYear() })}</span>
           </div>
         </footer>
+
+        {/* Bottom tab bar — the only route to these four screens below lg. */}
+        <nav
+          aria-label={t('dashboard.navTabBarLabel')}
+          className="fixed bottom-0 left-0 right-0 z-40 border-t border-charcoal-200 bg-[rgba(246,244,238,0.94)] pb-[env(safe-area-inset-bottom)] backdrop-blur-[12px] lg:hidden"
+        >
+          {/* Capped so the tabs stay a group on a tablet instead of drifting to
+              the far corners; on a phone the cap never binds. */}
+          <div className="mx-auto flex w-full max-w-[520px]">
+          {DESTINATIONS.map(({ key, icon: Icon, tabLabel, on, isActive }) => (
+            <a
+              key={key}
+              href="#"
+              onClick={(e) => { e.preventDefault(); on(); }}
+              aria-current={isActive ? 'page' : undefined}
+              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-2 transition-colors ${
+                isActive ? 'text-accent-600' : 'text-charcoal-500'
+              }`}
+            >
+              <Icon size={19} strokeWidth={isActive ? 2.4 : 1.9} />
+              <span className={`max-w-full truncate px-0.5 text-[10.5px] leading-none ${isActive ? 'font-bold' : 'font-medium'}`}>
+                {tabLabel}
+              </span>
+            </a>
+          ))}
+          </div>
+        </nav>
       </div>
 
       <CommandPalette

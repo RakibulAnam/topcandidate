@@ -296,7 +296,9 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
             </span>
           )}
           <div className="flex-1" />
-          {recentTotal > RECENT_LIMIT && (
+          {/* Not gated on recentTotal > RECENT_LIMIT: with 6 or fewer toolkits
+              that hid the only in-content route to the All Toolkits screen. */}
+          {recentTotal > 0 && (
             <a
               href="#"
               onClick={(e) => { e.preventDefault(); onNavigate('APPLICATIONS'); }}

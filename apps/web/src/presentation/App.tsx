@@ -397,7 +397,7 @@ const AppContent = () => {
   // across navigation between them.
   return (
     <DashboardShell
-      active={screen === 'APPLICATIONS' ? 'applications' : (screen === 'PURCHASES' || screen === 'SUMMARY') ? null : 'home'}
+      active={screen === 'APPLICATIONS' ? 'applications' : screen === 'PURCHASES' ? 'purchases' : screen === 'SUMMARY' ? null : 'home'}
       onNavigate={(s) => navigate({ screen: s })}
       onEditProfile={() => navigate({ screen: 'PROFILE' })}
       onOpenResume={handleOpenResume}

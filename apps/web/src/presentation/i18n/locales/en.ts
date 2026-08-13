@@ -955,6 +955,9 @@ export const en = {
     navHome: 'Home',
     navApplications: 'Applications',
     navMasterResume: 'Master Resume',
+    navPurchases: 'Purchases',
+    navTabMaster: 'Master', // short form for the phone tab bar, where a tab is ~90px
+    navTabBarLabel: 'Main navigation',
     searchNavPlaceholder: 'Search applications',
     creditsUnit: 'credits',
     // ── Redesign: hero ──
