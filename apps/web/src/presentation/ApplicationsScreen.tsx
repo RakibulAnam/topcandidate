@@ -4,6 +4,7 @@
 // beyond the mockup's 12-card sample.
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { createResumeService } from '../infrastructure/config/dependencies';
 import type { ResumeListItem } from '../domain/repositories/IResumeRepository';
@@ -31,6 +32,7 @@ export const ApplicationsScreen = ({ onOpenResume, onNewApplication, onBack }: P
   const [grandTotal, setGrandTotal] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0); // bumped after a delete to refetch the page
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -55,7 +57,24 @@ export const ApplicationsScreen = ({ onOpenResume, onNewApplication, onBack }: P
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, page, debounced]);
+  }, [user?.id, page, debounced, refreshKey]);
+
+  // Deleting the last card on the final page would leave an empty page, so
+  // retreat first (which refetches on its own) and only bump refreshKey
+  // otherwise.
+  const handleDeleteToolkit = async (id: string) => {
+    try {
+      await createResumeService().deleteGeneratedResume(id);
+      toast.success(t('dashboard.deleted'));
+      setGrandTotal((g) => (g === null ? g : Math.max(0, g - 1)));
+      const lastPage = Math.max(1, Math.ceil((total - 1) / PAGE_SIZE));
+      if (page > lastPage) setPage(lastPage);
+      else setRefreshKey((k) => k + 1);
+    } catch (err) {
+      console.error('Failed to delete toolkit:', err);
+      toast.error(t('dashboard.deleteFailed'));
+    }
+  };
 
   const all = grandTotal ?? total;
   const countLabel = debounced
@@ -122,6 +141,7 @@ export const ApplicationsScreen = ({ onOpenResume, onNewApplication, onBack }: P
                 item={item}
                 builtLabel={t('dashboard.builtOn', { when: rel(item.updatedAt ?? item.date) ?? '' })}
                 onOpen={onOpenResume}
+                onDelete={handleDeleteToolkit}
               />
             ))}
           </div>

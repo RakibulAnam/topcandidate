@@ -55,6 +55,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
   const [recent, setRecent] = useState<ResumeListItem[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0); // bumped after a delete to refetch the grid
   const [buildingMaster, setBuildingMaster] = useState(false);
   // Profile has neither education nor experience → nothing can be generated.
   const [profileEmpty, setProfileEmpty] = useState(false);
@@ -83,7 +84,18 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
     ]).then(([exps, edus]) => { if (!cancelled) setProfileEmpty(exps.length === 0 && edus.length === 0); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, refreshKey]);
+
+  const handleDeleteToolkit = async (id: string) => {
+    try {
+      await createResumeService().deleteGeneratedResume(id);
+      toast.success(t('dashboard.deleted'));
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      console.error('Failed to delete toolkit:', err);
+      toast.error(t('dashboard.deleteFailed'));
+    }
+  };
 
   const handleStart = () => {
     if (!jd.trim()) {
@@ -306,6 +318,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
                 item={item}
                 builtLabel={t('dashboard.builtOn', { when: rel(item.updatedAt ?? item.date) ?? '' })}
                 onOpen={onOpenResume}
+                onDelete={handleDeleteToolkit}
               />
             ))}
           </div>
