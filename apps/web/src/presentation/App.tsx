@@ -165,6 +165,15 @@ const AppContent = () => {
   const userId = user?.id ?? null;
 
   useEffect(() => {
+    // Wait for auth to settle. While `loading` is true the session is still
+    // being restored from storage, so `user` is null but not meaningfully so —
+    // acting on it would fire the signed-out bounce below against a URL the
+    // user IS entitled to. That broke every authed deep link on a cold load:
+    // /purchases → LANDING (replace) → session arrives → LANDING is unauthed →
+    // DASHBOARD. Only /dashboard survived, because the bounce ended there
+    // anyway. The render already shows a spinner while `loading`.
+    if (loading) return;
+
     const checkProfileCompleteness = async () => {
       if (!userId) {
         setCheckingProfile(false);
@@ -197,7 +206,7 @@ const AppContent = () => {
 
     checkProfileCompleteness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, loading]);
 
   if (loading) {
     return (
