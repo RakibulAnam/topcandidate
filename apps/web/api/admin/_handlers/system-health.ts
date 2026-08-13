@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const iso7d = new Date(now - 7 * 24 * HOUR_MS).toISOString();
   const iso30d = new Date(now - 30 * 24 * HOUR_MS).toISOString();
 
-  const [ai24hRes, ai7dRes, ai30dRes, pendingRes, oldestPendingRes, orphanRes, expired24hRes, confirmRes, reversalRes] =
+  const [ai24hRes, ai7dRes, ai30dRes, pendingRes, oldestPendingRes, orphanRes, expired24hRes, confirmRes, reversalRes, loginAttemptsRes] =
     await Promise.all([
       // AI calls in last 24h (full telemetry for rollups).
       supabase.from('ai_call_log').select('provider, cost_usd, status, latency_ms').gte('created_at', iso24h).limit(50000),
@@ -35,6 +35,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('status', 'expired').gte('created_at', iso24h),
       supabase.from('purchase_state_changes').select('id', { count: 'exact', head: true }).eq('to_status', 'completed').gte('created_at', iso24h),
       supabase.from('purchase_state_changes').select('id', { count: 'exact', head: true }).eq('to_status', 'refunded').gte('created_at', iso7d),
+      // Admin login attempts, 24h (migration 026). One fetch, rolled up below —
+      // cheaper than five counts, and the table is pruned to 90 days.
+      supabase.from('admin_login_attempts').select('ip, outcome, created_at').gte('created_at', iso24h).order('created_at', { ascending: false }).limit(5000),
     ]);
 
   // Tolerate per-query errors (empty/missing tables) — log and treat as zero.
@@ -50,6 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   logIfErr('expired24h', expired24hRes.error);
   logIfErr('confirm', confirmRes.error);
   logIfErr('reversal', reversalRes.error);
+  logIfErr('loginAttempts', loginAttemptsRes.error);
 
   // --- AI 24h rollups ---
   const ai24h = ai24hRes.data ?? [];
@@ -87,7 +91,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? Math.max(0, Math.round((now - new Date(oldestPendingAt).getTime()) / 60000))
     : 0;
 
+  // --- Admin access (24h) ---
+  // `locked` mirrors the ladder's first rung: 5+ failures from one IP inside the
+  // 15-minute window. It's a read-only estimate for the operator's benefit — the
+  // authoritative decision is made by begin_admin_login_attempt at login time.
+  const attempts = (loginAttemptsRes.data ?? []) as { ip: string; outcome: string; created_at: string }[];
+  const window15mAgo = now - 15 * 60_000;
+  const failuresByIp: Record<string, number> = {};
+  const recentFailuresByIp: Record<string, number> = {};
+  let failures24h = 0;
+  let blocked24h = 0;
+  let lastFailureAt: string | null = null;
+  let lastSuccessAt: string | null = null;
+  for (const a of attempts) {
+    const isFailure = a.outcome === 'failure' || a.outcome === 'blocked';
+    if (a.outcome === 'failure') failures24h += 1;
+    if (a.outcome === 'blocked') blocked24h += 1;
+    if (isFailure) {
+      failuresByIp[a.ip] = (failuresByIp[a.ip] ?? 0) + 1;
+      if (new Date(a.created_at).getTime() >= window15mAgo) {
+        recentFailuresByIp[a.ip] = (recentFailuresByIp[a.ip] ?? 0) + 1;
+      }
+      // Rows arrive newest-first, so the first one wins.
+      if (!lastFailureAt) lastFailureAt = a.created_at;
+    }
+    if (a.outcome === 'success' && !lastSuccessAt) lastSuccessAt = a.created_at;
+  }
+  const topIps24h = Object.entries(failuresByIp)
+    .map(([ip, failures]) => ({ ip, failures }))
+    .sort((a, b) => b.failures - a.failures)
+    .slice(0, 5);
+
   res.status(200).json({
+    adminAccess: {
+      failures24h,
+      blocked24h,
+      distinctFailingIps24h: Object.keys(failuresByIp).length,
+      lockedIpsNow: Object.values(recentFailuresByIp).filter((n) => n >= 5).length,
+      lastFailureAt,
+      lastSuccessAt,
+      topIps24h,
+      // Which credential store is actually in force. The hash is preferred; the
+      // plaintext env var still authenticates when no hash is configured, and
+      // the operator should be able to see which one they're on.
+      credentialStore: process.env.ADMIN_PASSWORD_HASH ? 'hash' : process.env.ADMIN_PASSWORD ? 'plaintext' : 'none',
+      sessionTtlHours: 12,
+    },
     ai: {
       calls24h,
       errorRatePct24h,
@@ -107,7 +156,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     },
     env: {
       ADMIN_USERNAME: Boolean(process.env.ADMIN_USERNAME),
-      ADMIN_PASSWORD: Boolean(process.env.ADMIN_PASSWORD_HASH || process.env.ADMIN_PASSWORD),
+      // Either-or by design — see adminAccess.credentialStore above for WHICH of
+      // the two is in force. A single `ADMIN_PASSWORD` line here read as "set"
+      // whichever one was present, which hid a plaintext-only setup.
+      'ADMIN_PASSWORD_HASH|ADMIN_PASSWORD': Boolean(process.env.ADMIN_PASSWORD_HASH || process.env.ADMIN_PASSWORD),
       ADMIN_API_KEY: Boolean(process.env.ADMIN_API_KEY),
       BKASH_WEBHOOK_SECRET: Boolean(process.env.BKASH_WEBHOOK_SECRET),
       SUPABASE_SERVICE_ROLE_KEY: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),

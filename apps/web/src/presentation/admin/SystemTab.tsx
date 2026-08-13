@@ -11,6 +11,13 @@ import { HBarChart } from './charts';
 const usd = (n: number): string => `$${Number(n ?? 0).toFixed(4)}`;
 
 interface SystemData {
+  adminAccess: {
+    failures24h: number; blocked24h: number; distinctFailingIps24h: number;
+    lockedIpsNow: number; lastFailureAt: string | null; lastSuccessAt: string | null;
+    topIps24h: { ip: string; failures: number }[];
+    credentialStore: 'hash' | 'plaintext' | 'none';
+    sessionTtlHours: number;
+  };
   ai: {
     calls24h: number; errorRatePct24h: number; avgLatencyMs24h: number;
     costUsd24h: number; costUsd7d: number; costUsd30d: number;
@@ -70,6 +77,65 @@ export const SystemTab: React.FC<{ api: AdminApi }> = ({ api }) => {
 
       {data && (
         <>
+          {/* Admin access first: it's the only section that can indicate someone
+              is attacking the panel right now. */}
+          <Section title="Admin access (24h)">
+            <Card>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <Stat
+                  label="Failed logins"
+                  value={String(data.adminAccess.failures24h)}
+                  tone={data.adminAccess.failures24h >= 20 ? 'bad' : data.adminAccess.failures24h >= 5 ? 'warn' : 'neutral'}
+                  sub={data.adminAccess.lastFailureAt ? `last ${new Date(data.adminAccess.lastFailureAt).toLocaleString()}` : 'none'}
+                />
+                <Stat
+                  label="Refused by lockout"
+                  value={String(data.adminAccess.blocked24h)}
+                  tone={data.adminAccess.blocked24h > 0 ? 'warn' : 'neutral'}
+                  sub="attempts the ladder blocked"
+                />
+                <Stat
+                  label="IPs locked now"
+                  value={String(data.adminAccess.lockedIpsNow)}
+                  tone={data.adminAccess.lockedIpsNow > 0 ? 'bad' : 'neutral'}
+                  sub="5+ failures in 15 min"
+                />
+                <Stat
+                  label="Failing IPs"
+                  value={String(data.adminAccess.distinctFailingIps24h)}
+                  tone={data.adminAccess.distinctFailingIps24h > 3 ? 'bad' : 'neutral'}
+                  sub="distinct, 24h"
+                />
+                <Stat
+                  label="Last success"
+                  value={data.adminAccess.lastSuccessAt ? new Date(data.adminAccess.lastSuccessAt).toLocaleTimeString() : '—'}
+                  sub={data.adminAccess.lastSuccessAt ? new Date(data.adminAccess.lastSuccessAt).toLocaleDateString() : 'none in 24h'}
+                />
+                <Stat
+                  label="Credential store"
+                  value={data.adminAccess.credentialStore === 'hash' ? 'scrypt' : data.adminAccess.credentialStore === 'plaintext' ? 'plaintext' : 'none'}
+                  tone={data.adminAccess.credentialStore === 'hash' ? 'neutral' : 'warn'}
+                  sub={data.adminAccess.credentialStore === 'hash' ? `${data.adminAccess.sessionTtlHours}h sessions` : 'set ADMIN_PASSWORD_HASH'}
+                />
+              </div>
+              {data.adminAccess.topIps24h.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-charcoal-100">
+                  <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold mb-2">Failures by IP (24h)</div>
+                  <ul className="space-y-1">
+                    {data.adminAccess.topIps24h.map((r) => (
+                      <li key={r.ip} className="flex items-center justify-between gap-2 text-[12.5px]">
+                        <span className="font-mono">{r.ip}</span>
+                        <span className="tabular-nums text-charcoal-500">{r.failures}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </Card>
+          </Section>
+
+          <div className="mt-6" />
+
           <Section title="AI health (24h)">
             <Card>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">

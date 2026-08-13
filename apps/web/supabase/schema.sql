@@ -1565,3 +1565,113 @@ revoke all on function reserve_ai_call(text, int, int, text[]) from public, anon
 revoke all on function finalize_ai_call(uuid, jsonb) from public, anon;
 grant execute on function reserve_ai_call(text, int, int, text[]) to authenticated, service_role;
 grant execute on function finalize_ai_call(uuid, jsonb) to authenticated, service_role;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Migration 026 — admin login throttle (per-IP lockout + attempt log)
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Every POST /api/admin/login attempt. Drives the lockout ladder and the
+-- "Admin access" panel in the System tab. RLS on with no policies = deny-all;
+-- service_role only. NEVER stores the submitted password.
+create table if not exists admin_login_attempts (
+  id              bigserial primary key,
+  ip              text not null,
+  username_tried  text,
+  user_agent      text,
+  -- 'pending' | 'failure' | 'success' | 'blocked'
+  outcome         text not null default 'pending',
+  created_at      timestamptz not null default now()
+);
+create index if not exists admin_login_attempts_ip_created_idx on admin_login_attempts (ip, created_at desc);
+create index if not exists admin_login_attempts_created_idx on admin_login_attempts (created_at desc);
+alter table admin_login_attempts enable row level security;
+revoke all on admin_login_attempts from anon, authenticated;
+grant select, insert, update, delete on admin_login_attempts to service_role;
+grant usage, select on sequence admin_login_attempts_id_seq to service_role;
+
+-- Reserve an attempt for this IP or refuse it. The 'pending' row is inserted
+-- BEFORE credentials are checked and counts against concurrent siblings, so a
+-- burst of parallel requests cannot each pass the ladder (the 024 bug shape).
+-- Ladder, per IP, failures since that IP's last success, 15-minute window:
+-- 5+ → 60s, 10+ → 15min, 20+ → 60min, measured from the latest attempt.
+-- Deliberately NOT global: a global lock would let anyone lock the owner out of
+-- the payment-recovery panel on demand.
+create or replace function begin_admin_login_attempt(
+  p_ip text,
+  p_username text default null,
+  p_user_agent text default null
+)
+returns table (attempt_id bigint, allowed boolean, retry_after_sec integer, recent_failures integer)
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_window   constant interval := interval '15 minutes';
+  v_ip       text := coalesce(nullif(trim(p_ip), ''), 'unknown');
+  v_since    timestamptz;
+  v_failures integer;
+  v_last_at  timestamptz;
+  v_lock_sec integer;
+  v_retry    integer;
+  v_id       bigint;
+begin
+  perform pg_advisory_xact_lock(hashtext('admin_login:' || v_ip));
+
+  select greatest(
+           coalesce(max(created_at) filter (where outcome = 'success'), now() - v_window),
+           now() - v_window
+         )
+    into v_since
+    from admin_login_attempts
+   where ip = v_ip and created_at > now() - v_window;
+  v_since := coalesce(v_since, now() - v_window);
+
+  select count(*), max(created_at)
+    into v_failures, v_last_at
+    from admin_login_attempts
+   where ip = v_ip
+     and outcome in ('failure', 'pending', 'blocked')
+     and created_at > v_since;
+
+  v_lock_sec := case
+                  when v_failures >= 20 then 3600
+                  when v_failures >= 10 then 900
+                  when v_failures >= 5  then 60
+                  else 0
+                end;
+  if v_lock_sec > 0 and v_last_at is not null then
+    v_retry := ceil(extract(epoch from (v_last_at + make_interval(secs => v_lock_sec)) - now()))::integer;
+  else
+    v_retry := 0;
+  end if;
+
+  if v_retry > 0 then
+    insert into admin_login_attempts (ip, username_tried, user_agent, outcome)
+    values (v_ip, left(coalesce(p_username, ''), 120), left(coalesce(p_user_agent, ''), 300), 'blocked')
+    returning id into v_id;
+    return query select v_id, false, v_retry, v_failures;
+    return;
+  end if;
+
+  insert into admin_login_attempts (ip, username_tried, user_agent, outcome)
+  values (v_ip, left(coalesce(p_username, ''), 120), left(coalesce(p_user_agent, ''), 300), 'pending')
+  returning id into v_id;
+
+  delete from admin_login_attempts where created_at < now() - interval '90 days';
+
+  return query select v_id, true, 0, v_failures;
+end; $$;
+
+-- Only moves a row OUT of 'pending', so a replayed id cannot rewrite a
+-- 'failure' into a 'success' and clear the ladder.
+create or replace function finalize_admin_login_attempt(p_attempt_id bigint, p_success boolean)
+returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  update admin_login_attempts
+     set outcome = case when p_success then 'success' else 'failure' end
+   where id = p_attempt_id and outcome = 'pending';
+end; $$;
+
+revoke all on function begin_admin_login_attempt(text, text, text) from public, anon, authenticated;
+revoke all on function finalize_admin_login_attempt(bigint, boolean) from public, anon, authenticated;
+grant execute on function begin_admin_login_attempt(text, text, text) to service_role;
+grant execute on function finalize_admin_login_attempt(bigint, boolean) to service_role;
