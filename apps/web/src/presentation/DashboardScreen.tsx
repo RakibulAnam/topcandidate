@@ -2,7 +2,8 @@
 // shared credits/master/purchase state live in <DashboardShell>, which wraps
 // this). Sections top→bottom: dated welcome hero, the dark inline
 // "Start a new application" card, the Master Resume banner, a 6-card recent
-// toolkits grid, and the credits + help rows.
+// toolkits grid, the "Roles you might be interested in" job-discovery list, and
+// the credits + help rows.
 //
 // The start card captures company/title/JD on the dashboard and hands them to
 // App's handleStartFromDashboard, which prefills from the profile and enters
@@ -18,6 +19,9 @@ import type { NavScreen } from './hooks/useBrowserNav';
 import { useT, useLocale } from './i18n/LocaleContext';
 import { CONTACT_FACEBOOK_URL, contactMailto } from './support';
 import { ToolkitCard } from './components/dashboard/ToolkitCard';
+import { JobDiscovery } from './components/dashboard/JobDiscovery';
+import { consumeSearchClick, type JobSearchInput } from './utils/jobSearch';
+import { track } from '../infrastructure/analytics/track';
 import { useRelativeTime } from './components/dashboard/relativeTime';
 import { useDashboardShell } from './components/dashboard/DashboardShell';
 
@@ -59,6 +63,9 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const [buildingMaster, setBuildingMaster] = useState(false);
   // Profile has neither education nor experience → nothing can be generated.
   const [profileEmpty, setProfileEmpty] = useState(false);
+  // The slice of the master profile the job-discovery searches derive from.
+  // Null until loaded; the section renders nothing until it has real data.
+  const [searchInput, setSearchInput] = useState<JobSearchInput | null>(null);
 
   const firstName = (user?.user_metadata?.full_name as string | undefined)?.split(' ')[0]
     ?? user?.email?.split('@')[0]
@@ -77,11 +84,29 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       .then(({ items, total }) => { if (!cancelled) { setRecent(items); setRecentTotal(total); } })
       .catch((err) => { if (!cancelled) console.warn('recent toolkits failed', err); });
     // The hard content gate is education OR experience — if both are empty,
-    // no toolkit or general resume can be generated. Surface a banner.
+    // no toolkit or general resume can be generated. Surface a banner. The same
+    // read feeds the job-discovery searches (title / skills / city), so job
+    // discovery costs no extra round trip and no AI call.
     Promise.all([
       profileRepository.getExperiences(user.id).catch(() => []),
       profileRepository.getEducations(user.id).catch(() => []),
-    ]).then(([exps, edus]) => { if (!cancelled) setProfileEmpty(exps.length === 0 && edus.length === 0); });
+      profileRepository.getSkills(user.id).catch(() => [] as string[]),
+      profileRepository.getProfile(user.id).catch(() => null),
+    ]).then(([exps, edus, skills, personal]) => {
+      if (cancelled) return;
+      setProfileEmpty(exps.length === 0 && edus.length === 0);
+      setSearchInput({
+        roles: exps.map((e) => e.role).filter(Boolean),
+        skills,
+        // Skills the normalizer evidenced in the CURRENT role. `skills` itself
+        // arrives unordered (getSkills has no ORDER BY), so this is the only
+        // real signal for which skill is worth searching on — and it rides
+        // along on a read we were already doing.
+        evidencedSkills: exps[0]?.normalized?.skills ?? [],
+        location: personal?.location,
+        educationFields: edus.map((e) => e.field || e.degree).filter(Boolean),
+      });
+    });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, refreshKey]);
@@ -102,6 +127,20 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       toast.message(t('dashboard.startNeedJd'));
       jdRef.current?.focus();
       return;
+    }
+    // Did a job-discovery click plausibly produce this JD? consumeSearchClick
+    // reads AND clears the marker, so one search click credits at most one
+    // generation — this is the number that says whether discovery drives
+    // purchases, including for users who never bought a credit before. It is
+    // measured from the click alone; there is no in-app hand-off to instrument,
+    // because the user leaves for the board and comes back with the ad.
+    const fromSearch = consumeSearchClick();
+    if (fromSearch) {
+      track('jd_pasted_after_search_click', {
+        angle: fromSearch.angle,
+        source: fromSearch.source,
+        minutesSinceClick: Math.round((Date.now() - new Date(fromSearch.at).getTime()) / 60000),
+      });
     }
     onStartApplication({ company: company.trim(), title: title.trim(), description: jd.trim() });
   };
@@ -326,6 +365,12 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           </div>
         )}
       </section>
+
+      {/* Job discovery — derived from the profile on every render, never
+          persisted, never gated on credits (see JobDiscovery). Deliberately
+          BELOW the toolkits: these links send the user off-site, and the
+          toolkits are what they came back for. */}
+      {searchInput && <JobDiscovery input={searchInput} />}
 
       {/* Credits + Help rows */}
       <section className="flex flex-wrap gap-5">
