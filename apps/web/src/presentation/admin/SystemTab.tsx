@@ -11,6 +11,15 @@ import { HBarChart } from './charts';
 const usd = (n: number): string => `$${Number(n ?? 0).toFixed(4)}`;
 
 interface SystemData {
+  abuseSignals: {
+    multiAccountBrowsers: number;
+    topBrowsers: { id: string; accounts: number }[];
+    multiAccountOrigins: number;
+    topOrigins: { id: string; accounts: number }[];
+    freeCallsNonPayers30d: number;
+    freeSpendNonPayersUsd30d: number;
+    nonPayingAccountsGenerating30d: number;
+  };
   adminAccess: {
     failures24h: number; blocked24h: number; distinctFailingIps24h: number;
     lockedIpsNow: number; lastFailureAt: string | null; lastSuccessAt: string | null;
@@ -133,6 +142,77 @@ export const SystemTab: React.FC<{ api: AdminApi }> = ({ api }) => {
               )}
             </Card>
           </Section>
+
+          <div className="mt-6">
+            {/* Detection only — nothing here blocks anyone. The free tier is a
+                Master Resume (~$0.003/call, 5/day/account) and new accounts get
+                zero credits, so multi-accounting buys AI spend, not product.
+                These numbers exist so the decision to add signup friction is
+                made on evidence rather than fear. */}
+            <Section title="Abuse signals (30d)">
+              <Card>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <Stat
+                    label="Free spend, non-payers"
+                    value={usd(data.abuseSignals.freeSpendNonPayersUsd30d)}
+                    tone={data.abuseSignals.freeSpendNonPayersUsd30d > 5 ? 'bad' : data.abuseSignals.freeSpendNonPayersUsd30d > 1 ? 'warn' : 'neutral'}
+                    sub={`${data.abuseSignals.freeCallsNonPayers30d} calls, 30d`}
+                  />
+                  <Stat
+                    label="Accounts generating free"
+                    value={String(data.abuseSignals.nonPayingAccountsGenerating30d)}
+                    sub="never purchased"
+                  />
+                  <Stat
+                    label="Browsers, 2+ accounts"
+                    value={String(data.abuseSignals.multiAccountBrowsers)}
+                    tone={data.abuseSignals.multiAccountBrowsers >= 10 ? 'bad' : data.abuseSignals.multiAccountBrowsers >= 3 ? 'warn' : 'neutral'}
+                    sub="same localStorage id"
+                  />
+                  <Stat
+                    label="Origins, 2+ accounts"
+                    value={String(data.abuseSignals.multiAccountOrigins)}
+                    tone={data.abuseSignals.multiAccountOrigins >= 10 ? 'bad' : data.abuseSignals.multiAccountOrigins >= 3 ? 'warn' : 'neutral'}
+                    sub="same hashed network"
+                  />
+                </div>
+                {(data.abuseSignals.topBrowsers.length > 0 || data.abuseSignals.topOrigins.length > 0) && (
+                  <div className="mt-4 pt-4 border-t border-charcoal-100 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                    {data.abuseSignals.topBrowsers.length > 0 && (
+                      <div>
+                        <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold mb-2">Accounts per browser</div>
+                        <ul className="space-y-1">
+                          {data.abuseSignals.topBrowsers.map((b) => (
+                            <li key={b.id} className="flex items-center justify-between gap-2 text-[12.5px]">
+                              <span className="font-mono">{b.id}…</span>
+                              <span className="tabular-nums text-charcoal-500">{b.accounts}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {data.abuseSignals.topOrigins.length > 0 && (
+                      <div>
+                        <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold mb-2">Accounts per origin</div>
+                        <ul className="space-y-1">
+                          {data.abuseSignals.topOrigins.map((o) => (
+                            <li key={o.id} className="flex items-center justify-between gap-2 text-[12.5px]">
+                              <span className="font-mono">{o.id}…</span>
+                              <span className="tabular-nums text-charcoal-500">{o.accounts}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="mt-4 text-[11.5px] text-charcoal-500">
+                  Sharing a browser or a network is normal in small numbers — a family laptop, an office,
+                  a user who re-registered. Treat a jump, not a count, as the signal.
+                </p>
+              </Card>
+            </Section>
+          </div>
 
           <div className="mt-6" />
 

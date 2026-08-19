@@ -1675,3 +1675,59 @@ revoke all on function begin_admin_login_attempt(text, text, text) from public, 
 revoke all on function finalize_admin_login_attempt(bigint, boolean) from public, anon, authenticated;
 grant execute on function begin_admin_login_attempt(text, text, text) to service_role;
 grant execute on function finalize_admin_login_attempt(bigint, boolean) to service_role;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Migration 027 — account origin signals (detection only)
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- HMAC of the network origin per account, for spotting one person running many
+-- accounts on throwaway emails. NEVER stores a raw IP; the digest is keyed with
+-- IP_HASH_SALT (falls back to the service-role key). Nothing reads this to
+-- block anyone — it feeds the System tab's "Abuse signals" panel so the
+-- decision to add signup friction can be made on evidence.
+--
+-- Written by api/_lib/auth.ts on an account's authenticated API calls, NOT at
+-- signup: signup is browser-to-Supabase with no server in the path. Supabase's
+-- own auth.audit_log_entries has an ip_address column but is empty (GoTrue
+-- prunes it), which is why this exists at all.
+--
+-- One row per (user, origin) — the counter carries volume, so the table grows
+-- with distinct networks per person, not with traffic.
+create table if not exists account_ip_signals (
+  user_id    uuid not null references profiles(id) on delete cascade,
+  ip_hash    text not null,
+  first_seen timestamptz not null default now(),
+  last_seen  timestamptz not null default now(),
+  hits       integer not null default 1,
+  primary key (user_id, ip_hash)
+);
+-- The question is "which accounts share this origin", so index the hash.
+create index if not exists account_ip_signals_hash_idx on account_ip_signals (ip_hash);
+create index if not exists account_ip_signals_last_seen_idx on account_ip_signals (last_seen desc);
+alter table account_ip_signals enable row level security;
+revoke all on account_ip_signals from anon, authenticated;
+grant select, insert, update, delete on account_ip_signals to service_role;
+
+-- Sits in the request path of every authenticated endpoint, so it is one
+-- indexed upsert and nothing else. Prunes at 180 days on ~1 in 1000 calls so
+-- there is no cron to forget about.
+create or replace function record_account_ip(p_user_id uuid, p_ip_hash text)
+returns void
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if p_user_id is null or coalesce(trim(p_ip_hash), '') = '' then
+    return;
+  end if;
+
+  insert into account_ip_signals (user_id, ip_hash)
+  values (p_user_id, p_ip_hash)
+  on conflict (user_id, ip_hash)
+  do update set last_seen = now(), hits = account_ip_signals.hits + 1;
+
+  if random() < 0.001 then
+    delete from account_ip_signals where last_seen < now() - interval '180 days';
+  end if;
+end; $$;
+
+revoke all on function record_account_ip(uuid, text) from public, anon, authenticated;
+grant execute on function record_account_ip(uuid, text) to service_role;

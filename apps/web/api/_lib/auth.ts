@@ -4,6 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { recordAccountIp } from './accountSignals.js';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
 // Anon key is fine for verifying user JWTs (getUser does not need elevated privileges).
@@ -44,6 +45,12 @@ export async function authenticate(
     res.status(401).json({ error: 'Invalid or expired token' });
     return null;
   }
+
+  // Detection-only abuse signal (migration 027). Deliberately here rather than
+  // at signup: signup is browser-to-Supabase with no server in the path, so
+  // this is the first server-side moment an account is identifiable. Cannot
+  // throw and cannot change the outcome — see accountSignals.ts.
+  await recordAccountIp(data.user.id, req);
 
   return { userId: data.user.id, jwt: token };
 }

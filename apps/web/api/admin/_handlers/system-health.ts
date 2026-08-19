@@ -21,7 +21,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const iso7d = new Date(now - 7 * 24 * HOUR_MS).toISOString();
   const iso30d = new Date(now - 30 * 24 * HOUR_MS).toISOString();
 
-  const [ai24hRes, ai7dRes, ai30dRes, pendingRes, oldestPendingRes, orphanRes, expired24hRes, confirmRes, reversalRes, loginAttemptsRes] =
+  const [ai24hRes, ai7dRes, ai30dRes, pendingRes, oldestPendingRes, orphanRes, expired24hRes, confirmRes, reversalRes, loginAttemptsRes,
+         browserRes, ipSignalRes, freeCallsRes, payersRes] =
     await Promise.all([
       // AI calls in last 24h (full telemetry for rollups).
       supabase.from('ai_call_log').select('provider, cost_usd, status, latency_ms').gte('created_at', iso24h).limit(50000),
@@ -38,6 +39,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Admin login attempts, 24h (migration 026). One fetch, rolled up below —
       // cheaper than five counts, and the table is pruned to 90 days.
       supabase.from('admin_login_attempts').select('ip, outcome, created_at').gte('created_at', iso24h).order('created_at', { ascending: false }).limit(5000),
+      // Abuse signals. One browser (anon_id, localStorage) seen on several
+      // accounts, and one network origin (migration 027) seen on several
+      // accounts — the two cheap tells for someone farming free generations
+      // with throwaway emails.
+      supabase.from('analytics_events').select('anon_id, user_id').not('user_id', 'is', null).not('anon_id', 'is', null).limit(50000),
+      supabase.from('account_ip_signals').select('ip_hash, user_id').limit(50000),
+      // Free-tier spend by accounts that have never completed a purchase — the
+      // number that decides whether any of this is worth acting on.
+      supabase.from('ai_call_log').select('user_id, cost_usd').in('kind', ['optimize_general', 'normalize', 'extract_resume']).gte('created_at', iso30d).limit(50000),
+      supabase.from('purchases').select('user_id').eq('status', 'completed').limit(50000),
     ]);
 
   // Tolerate per-query errors (empty/missing tables) — log and treat as zero.
@@ -54,6 +65,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   logIfErr('confirm', confirmRes.error);
   logIfErr('reversal', reversalRes.error);
   logIfErr('loginAttempts', loginAttemptsRes.error);
+  logIfErr('browserSignals', browserRes.error);
+  logIfErr('ipSignals', ipSignalRes.error);
+  logIfErr('freeCalls', freeCallsRes.error);
+  logIfErr('payers', payersRes.error);
 
   // --- AI 24h rollups ---
   const ai24h = ai24hRes.data ?? [];
@@ -122,7 +137,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .sort((a, b) => b.failures - a.failures)
     .slice(0, 5);
 
+  // --- Abuse signals ---
+  // Counting DISTINCT accounts per browser / per origin. Sharing is normal in
+  // small numbers (a family laptop, an office network, a user who re-registers),
+  // so the operator sees the distribution rather than a verdict.
+  const distinctBy = (rows: { key: string; user: string }[]) => {
+    const map: Record<string, Set<string>> = {};
+    for (const r of rows) (map[r.key] ||= new Set()).add(r.user);
+    return Object.entries(map)
+      .map(([key, users]) => ({ key, accounts: users.size }))
+      .filter((r) => r.accounts > 1)
+      .sort((a, b) => b.accounts - a.accounts);
+  };
+
+  const byBrowser = distinctBy(((browserRes.data ?? []) as { anon_id: string; user_id: string }[])
+    .map((r) => ({ key: r.anon_id, user: r.user_id })));
+  const byOrigin = distinctBy(((ipSignalRes.data ?? []) as { ip_hash: string; user_id: string }[])
+    .map((r) => ({ key: r.ip_hash, user: r.user_id })));
+
+  const payers = new Set(((payersRes.data ?? []) as { user_id: string }[]).map((r) => r.user_id));
+  let freeSpendNonPayersUsd = 0;
+  let freeCallsNonPayers = 0;
+  const nonPayerIds = new Set<string>();
+  for (const r of (freeCallsRes.data ?? []) as { user_id: string; cost_usd: number | null }[]) {
+    if (payers.has(r.user_id)) continue;
+    freeCallsNonPayers += 1;
+    nonPayerIds.add(r.user_id);
+    freeSpendNonPayersUsd += typeof r.cost_usd === 'number' ? r.cost_usd : Number(r.cost_usd) || 0;
+  }
+
   res.status(200).json({
+    abuseSignals: {
+      // Top few only — the operator wants "is anything unusual", not a dump.
+      multiAccountBrowsers: byBrowser.length,
+      topBrowsers: byBrowser.slice(0, 5).map((r) => ({ id: r.key.slice(0, 8), accounts: r.accounts })),
+      multiAccountOrigins: byOrigin.length,
+      topOrigins: byOrigin.slice(0, 5).map((r) => ({ id: r.key.slice(0, 8), accounts: r.accounts })),
+      freeCallsNonPayers30d: freeCallsNonPayers,
+      freeSpendNonPayersUsd30d: +freeSpendNonPayersUsd.toFixed(4),
+      nonPayingAccountsGenerating30d: nonPayerIds.size,
+    },
     adminAccess: {
       failures24h,
       blocked24h,
