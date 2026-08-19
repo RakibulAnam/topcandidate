@@ -933,6 +933,9 @@ export const bn: Dictionary = {
     navHome: 'হোম',
     navApplications: 'অ্যাপ্লিকেশন',
     navMasterResume: 'মাস্টার রিজিউমে',
+    navPurchases: 'পারচেজ',
+    navTabMaster: 'মাস্টার', // short form for the phone tab bar, where a tab is ~90px
+    navTabBarLabel: 'মূল নেভিগেশন',
     searchNavPlaceholder: 'অ্যাপ্লিকেশন খুঁজুন',
     creditsUnit: 'ক্রেডিট',
     // ── Redesign: hero ──

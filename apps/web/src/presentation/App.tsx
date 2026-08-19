@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Toaster, toast } from 'sonner';
 import { ResumeData, AppStep, inferUserType } from '../domain/entities';
 import { BuilderScreen } from './BuilderScreen';
@@ -18,6 +18,7 @@ import { ApplicationsScreen } from './ApplicationsScreen';
 import { PurchaseHistoryScreen } from './PurchaseHistoryScreen';
 import { SummaryScreen } from './SummaryScreen';
 import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
+import { track } from '../infrastructure/analytics/track';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
 import { TermsOfService } from './legal/TermsOfService';
@@ -84,6 +85,26 @@ const AppContent = () => {
 
   const { navState, navigate } = useBrowserNav({ screen: 'LANDING' });
   const screen = navState.screen;
+
+  // One page_view per screen change (and one on first paint, which is the
+  // session's entry page). This is what makes exit pages and bounce rate
+  // computable: the LAST page_view in a session IS the exit page, so no
+  // unreliable beforeunload/pagehide handler is needed — mobile browsers drop
+  // those routinely. Fire-and-forget; track() can never throw.
+  //
+  // The ref guard is load-bearing, not defensive. StrictMode double-invokes
+  // effects on mount, which logged every entry page TWICE — and because the dev
+  // server writes to the production Supabase, those duplicates land in real
+  // analytics and inflate page views while distorting bounce rate. Guarding on
+  // the last screen actually tracked makes the effect idempotent (the ref
+  // survives StrictMode's simulated remount). Navigating away and back still
+  // fires, because `screen` changes in between.
+  const lastTrackedScreen = useRef<NavScreen | null>(null);
+  useEffect(() => {
+    if (lastTrackedScreen.current === screen) return;
+    lastTrackedScreen.current = screen;
+    track('page_view', { screen });
+  }, [screen]);
 
   // Detect Supabase recovery link click. On first paint, if the URL hash
   // includes `type=recovery` (or an error_code), route to the reset screen.
@@ -165,6 +186,15 @@ const AppContent = () => {
   const userId = user?.id ?? null;
 
   useEffect(() => {
+    // Wait for auth to settle. While `loading` is true the session is still
+    // being restored from storage, so `user` is null but not meaningfully so —
+    // acting on it would fire the signed-out bounce below against a URL the
+    // user IS entitled to. That broke every authed deep link on a cold load:
+    // /purchases → LANDING (replace) → session arrives → LANDING is unauthed →
+    // DASHBOARD. Only /dashboard survived, because the bounce ended there
+    // anyway. The render already shows a spinner while `loading`.
+    if (loading) return;
+
     const checkProfileCompleteness = async () => {
       if (!userId) {
         setCheckingProfile(false);
@@ -197,7 +227,7 @@ const AppContent = () => {
 
     checkProfileCompleteness();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, loading]);
 
   if (loading) {
     return (
@@ -397,7 +427,7 @@ const AppContent = () => {
   // across navigation between them.
   return (
     <DashboardShell
-      active={screen === 'APPLICATIONS' ? 'applications' : (screen === 'PURCHASES' || screen === 'SUMMARY') ? null : 'home'}
+      active={screen === 'APPLICATIONS' ? 'applications' : screen === 'PURCHASES' ? 'purchases' : screen === 'SUMMARY' ? null : 'home'}
       onNavigate={(s) => navigate({ screen: s })}
       onEditProfile={() => navigate({ screen: 'PROFILE' })}
       onOpenResume={handleOpenResume}

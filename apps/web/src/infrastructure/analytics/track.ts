@@ -24,6 +24,13 @@ export interface FirstTouch {
   utm_medium?: string;
   utm_campaign?: string;
   referrer?: string;
+  // Ad-platform click ids, kept for a future server-side Conversions API call
+  // (Meta CAPI / TikTok Events API) — they are what the platforms match a
+  // conversion back to a click on. Meta derives its _fbc cookie from fbclid on
+  // its own IF the pixel is installed; we have no pixel, so both are read from
+  // the URL here. ttclid in particular has NO automatic capture anywhere.
+  fbclid?: string;
+  ttclid?: string;
 }
 
 const uid = (): string => {
@@ -67,10 +74,13 @@ export function captureFirstTouch(): void {
       utm_medium: p.get('utm_medium') ?? undefined,
       utm_campaign: p.get('utm_campaign') ?? undefined,
       referrer: document.referrer || undefined,
+      fbclid: p.get('fbclid') ?? undefined,
+      ttclid: p.get('ttclid') ?? undefined,
     };
-    // Only persist if there's something meaningful (a UTM tag or an external referrer).
+    // Only persist if there's something meaningful (a UTM tag, an ad click id,
+    // or an external referrer).
     const externalRef = ft.referrer && !ft.referrer.includes(window.location.host);
-    if (ft.utm_source || ft.utm_medium || ft.utm_campaign || externalRef) {
+    if (ft.utm_source || ft.utm_medium || ft.utm_campaign || ft.fbclid || ft.ttclid || externalRef) {
       localStorage.setItem(UTM_KEY, JSON.stringify(ft));
     }
   } catch {
@@ -97,12 +107,20 @@ export function track(event: string, props: Record<string, unknown> = {}): void 
       const { data } = await supabase.auth.getSession();
       const userId = data.session?.user?.id ?? null;
       const ft = getFirstTouch();
+      // Click ids ride in props because analytics_events has no column for
+      // them. Attached to every event on purpose: whichever row a future
+      // Conversions API call reads from (signup_completed, purchase_confirmed),
+      // the click id is already there.
+      const clickIds: Record<string, string> = {};
+      if (ft.fbclid) clickIds.fbclid = ft.fbclid;
+      if (ft.ttclid) clickIds.ttclid = ft.ttclid;
+
       await supabase.from('analytics_events').insert({
         anon_id: getAnonId(),
         user_id: userId,
         session_id: getSessionId(),
         event,
-        props,
+        props: { ...clickIds, ...props },
         path: typeof window !== 'undefined' ? window.location.pathname : null,
         referrer: ft.referrer ?? (typeof document !== 'undefined' ? document.referrer || null : null),
         utm_source: ft.utm_source ?? null,
