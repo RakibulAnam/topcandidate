@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Toaster, toast } from 'sonner';
 import { ResumeData, AppStep, inferUserType } from '../domain/entities';
 import { BuilderScreen } from './BuilderScreen';
@@ -18,6 +18,7 @@ import { ApplicationsScreen } from './ApplicationsScreen';
 import { PurchaseHistoryScreen } from './PurchaseHistoryScreen';
 import { SummaryScreen } from './SummaryScreen';
 import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
+import { track } from '../infrastructure/analytics/track';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
 import { TermsOfService } from './legal/TermsOfService';
@@ -84,6 +85,26 @@ const AppContent = () => {
 
   const { navState, navigate } = useBrowserNav({ screen: 'LANDING' });
   const screen = navState.screen;
+
+  // One page_view per screen change (and one on first paint, which is the
+  // session's entry page). This is what makes exit pages and bounce rate
+  // computable: the LAST page_view in a session IS the exit page, so no
+  // unreliable beforeunload/pagehide handler is needed — mobile browsers drop
+  // those routinely. Fire-and-forget; track() can never throw.
+  //
+  // The ref guard is load-bearing, not defensive. StrictMode double-invokes
+  // effects on mount, which logged every entry page TWICE — and because the dev
+  // server writes to the production Supabase, those duplicates land in real
+  // analytics and inflate page views while distorting bounce rate. Guarding on
+  // the last screen actually tracked makes the effect idempotent (the ref
+  // survives StrictMode's simulated remount). Navigating away and back still
+  // fires, because `screen` changes in between.
+  const lastTrackedScreen = useRef<NavScreen | null>(null);
+  useEffect(() => {
+    if (lastTrackedScreen.current === screen) return;
+    lastTrackedScreen.current = screen;
+    track('page_view', { screen });
+  }, [screen]);
 
   // Detect Supabase recovery link click. On first paint, if the URL hash
   // includes `type=recovery` (or an error_code), route to the reset screen.

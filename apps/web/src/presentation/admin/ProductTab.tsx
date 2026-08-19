@@ -17,6 +17,14 @@ const usd = (n: number): string => `$${Number(n ?? 0).toFixed(4)}`;
 
 interface ProductData {
   range: Range;
+  traffic: {
+    sessions: number; pageViews: number; viewsPerSession: number; bounceRatePct: number;
+    topPages: { page: string; count: number }[];
+    entryPages: { page: string; count: number }[];
+    exitPages: { page: string; count: number }[];
+    endedSessions: number;
+    signupWall: { sessionsReachedLogin: number; sessionsSignedUp: number; abandonRatePct: number };
+  };
   generations: { paidTailored: number; freeGeneral: number; toolkitItems: number; extracts: number };
   dailyGenerations: { day: string; value: number }[];
   aiCost: { totalCostUsd: number; callsWithCost: number; errorRatePct: number; avgLatencyMs: number; byProvider: { provider: string; calls: number; costUsd: number }[] };
@@ -59,9 +67,46 @@ export const ProductTab: React.FC<{ api: AdminApi }> = ({ api }) => {
             <KpiCard label="Free generations" value={String(data.generations.freeGeneral)} sub="general resumes" />
             <KpiCard label="Gross margin" value={`${data.margin.grossMarginPct.toFixed(1)}%`} tone={data.margin.grossMarginPct < 0 ? 'bad' : 'neutral'} sub="approx" />
             <KpiCard label="AI cost" value={usd(data.aiCost.totalCostUsd)} tone="warn" sub={`${data.aiCost.callsWithCost} priced calls`} />
+            <KpiCard label="Sessions" value={String(data.traffic.sessions)} sub={`${data.traffic.pageViews} page views`} />
+            <KpiCard label="Bounce rate" value={`${data.traffic.bounceRatePct.toFixed(1)}%`} tone={data.traffic.bounceRatePct > 70 ? 'bad' : data.traffic.bounceRatePct > 50 ? 'warn' : 'neutral'} sub="one-page sessions" />
+            <KpiCard label="Pages / session" value={data.traffic.viewsPerSession.toFixed(2)} sub="depth" />
+            <KpiCard
+              label="Left at sign-in"
+              value={`${data.traffic.signupWall.abandonRatePct.toFixed(1)}%`}
+              tone={data.traffic.signupWall.abandonRatePct > 80 ? 'bad' : data.traffic.signupWall.abandonRatePct > 60 ? 'warn' : 'neutral'}
+              sub={`${data.traffic.signupWall.sessionsSignedUp}/${data.traffic.signupWall.sessionsReachedLogin} signed up`}
+            />
           </ContentGrid>
         )}
       </Section>
+
+      {/* Traffic. Answers "where do people stop?" — entry pages show what ads
+          and links land on, exit pages show the last screen of a session. Exit
+          counts only sessions idle 30+ min, so someone browsing right now isn't
+          counted as having left. */}
+      {data && (
+        <div className="mt-6">
+          <Section title="Traffic & drop-off">
+            <ContentGrid cols={3}>
+              <Card>
+                <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold mb-2">Most viewed</div>
+                <HBarChart data={data.traffic.topPages.map((p) => ({ label: p.page, value: p.count }))} formatValue={(v) => String(v)} />
+              </Card>
+              <Card>
+                <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold mb-2">Entry pages</div>
+                <HBarChart data={data.traffic.entryPages.map((p) => ({ label: p.page, value: p.count }))} formatValue={(v) => String(v)} />
+              </Card>
+              <Card>
+                <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold mb-2">Exit pages</div>
+                <HBarChart data={data.traffic.exitPages.map((p) => ({ label: p.page, value: p.count }))} formatValue={(v) => String(v)} />
+                <p className="mt-3 text-[11.5px] text-charcoal-500">
+                  Last screen of {data.traffic.endedSessions} finished session{data.traffic.endedSessions === 1 ? '' : 's'} (idle 30+ min).
+                </p>
+              </Card>
+            </ContentGrid>
+          </Section>
+        </div>
+      )}
 
       <div className="mt-6">
         <Section title="Daily generations">

@@ -90,28 +90,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Channels: per marketing_spend.channel — spend, signups (utm_source=channel),
   // revenue (completed purchases by users whose utm_source=channel), cac, roas.
+  // Channel keys are matched CASE- AND WHITESPACE-INSENSITIVELY against
+  // utm_source. Before this, the join was an exact string compare: spend typed
+  // as "Facebook" never matched an ad link carrying utm_source=facebook, so CAC
+  // and ROAS silently read 0 and the channel looked worthless. The operator's
+  // original spelling is kept for display; only the join key is normalised.
+  const norm = (v: string): string => v.trim().toLowerCase();
+
   const spendRowsRaw = spendRes.data ?? [];
   const spendByChannel: Record<string, number> = {};
+  const labelByKey: Record<string, string> = {};
   for (const s of spendRowsRaw) {
-    const ch = s.channel ?? '(unknown)';
-    spendByChannel[ch] = (spendByChannel[ch] ?? 0) + (s.amount_taka ?? 0);
+    const label = s.channel ?? '(unknown)';
+    const key = norm(label);
+    labelByKey[key] ??= label;
+    spendByChannel[key] = (spendByChannel[key] ?? 0) + (s.amount_taka ?? 0);
   }
   const signupsByChannel: Record<string, number> = {};
   for (const src of Object.values(sourceByUser)) {
-    signupsByChannel[src] = (signupsByChannel[src] ?? 0) + 1;
+    const key = norm(src);
+    labelByKey[key] ??= src;
+    signupsByChannel[key] = (signupsByChannel[key] ?? 0) + 1;
   }
   const revenueByChannel: Record<string, number> = {};
   for (const r of purchasesRes.data ?? []) {
     if (!r.user_id) continue;
     const src = sourceByUser[r.user_id];
     if (!src) continue; // purchaser not signed up in range / unknown channel
-    revenueByChannel[src] = (revenueByChannel[src] ?? 0) + (r.amount_taka ?? 0);
+    revenueByChannel[norm(src)] = (revenueByChannel[norm(src)] ?? 0) + (r.amount_taka ?? 0);
   }
 
-  const channels = Object.keys(spendByChannel).map((channel) => {
-    const spendTaka = spendByChannel[channel] ?? 0;
-    const signups = signupsByChannel[channel] ?? 0;
-    const revenueTaka = revenueByChannel[channel] ?? 0;
+  // Every channel with spend OR signups — a channel that drove signups but has
+  // no spend row entered yet was previously invisible here.
+  const channelKeys = Array.from(new Set([...Object.keys(spendByChannel), ...Object.keys(signupsByChannel)]));
+  const channels = channelKeys.map((key) => {
+    const channel = labelByKey[key] ?? key;
+    const spendTaka = spendByChannel[key] ?? 0;
+    const signups = signupsByChannel[key] ?? 0;
+    const revenueTaka = revenueByChannel[key] ?? 0;
     const cacTaka = signups > 0 ? Math.round(spendTaka / signups) : 0;
     const roas = spendTaka > 0 ? +(revenueTaka / spendTaka).toFixed(2) : 0;
     return { channel, spendTaka, signups, revenueTaka, cacTaka, roas };
