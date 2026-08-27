@@ -55,6 +55,47 @@ When the watcher omits the timestamp header, the server falls back to the v1 ver
 - `senderMsisdn` — `01` followed by 9 digits, OR `null` for SMS variants without a sender phone. Treat as nullable.
 - `amountTaka` — positive integer Taka. Watcher floors any decimal (`Tk 200.50` → `200`). **Load-bearing** since migration 007: the server compares observed vs expected and refuses underpayments with 409 `underpaid`. A missing or zero `amountTaka` causes the underpayment check to be skipped — the watcher MUST send the real amount.
 
+### Heartbeat mode (added migration 028)
+
+The **same endpoint, same secret, same v2 signature** also accepts a liveness
+ping that carries no transaction. It is distinguished only by `kind`:
+
+```json
+{
+  "kind": "heartbeat",
+  "deviceId": "9f2c1ab47e0d4c5f8b3a6e1d02f47c93",
+  "appVersion": null,
+  "queueDepth": 3
+}
+```
+
+- `kind` — the literal string `"heartbeat"`. Any other value (or its absence) is a normal confirm-purchase call.
+- `deviceId` — stable opaque per-install id, ≤128 chars. **Not** a hardware identifier: a random value generated on first use and persisted (`SettingsRepository.deviceId()`). Reinstalling produces a new id and therefore a new `watcher_heartbeats` row, rather than silently masquerading as the old device.
+- `appVersion` — optional, ≤40 chars. Currently sent as `null`: there is no single source of truth for the app version on the mobile side, and a hand-maintained copy of the pubspec version would drift and then lie in telemetry.
+- `queueDepth` — optional non-negative integer; rows the watcher still owes the server (`queued` / `retrying` / `waiting_user` / `reversing`).
+
+Response is always `200 { "success": true, "heartbeat": true }`, except `400`
+when `deviceId` is missing. A failure to record the heartbeat server-side is
+logged and still returns 200 — telemetry must never stall the watcher's loop.
+
+**Why it exists.** Server-side, "we have not matched this customer's bKash SMS"
+is ambiguous between *the customer mistyped their TrxID* and *the operator's
+phone is offline*. With no SMS traffic those look identical, and the web app
+would otherwise have to guess — telling paying customers to re-check a correct
+TrxID during our own outage. The ping records `last_seen_at`, and
+`diagnose_pending_purchase` (read by `GET /api/purchase-ops/verify-txn`) uses it
+to choose between the `nothing_found` and `watcher_stale` verdicts.
+
+**Cadence.** Once per minute while the foreground service is alive (throttled
+in-memory, driven off the existing 15s dispatch ticker), plus once per
+WorkManager backstop run, plus one forced ping at service startup. The server
+treats a watcher as stale after **5 minutes**, so four consecutive misses are
+tolerated. Never retried — a dropped ping only costs the web app some wording
+precision.
+
+**Replay protection is unchanged.** The v2 signature covers the timestamp, so
+each ping yields a distinct nonce even though the body is nearly identical.
+
 ## Response codes (do NOT invent new ones)
 
 | Status | Body | Meaning | Watcher's reaction |
@@ -113,6 +154,11 @@ The watcher also POSTs to three sibling endpoints, all signed with the same `X-B
 - `POST /api/reverse-purchase` — body `{ transactionId, reason? }`. For bKash reversal SMS. Server flips the matching `completed` row to `refunded` and decrements credits.
 - `POST /api/admin/parser-failures` (POST mode) — body `{ rawBody, senderMsisdn?, smsTimestamp?, reason? }`. For SMS the watcher could not classify. Server stores the verbatim body so the operator can update the parser.
 
+The heartbeat is deliberately **not** a fourth sibling endpoint — it reuses
+`/api/confirm-purchase` with `kind: 'heartbeat'`. The Vercel Hobby plan caps a
+deployment at 12 Serverless Functions and the project is at that cap, so a new
+function file would fail the deploy. See "Heartbeat mode" above.
+
 ## HMAC verification example (Node)
 
 ```ts
@@ -131,5 +177,7 @@ function verifySignature(rawBody: string, headerSig: string, secret: string) {
 
 - Web handler: [`apps/web/api/confirm-purchase.ts`](../../apps/web/api/confirm-purchase.ts)
 - Mobile sender: [`apps/mobile/lib/dispatch/webhook_client.dart`](../../apps/mobile/lib/dispatch/webhook_client.dart)
+- Mobile heartbeat: [`apps/mobile/lib/dispatch/heartbeat.dart`](../../apps/mobile/lib/dispatch/heartbeat.dart), wired in [`apps/mobile/lib/service/background_service.dart`](../../apps/mobile/lib/service/background_service.dart)
+- Customer-facing consumer of the heartbeat: [`apps/web/api/purchase-ops/_handlers/verify-txn.ts`](../../apps/web/api/purchase-ops/_handlers/verify-txn.ts)
 - Mobile state machine: [`apps/mobile/lib/dispatch/dispatcher.dart`](../../apps/mobile/lib/dispatch/dispatcher.dart) + [`apps/mobile/spec/04-state-machine.md`](../../apps/mobile/spec/04-state-machine.md)
 - DB schema sketch: see [`apps/mobile/WHAT_IT_DOES.md`](../../apps/mobile/WHAT_IT_DOES.md) §4 and [`apps/web/supabase/schema.sql`](../../apps/web/supabase/schema.sql).

@@ -18,6 +18,23 @@
 // 404 if no matching purchase row exists at all; 409 if msisdn doesn't match;
 // 503 if SUPABASE_SERVICE_ROLE_KEY is not configured.
 //
+// HEARTBEAT MODE (migration 028)
+// ==============================
+// The same endpoint, same secret, same signature scheme, accepts a liveness
+// ping that carries no transaction:
+//   Request:  { kind: 'heartbeat', deviceId: '<stable-id>', appVersion?, queueDepth? }
+//   Response: { success: true, heartbeat: true }
+// It exists so the customer-facing diagnosis (`diagnose_pending_purchase`, via
+// /api/purchase-ops/verify-txn) can tell "we haven't seen your bKash SMS
+// because your TrxID is wrong" from "...because the operator's phone is
+// offline". Without it those are indistinguishable and we would end up
+// accusing paying customers of typos during our own outages.
+//
+// Folded into this function rather than given its own file because the Vercel
+// Hobby plan caps a deployment at 12 Serverless Functions and we are at that
+// cap. Replay protection is unchanged: the v2 signature covers a timestamp, so
+// each ping produces a distinct nonce.
+//
 // SECURITY MODEL
 // ==============
 // - The Flutter app holds BKASH_WEBHOOK_SECRET (a random 32-byte string).
@@ -63,6 +80,11 @@ interface ConfirmBody {
   transactionId?: string;
   senderMsisdn?: string | null;
   amountTaka?: number;
+  /** 'heartbeat' switches this endpoint into liveness-ping mode (migration 028). */
+  kind?: string;
+  deviceId?: string;
+  appVersion?: string;
+  queueDepth?: number;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -98,6 +120,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Flutter Settings tab's "Test webhook" button regex-checks for it to
     // flash a green "URL and secret look correct" indicator.
     res.status(400).json({ error: 'transactionId is required (body must be valid JSON).' });
+    return;
+  }
+
+  // ── Heartbeat mode ───────────────────────────────────────────────────────
+  // Deliberately placed after signature verification (an unsigned caller can
+  // never write liveness) and before the transactionId validation below, whose
+  // error string is contract-bound to the Flutter "Test webhook" button.
+  if (body.kind === 'heartbeat') {
+    const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
+    if (!deviceId) {
+      res.status(400).json({ error: 'deviceId is required for a heartbeat.' });
+      return;
+    }
+    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { error: hbErr } = await admin.rpc('record_watcher_heartbeat', {
+      p_device_id: deviceId.slice(0, 128),
+      p_app_version: typeof body.appVersion === 'string' ? body.appVersion.slice(0, 40) : null,
+      p_queue_depth:
+        typeof body.queueDepth === 'number' && Number.isFinite(body.queueDepth)
+          ? Math.max(0, Math.floor(body.queueDepth))
+          : null,
+    });
+    if (hbErr) {
+      // Never fail the watcher's loop over telemetry. It will ping again.
+      console.warn('[confirm-purchase] record_watcher_heartbeat failed:', hbErr.message);
+    }
+    res.status(200).json({ success: true, heartbeat: true });
     return;
   }
 

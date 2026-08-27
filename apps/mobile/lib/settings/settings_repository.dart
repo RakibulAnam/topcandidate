@@ -1,6 +1,8 @@
 // Encrypted key/value store for the webhook URL + HMAC secret.
 // See spec/08-security.md.
 
+import 'dart:math';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SettingsRepository {
@@ -17,6 +19,7 @@ class SettingsRepository {
   static const _kSecret = 'bkash_webhook_secret';
   static const _kBiometricLock = 'bkash_biometric_lock';
   static const _kBatteryPrompted = 'bkash_battery_prompted';
+  static const _kDeviceId = 'bkash_device_id';
 
   Future<String?> webhookUrl() => _storage.read(key: _kUrl);
   Future<void> setWebhookUrl(String value) =>
@@ -27,6 +30,25 @@ class SettingsRepository {
       _storage.write(key: _kSecret, value: value);
 
   Future<bool> hasSecret() async => (await hmacSecret())?.isNotEmpty ?? false;
+
+  /// Stable per-install id for the liveness heartbeat (web migration 028).
+  /// Generated on first use and persisted; the server keys
+  /// `watcher_heartbeats` on it so reinstalling produces a new row rather
+  /// than silently masquerading as the old device.
+  ///
+  /// Not a hardware identifier on purpose — a random opaque value is enough
+  /// to answer "is a watcher alive?" and carries no device fingerprint.
+  Future<String> deviceId() async {
+    final existing = await _storage.read(key: _kDeviceId);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final rnd = Random.secure();
+    final id = List<String>.generate(
+      16,
+      (_) => rnd.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    await _storage.write(key: _kDeviceId, value: id);
+    return id;
+  }
 
   Future<bool> biometricLockEnabled() async {
     final v = await _storage.read(key: _kBiometricLock);

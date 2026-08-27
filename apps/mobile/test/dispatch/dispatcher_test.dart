@@ -20,16 +20,19 @@ class _FakeWebhookClient implements WebhookClient {
   WebhookResponse nextReversal = const WebhookResponse(statusCode: 200);
   WebhookResponse nextOrphan = const WebhookResponse(statusCode: 200);
   WebhookResponse nextParserFailure = const WebhookResponse(statusCode: 200);
+  WebhookResponse nextHeartbeat = const WebhookResponse(statusCode: 200);
 
   int callCount = 0;
   int reversalCallCount = 0;
   int orphanCallCount = 0;
   int parserFailureCallCount = 0;
+  int heartbeatCallCount = 0;
 
   Map<String, dynamic>? lastBody;
   Map<String, dynamic>? lastReversalBody;
   Map<String, dynamic>? lastOrphanBody;
   Map<String, dynamic>? lastParserFailureBody;
+  Map<String, dynamic>? lastHeartbeatBody;
 
   @override
   Future<WebhookResponse> post({
@@ -44,6 +47,22 @@ class _FakeWebhookClient implements WebhookClient {
       'amountTaka': amountTaka,
     };
     return next;
+  }
+
+  @override
+  Future<WebhookResponse> postHeartbeat({
+    required String deviceId,
+    String? appVersion,
+    int? queueDepth,
+  }) async {
+    heartbeatCallCount += 1;
+    lastHeartbeatBody = {
+      'kind': 'heartbeat',
+      'deviceId': deviceId,
+      'appVersion': appVersion,
+      'queueDepth': queueDepth,
+    };
+    return nextHeartbeat;
   }
 
   @override
