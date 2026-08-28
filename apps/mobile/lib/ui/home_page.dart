@@ -126,6 +126,8 @@ class _HomePageState extends State<HomePage> {
             SettingsTab(
               settings: widget.settings,
               webhookClient: widget.webhookClient,
+              dao: widget.dao,
+              dispatcher: widget.dispatcher,
             ),
           ],
         ),

@@ -403,6 +403,11 @@ Alternatively, the watcher's debug build will accept `http://10.0.2.2:3000`
 (Android emulator's host-loopback) — but you have to be testing on the
 emulator AND on a debug APK. Easier to use a tunnel.
 
+To exercise the web app's purchase states by hand without real money or a
+real SMS, use the watcher's **Settings > Test tools** panel (default off). It
+posts synthetic payments through the watcher's normal pipeline — see
+`spec/09-qa-checklist.md` for the state-by-state recipe and the cleanup SQL.
+
 For automated end-to-end tests on the web app side, **do not** try to
 drive the watcher. Instead, have your test suite POST directly to
 `/api/confirm-purchase` with a hand-computed HMAC, mimicking what the

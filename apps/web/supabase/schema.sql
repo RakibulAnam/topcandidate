@@ -1781,24 +1781,30 @@ revoke execute on function record_watcher_heartbeat(text, text, integer)
 -- Customer-facing diagnosis. User-callable; ownership via auth.uid().
 -- Naturally rate-limited: needs an owned purchase row, and initiate_purchase
 -- caps a user at 5 pending rows per 24h.
+--
+-- PRIVACY (migration 029, tightening 028): returns NOTHING about the unclaimed
+-- payment it matched against — no reference, no amount, no masked sender, not
+-- even a boolean. Ownership cannot be established at diagnosis time (the
+-- customer's sender_msisdn is unverified and TrxID similarity is not
+-- ownership), so any detail would describe a stranger's payment. The near-miss
+-- search survives only to choose between the 'likely_typo' and 'nothing_found'
+-- verdicts.
 create or replace function diagnose_pending_purchase(p_transaction_id text)
 returns table (
-  verdict            text,
-  purchase_status    text,
-  amount_taka        integer,
-  observed_amount    integer,
-  age_seconds        integer,
-  near_amount_taka   integer,
-  near_msisdn_masked text,
-  near_similar       boolean,
-  near_msisdn_match  boolean,
-  watcher_last_seen  timestamp with time zone,
-  watcher_live       boolean,
-  attempts_24h       integer
+  verdict           text,
+  purchase_status   text,
+  amount_taka       integer,
+  observed_amount   integer,
+  age_seconds       integer,
+  watcher_last_seen timestamp with time zone,
+  watcher_live      boolean,
+  attempts_24h      integer
 )
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
-  c_grace_seconds  constant integer := 90;
+  -- Must stay below PurchaseModal's VERIFY_WINDOW_MS (20s), or the modal always
+  -- asks inside the grace window and the firm verdicts become unreachable.
+  c_grace_seconds  constant integer := 15;
   c_stale_interval constant interval := interval '5 minutes';
   c_sim_floor      constant real := 0.45;
 
@@ -1807,10 +1813,7 @@ declare
   v_attempts   integer;
   v_last_seen  timestamp with time zone;
   v_live       boolean;
-  v_near_amt   integer;
-  v_near_msisdn text;
-  v_near_sim   boolean := false;
-  v_near_match boolean := false;
+  v_near_found boolean := false;
   v_verdict    text;
 begin
   if length(coalesce(p_transaction_id, '')) < 6 then
@@ -1841,49 +1844,31 @@ begin
     return query select
       v_purchase.status, v_purchase.status, v_purchase.amount_taka,
       v_purchase.observed_amount_taka, v_age,
-      null::integer, null::text, false, false,
       v_last_seen, v_live, v_attempts;
     return;
   end if;
 
-  -- Columns aliased away from the RETURNS TABLE output names: a bare
-  -- `amount_taka` here collides with the OUT parameter and Postgres raises
-  -- "column reference is ambiguous" at runtime.
-  with candidates as (
-    select ip.payment_reference as cand_ref,
-           ip.sender_msisdn     as cand_msisdn,
-           ip.amount_taka       as cand_amount
-    from public.inbound_payments ip
-    where ip.consumed_at is null
-      and ip.received_at > now() - interval '24 hours'
-    union all
-    select us.payment_reference as cand_ref,
-           us.sender_msisdn     as cand_msisdn,
-           us.amount_taka       as cand_amount
-    from public.unmatched_inbound_sms us
-    where us.matched_to_purchase_id is null
-      and us.reviewed_at is null
-      and us.created_at > now() - interval '24 hours'
-  ),
-  scored as (
-    select
-      c.cand_amount,
-      c.cand_msisdn,
-      (v_purchase.sender_msisdn is not null
-        and c.cand_msisdn is not null
-        and c.cand_msisdn = v_purchase.sender_msisdn) as cand_msisdn_match,
-      similarity(c.cand_ref, p_transaction_id) as cand_sim
-    from candidates c
-  )
-  select s.cand_amount, s.cand_msisdn,
-         s.cand_sim >= c_sim_floor, s.cand_msisdn_match
-    into v_near_amt, v_near_msisdn, v_near_sim, v_near_match
-  from scored s
-  where s.cand_msisdn_match or s.cand_sim >= c_sim_floor
-  order by s.cand_msisdn_match desc, s.cand_sim desc
-  limit 1;
+  select exists (
+    with candidates as (
+      select ip.payment_reference as cand_ref, ip.sender_msisdn as cand_msisdn
+      from public.inbound_payments ip
+      where ip.consumed_at is null
+        and ip.received_at > now() - interval '24 hours'
+      union all
+      select us.payment_reference as cand_ref, us.sender_msisdn as cand_msisdn
+      from public.unmatched_inbound_sms us
+      where us.matched_to_purchase_id is null
+        and us.reviewed_at is null
+        and us.created_at > now() - interval '24 hours'
+    )
+    select 1 from candidates c
+    where (v_purchase.sender_msisdn is not null
+           and c.cand_msisdn is not null
+           and c.cand_msisdn = v_purchase.sender_msisdn)
+       or similarity(c.cand_ref, p_transaction_id) >= c_sim_floor
+  ) into v_near_found;
 
-  if v_near_amt is not null then
+  if v_near_found then
     v_verdict := 'likely_typo';
   elsif v_age < c_grace_seconds then
     v_verdict := 'awaiting_sms';
@@ -1898,21 +1883,8 @@ begin
   return query select
     v_verdict, v_purchase.status, v_purchase.amount_taka,
     v_purchase.observed_amount_taka, v_age,
-    v_near_amt,
-    case when v_near_msisdn is null or length(v_near_msisdn) < 7 then null
-         else left(v_near_msisdn, 5) || '•••' || right(v_near_msisdn, 2) end,
-    coalesce(v_near_sim, false), coalesce(v_near_match, false),
     v_last_seen, v_live, v_attempts;
 end; $$;
--- Ownership comes from auth.uid(), never a parameter, so this is safe to expose
--- to a signed-in user. Drop the DEFAULT PUBLIC execute grant that CREATE
--- FUNCTION leaves behind and grant the two roles explicitly: without this,
--- `anon` inherits EXECUTE via PUBLIC and the function is reachable over
--- /rest/v1/rpc without a JWT. It fails closed there (auth.uid() is null, so no
--- row matches) but it is still needless unauthenticated surface, and every
--- other user-callable definer function here is locked down the same way
--- (see migration 025). Supabase's linter flags the PUBLIC grant as
--- `anon_security_definer_function_executable`.
 revoke execute on function diagnose_pending_purchase(text) from public;
 grant  execute on function diagnose_pending_purchase(text) to authenticated, service_role;
 

@@ -130,7 +130,8 @@ export function subscribeToPurchase(
  * The distinction that matters: 'likely_typo' means we hold an unclaimed
  * verified payment that resembles what the customer typed (so telling them to
  * check their TrxID is fair), while 'awaiting_sms' / 'watcher_stale' mean the
- * delay is ours and blaming them would be wrong.
+ * delay is ours and blaming them would be wrong. The verdict is all we learn —
+ * the payment itself is never described back to us (migration 029).
  */
 export type PurchaseVerdict =
   | PurchaseStatus
@@ -147,16 +148,9 @@ export interface PurchaseVerification {
   ageSeconds: number;
   /** Submissions by this user in the last 24h (pending + voided + expired). */
   attempts: number;
-  /** An unclaimed verified payment we can see. Never carries its TrxID — see
-   *  the privacy/fraud note in migration 028. */
-  near: {
-    amountTaka: number;
-    msisdnMasked: string | null;
-    /** The typed TrxID resembles this payment's reference. */
-    similar: boolean;
-    /** This payment came from the msisdn the customer gave us. */
-    msisdnMatch: boolean;
-  } | null;
+  // Deliberately no field describing the unclaimed payment we matched against.
+  // Nothing at diagnosis time proves it belongs to the caller, so exposing its
+  // amount or sender — even masked — leaks a stranger's data. See migration 029.
   watcher: {
     lastSeenAt: string | null;
     /** null = heartbeats not wired up yet, so liveness is unknown. */

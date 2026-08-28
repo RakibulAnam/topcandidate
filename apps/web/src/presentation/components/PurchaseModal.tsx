@@ -387,7 +387,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
         });
         setCreditsGranted(result.creditsGranted ?? null);
         setPhase('confirmed');
-        toast.success(t('purchaseModal.successToast'));
+        // The credits are already in the account at this point, so say that.
+        // `successToast` ("will land within a few minutes") is the wrong tense
+        // here — it belonged to the old flow where submitting only queued.
+        toast.success(t('purchaseModal.confirmedToast', { credits: result.creditsGranted ?? 5 }));
         // Hold the green check briefly, then refresh credits + close — see the
         // 'confirmed' effect. Kept in one place so both success paths (this one
         // and the mid-window Realtime arrival) behave identically.
@@ -554,18 +557,13 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   } = (() => {
     switch (verdict) {
       case 'likely_typo':
+        // Says nothing about the payment we matched against. We cannot prove it
+        // belongs to this customer, so describing it — even the amount, even a
+        // masked number — would leak a stranger's data. See migration 029.
         return {
           tone: 'warn',
           title: t('purchaseModal.problemTypoTitle'),
-          body:
-            verification?.near?.msisdnMatch && verification.near.msisdnMasked
-              ? t('purchaseModal.problemTypoBodyYours', {
-                  amount: verification.near.amountTaka,
-                  msisdn: verification.near.msisdnMasked,
-                })
-              : t('purchaseModal.problemTypoBody', {
-                  amount: verification?.near?.amountTaka ?? expectedTaka,
-                }),
+          body: t('purchaseModal.problemTypoBody'),
           primary: 'retry',
         };
       case 'nothing_found':
@@ -732,8 +730,12 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
         </div>
       </div>
 
-      {escalated && helpCard}
-
+      {/* Action first, help card second. When escalated the help card is long,
+          and burying the primary button beneath it meant scrolling past four
+          contact rows to reach the thing most people want: another go. */}
+      {/* Rendered only when it has something in it — for the underpaid case the
+          remedy is the help card, and an empty container just left a gap. */}
+      {(problem.primary === 'retry' || problem.primary === 'wait' || !escalated) && (
       <div className="mt-4 w-full max-w-sm space-y-2">
         {problem.primary === 'retry' && (
           <button
@@ -757,16 +759,6 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             <ArrowRight size={16} />
           </button>
         )}
-        {problem.primary === 'help' && (
-          <button
-            type="button"
-            onClick={finishAndClose}
-            className="inline-flex min-h-[50px] w-full items-center justify-center gap-2 rounded-2xl border-2 px-5 py-3.5 text-[15px] font-bold text-[#1A1812] transition-colors"
-            style={{ borderColor: '#EAE6DA' }}
-          >
-            {t('common.close')}
-          </button>
-        )}
 
         {!escalated && (
           <button
@@ -778,9 +770,25 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             {t('purchaseModal.needHelpCta')}
           </button>
         )}
-        {/* Escalated: the help card above already carries the human channels, so
-            the only thing worth adding is a way back to the field — and only
-            when the primary button isn't already that. */}
+      </div>
+      )}
+
+      {escalated && <div className={`w-full max-w-sm${problem.primary === 'help' ? ' mt-4' : ''}`}>{helpCard}</div>}
+
+      <div className="mt-3 w-full max-w-sm space-y-1">
+        {/* 'help' is the underpaid case: no big button of its own, because the
+            remedy IS the contact card above. Closing stays available here and
+            on the ✕, which is now always visible. */}
+        {problem.primary === 'help' && (
+          <button
+            type="button"
+            onClick={finishAndClose}
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border-2 px-4 py-2.5 text-[13px] font-bold text-[#1A1812] transition-colors"
+            style={{ borderColor: '#EAE6DA' }}
+          >
+            {t('common.close')}
+          </button>
+        )}
         {escalated && problem.primary === 'wait' && (
           <button
             type="button"
@@ -828,14 +836,6 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       {/* Sheet — bottom sheet on mobile (slides up), split card on desktop (zooms in). */}
       <div className="relative flex max-h-full w-full flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-8 motion-safe:duration-300 md:max-h-[92vh] md:max-w-4xl md:flex-row md:rounded-[28px] md:slide-in-from-bottom-0 md:zoom-in-95 md:duration-200">
 
-        {/* Mobile-only full-sheet takeover: confirmed / verifying / problem.
-            overflow-y-auto + m-auto centres short panels and scrolls tall ones
-            (the escalation card makes the problem panel the tall case). */}
-        {showTakeover && (
-          <div className="absolute inset-0 z-20 flex overflow-y-auto bg-white md:hidden motion-safe:animate-in motion-safe:fade-in">
-            <div className="m-auto w-full py-6">{takeoverContent}</div>
-          </div>
-        )}
 
         {/* ─── LEFT (desktop) / TOP RIBBON (mobile): receipt / value ─── */}
         <aside className="shrink-0 bg-[#FAF7F0] border-b border-[#E5E1D8] md:w-[42%] md:border-b-0 md:border-r">
@@ -961,18 +961,13 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
 
         {/* ─── RIGHT (desktop) / MAIN (mobile): action panel ─── */}
         <div className="relative flex min-h-0 flex-1 flex-col bg-white md:w-[58%] md:flex-none">
-          {/* Desktop takeover — covers the right panel only, so the receipt
-              stays visible while we verify. */}
-          {showTakeover && (
-            <div className="absolute inset-0 z-10 hidden overflow-y-auto bg-white md:flex animate-in fade-in duration-200">
-              <div className="m-auto w-full py-6">{takeoverContent}</div>
-            </div>
-          )}
-
-          {/* Header — desktop only (mobile close X lives in the ribbon) */}
+          {/* Header — desktop only (mobile close X lives in the ribbon). Kept
+              mounted during a takeover so the ✕ never disappears; the title is
+              dropped there because "Send your bKash payment" would contradict
+              the panel underneath it. */}
           <header className="hidden shrink-0 items-start justify-between px-9 pt-6 pb-3 md:flex">
             <h2 className="font-display text-lg font-semibold text-[#1A1812] tracking-tight">
-              {t('purchaseModal.panelTitle')}
+              {showTakeover ? '' : t('purchaseModal.panelTitle')}
             </h2>
             <button
               type="button"
@@ -985,6 +980,16 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             </button>
           </header>
 
+          {/* Takeover replaces the form IN FLOW rather than covering it, so the
+              sheet hugs whichever content is showing. As an absolute overlay it
+              inherited the (much taller) form's height and left the panel
+              stranded in the middle of a field of white on a phone. */}
+          {showTakeover ? (
+            <div className="min-h-0 flex-1 overflow-y-auto py-7 motion-safe:animate-in motion-safe:fade-in">
+              {takeoverContent}
+            </div>
+          ) : (
+          <>
           {/* Scrollable middle */}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-2 md:px-9 md:pt-0">
             {/* Step 1 — Send money */}
@@ -1192,6 +1197,8 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
               </button>
             </div>
           </footer>
+          </>
+          )}
         </div>
       </div>
     </div>

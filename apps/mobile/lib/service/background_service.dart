@@ -144,6 +144,7 @@ Future<void> _onStart(ServiceInstance service) async {
     webhookClient: webhook,
     deviceIdProvider: settings.deviceId,
     queueDepthProvider: dao.pendingCount,
+    pausedProvider: settings.heartbeatPaused,
   );
   final smsListener = SmsListener(
     telephony: Telephony.instance,
@@ -217,6 +218,7 @@ void workmanagerCallback() {
         webhookClient: webhook,
         deviceIdProvider: settings.deviceId,
         queueDepthProvider: dao.pendingCount,
+        pausedProvider: settings.heartbeatPaused,
       ).maybeSend(force: true);
     } catch (e, st) {
       developer.log(

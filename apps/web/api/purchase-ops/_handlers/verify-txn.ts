@@ -11,8 +11,7 @@
 //
 // Response: {
 //   verdict, status, amountTaka, observedAmountTaka, ageSeconds, attempts,
-//   near: { amountTaka, msisdnMasked, similar, msisdnMatch } | null,
-//   watcher: { lastSeenAt, live } , message
+//   watcher: { lastSeenAt, live }, message
 // }
 //
 // verdict values:
@@ -24,9 +23,12 @@
 //   'watcher_stale' — the operator's phone hasn't checked in; our problem
 //   'nothing_found' — watcher live, grace period passed, nothing matches
 //
-// NOTE: the RPC deliberately never returns the payment_reference of an
-// unclaimed payment — see the privacy/fraud note in migration 028. Don't add
-// it here either.
+// NOTE: the RPC deliberately returns NOTHING about an unclaimed payment it
+// matched against — not the reference, not the amount, not a masked sender,
+// not even a boolean. Ownership cannot be established at diagnosis time (the
+// customer's sender_msisdn is unverified, and TrxID similarity is not
+// ownership), so describing that payment leaks a stranger's data. See
+// migration 029. Don't add any of it back here.
 //
 // 401 missing/invalid auth; 400 missing txnId; 404 no such purchase for this
 // caller (same response whether it's absent or someone else's).
@@ -40,10 +42,6 @@ interface DiagnoseRow {
   amount_taka: number;
   observed_amount: number | null;
   age_seconds: number;
-  near_amount_taka: number | null;
-  near_msisdn_masked: string | null;
-  near_similar: boolean;
-  near_msisdn_match: boolean;
   watcher_last_seen: string | null;
   watcher_live: boolean | null;
   attempts_24h: number;
@@ -91,16 +89,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const near =
-    row.near_amount_taka != null
-      ? {
-          amountTaka: row.near_amount_taka,
-          msisdnMasked: row.near_msisdn_masked,
-          similar: row.near_similar,
-          msisdnMatch: row.near_msisdn_match,
-        }
-      : null;
-
   res.status(200).json({
     verdict: row.verdict,
     status: row.purchase_status,
@@ -108,7 +96,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     observedAmountTaka: row.observed_amount,
     ageSeconds: row.age_seconds,
     attempts: row.attempts_24h,
-    near,
     watcher: { lastSeenAt: row.watcher_last_seen, live: row.watcher_live },
     // Copy is localised client-side (en/bn); this is a non-localised fallback
     // for logs and any non-UI consumer.
@@ -119,9 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 function fallbackMessage(row: DiagnoseRow): string {
   switch (row.verdict) {
     case 'likely_typo':
-      return row.near_msisdn_match
-        ? `We received ৳${row.near_amount_taka} from the number you gave us, but the TrxID doesn't match. Check the ID against your bKash SMS.`
-        : `We received a ৳${row.near_amount_taka} payment that doesn't match the TrxID you entered. Check the ID against your bKash SMS.`;
+      return "We haven't received a payment with that Transaction ID. Check it against your bKash SMS.";
     case 'awaiting_sms':
       return 'Recorded. Verifying the transaction — usually under a minute.';
     case 'watcher_stale':

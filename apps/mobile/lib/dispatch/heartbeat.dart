@@ -31,6 +31,7 @@ class Heartbeat {
     required this.deviceIdProvider,
     this.appVersion,
     this.queueDepthProvider,
+    this.pausedProvider,
     Duration interval = const Duration(minutes: 1),
     DateTime Function()? clock,
   })  : _interval = interval,
@@ -47,6 +48,12 @@ class Heartbeat {
   final String? appVersion;
 
   final Future<int> Function()? queueDepthProvider;
+
+  /// Test seam (Settings > Test tools). When this returns true we stop
+  /// pinging, so the operator can watch the web app fall back to its
+  /// "verification is running behind" copy after the server's 5-minute
+  /// staleness threshold. Nothing else in the app reads it.
+  final Future<bool> Function()? pausedProvider;
   final Duration _interval;
   final DateTime Function() _clock;
 
@@ -67,6 +74,10 @@ class Heartbeat {
 
     _inFlight = true;
     try {
+      if (await pausedProvider?.call() ?? false) {
+        developer.log('heartbeat paused by test tools', name: 'heartbeat');
+        return;
+      }
       final deviceId = await deviceIdProvider();
       final depth = await queueDepthProvider?.call();
       final res = await webhookClient.postHeartbeat(

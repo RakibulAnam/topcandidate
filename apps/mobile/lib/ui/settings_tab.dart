@@ -3,18 +3,25 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../dispatch/dispatcher.dart';
 import '../dispatch/webhook_client.dart';
 import '../settings/settings_repository.dart';
+import '../storage/processed_sms_dao.dart';
+import 'test_tools_panel.dart';
 
 class SettingsTab extends StatefulWidget {
   const SettingsTab({
     super.key,
     required this.settings,
     required this.webhookClient,
+    required this.dao,
+    required this.dispatcher,
   });
 
   final SettingsRepository settings;
   final WebhookClient webhookClient;
+  final ProcessedSmsDao dao;
+  final Dispatcher dispatcher;
 
   @override
   State<SettingsTab> createState() => _SettingsTabState();
@@ -31,6 +38,7 @@ class _SettingsTabState extends State<SettingsTab> {
   String? _urlError;
   _TestResult? _testResult;
   bool _testing = false;
+  bool _testTools = false;
 
   @override
   void initState() {
@@ -46,8 +54,10 @@ class _SettingsTabState extends State<SettingsTab> {
     final battery = await DisableBatteryOptimization
             .isBatteryOptimizationDisabled ??
         false;
+    final testTools = await widget.settings.testToolsEnabled();
     if (!mounted) return;
     setState(() {
+      _testTools = testTools;
       _urlCtrl.text = url;
       _secretSaved = hasSecret;
       _smsGranted = sms;
@@ -225,6 +235,30 @@ class _SettingsTabState extends State<SettingsTab> {
           'enabled for this app. Disable it to keep the watcher alive 24/7.',
           style: TextStyle(color: Colors.grey, fontSize: 12),
         ),
+        const Divider(height: 32),
+        Text('Test tools', style: Theme.of(context).textTheme.titleMedium),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _testTools,
+          onChanged: (v) async {
+            await widget.settings.setTestTools(v);
+            if (!mounted) return;
+            setState(() => _testTools = v);
+          },
+          title: const Text('Enable test tools'),
+          subtitle: const Text(
+            'Simulate bKash payments to exercise the web app. Posts to the live '
+            'server — leave this off during normal operation.',
+          ),
+        ),
+        if (_testTools) ...[
+          const SizedBox(height: 8),
+          TestToolsPanel(
+            dao: widget.dao,
+            dispatcher: widget.dispatcher,
+            settings: widget.settings,
+          ),
+        ],
       ],
     );
   }

@@ -112,11 +112,21 @@ returns table (
 )
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
-  -- Below this age a live watcher proves nothing: bKash delivers the SMS to
-  -- payer and payee independently, and Android delivery + dispatch adds
-  -- seconds on top. Concluding "not found" inside the grace window would
-  -- accuse customers who did everything right.
-  c_grace_seconds  constant integer := 90;
+  -- Grace period before we will give a firm "nothing arrived" answer. bKash
+  -- delivers to payer and payee independently and Android dispatch adds a
+  -- little on top, so a very fresh purchase proves nothing either way.
+  --
+  -- INVARIANT: this MUST stay below PurchaseModal's VERIFY_WINDOW_MS (20s).
+  -- The modal asks for a verdict the moment its window closes; if the grace
+  -- period outlasts that, every answer is 'awaiting_sms' and the
+  -- 'nothing_found' / 'watcher_stale' verdicts — and with them the entire
+  -- heartbeat mechanism — become unreachable. It was 90s and did exactly that.
+  --
+  -- Being early here costs little: the 'nothing_found' copy is "we haven't
+  -- received this payment yet, if you've already sent it give it another
+  -- minute", which stays true for a merely-slow payment. The gentleness lives
+  -- in the wording, not in the threshold.
+  c_grace_seconds  constant integer := 15;
   -- A watcher that pings every 60s (see the mobile dispatcher) is stale at 5m.
   c_stale_interval constant interval := interval '5 minutes';
   -- pg_trgm similarity floor for "this looks like a typo of that". 0.45 keeps

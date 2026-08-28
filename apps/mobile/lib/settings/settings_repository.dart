@@ -20,6 +20,8 @@ class SettingsRepository {
   static const _kBiometricLock = 'bkash_biometric_lock';
   static const _kBatteryPrompted = 'bkash_battery_prompted';
   static const _kDeviceId = 'bkash_device_id';
+  static const _kTestTools = 'bkash_test_tools';
+  static const _kHeartbeatPaused = 'bkash_heartbeat_paused';
 
   Future<String?> webhookUrl() => _storage.read(key: _kUrl);
   Future<void> setWebhookUrl(String value) =>
@@ -30,6 +32,25 @@ class SettingsRepository {
       _storage.write(key: _kSecret, value: value);
 
   Future<bool> hasSecret() async => (await hmacSecret())?.isNotEmpty ?? false;
+
+  /// Reveals the Settings > Test tools panel, which can post SYNTHETIC bKash
+  /// payments to the live server. Off by default and persisted, so the panel
+  /// can never be tapped by accident during normal operation.
+  Future<bool> testToolsEnabled() async =>
+      (await _storage.read(key: _kTestTools)) == 'true';
+
+  Future<void> setTestTools(bool enabled) =>
+      _storage.write(key: _kTestTools, value: enabled ? 'true' : 'false');
+
+  /// Stops the liveness heartbeat. The only way to reproduce the web app's
+  /// 'watcher_stale' state on demand: pause, wait out the server's 5-minute
+  /// staleness threshold, and the purchase modal switches to "verification is
+  /// running behind". Remember to switch it back off.
+  Future<bool> heartbeatPaused() async =>
+      (await _storage.read(key: _kHeartbeatPaused)) == 'true';
+
+  Future<void> setHeartbeatPaused(bool paused) =>
+      _storage.write(key: _kHeartbeatPaused, value: paused ? 'true' : 'false');
 
   /// Stable per-install id for the liveness heartbeat (web migration 028).
   /// Generated on first use and persisted; the server keys
