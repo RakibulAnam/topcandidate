@@ -828,6 +828,10 @@ export const en = {
     deleteError: 'Failed to delete account. Please try again.',
   },
   profileSetup: {
+    optionalNoticeTitle: 'Optional — skip if it isn’t you',
+    optionalNoticeBody: 'Adding this makes your profile richer, so every application can draw on it. But if you have nothing here, or it has nothing to do with your career, skip it — an empty section never weakens your resume.',
+    recommendedNoticeTitle: 'Worth filling in',
+    recommendedNoticeBody: 'This is what most of your resume gets built from. You can still move on without it, but the more you add here, the better every tailored application will be.',
     title: 'Complete your profile',
     railEyebrow: 'Your profile',
     railTitle: 'Set once, reuse everywhere',

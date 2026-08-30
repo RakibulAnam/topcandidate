@@ -51,6 +51,7 @@ import {
   Building2,
   Languages as LanguagesIcon,
   UserCheck,
+  SkipForward,
 } from 'lucide-react';
 import { MonthPicker } from './ui/month-picker';
 import { EmailInput } from './ui/EmailInput';
@@ -667,7 +668,11 @@ const PanelHeader = ({
         </p>
       </div>
       {optional && (
-        <span className="text-[10px] uppercase tracking-[0.18em] text-charcoal-400 font-semibold">
+        // A tinted chip, not 10px grey uppercase in the corner. People scan for
+        // shape and colour before they read, and the old treatment was the
+        // quietest thing on a page it needed to be one of the loudest on.
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent-200 bg-accent-50 px-2.5 py-1 text-[11px] font-bold text-accent-700">
+          <SkipForward size={11} />
           {t('formSteps.allOptional')}
         </span>
       )}

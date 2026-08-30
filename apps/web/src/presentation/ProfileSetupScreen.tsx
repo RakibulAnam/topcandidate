@@ -50,6 +50,8 @@ import {
     AlertTriangle,
     ArrowRight,
     FileText,
+    SkipForward,
+    Star,
 } from 'lucide-react';
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
 import { ExtractedProfileData } from '../domain/usecases/ExtractResumeUseCase';
@@ -82,6 +84,20 @@ enum SetupStep {
 }
 
 type StepCopyT = ReturnType<typeof useT>;
+/** How much a step matters. Drives the colour, the icon and the shape of the
+ *  forward button, so the answer to "can I skip this?" is answerable at a
+ *  glance — people follow visual cues long before they read helper text. */
+type StepWeight = 'required' | 'recommended' | 'optional';
+
+const stepWeightOf = (step: SetupStep): StepWeight => {
+    if (step === SetupStep.PERSONAL_INFO) return 'required';
+    // Not strictly required — the wizard lets you past both — but a resume with
+    // neither is a resume with nothing to tailor, and skipping BOTH already
+    // raises a confirmation. Calling these "optional" would be misleading.
+    if (step === SetupStep.EDUCATION || step === SetupStep.EXPERIENCE) return 'recommended';
+    return 'optional';
+};
+
 const stepCopyOf = (t: StepCopyT, step: SetupStep): { label: string; phase: string } => {
     switch (step) {
         case SetupStep.IMPORT_RESUME: return { label: t('profileSetup.stepImport'), phase: t('profileSetup.phaseQuickStart') };
@@ -859,6 +875,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     // (Import + contact details aren't item sections, so they always advance.)
     const isItemSection = currentStep !== SetupStep.IMPORT_RESUME && currentStep !== SetupStep.PERSONAL_INFO;
     const showSkip = !isLastStep && isItemSection && !stepHasContent(currentStep);
+    const currentWeight = stepWeightOf(currentStep);
 
     return (
         <div className="min-h-screen bg-charcoal-50 flex flex-col">
@@ -1036,6 +1053,38 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                                 className="lg:hidden mb-6"
                             />
                         )}
+                        {/* Says, in colour and shape before words, whether this
+                            section can be skipped. The old signal was a 10px
+                            grey "All optional" in a corner. */}
+                        {!isFirstStep && currentWeight !== 'required' && (
+                            <div
+                                className={`mb-4 flex items-start gap-3 rounded-2xl border px-4 py-3.5 sm:px-5 ${
+                                    currentWeight === 'optional'
+                                        ? 'border-accent-200 bg-accent-50'
+                                        : 'border-charcoal-200 bg-white'
+                                }`}
+                            >
+                                <span
+                                    className={`mt-px flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                                        currentWeight === 'optional' ? 'bg-accent-100 text-accent-700' : 'bg-charcoal-100 text-brand-600'
+                                    }`}
+                                >
+                                    {currentWeight === 'optional' ? <SkipForward size={15} /> : <Star size={15} />}
+                                </span>
+                                <div className="min-w-0">
+                                    <p className={`text-[13.5px] font-bold ${currentWeight === 'optional' ? 'text-accent-700' : 'text-brand-700'}`}>
+                                        {currentWeight === 'optional'
+                                            ? t('profileSetup.optionalNoticeTitle')
+                                            : t('profileSetup.recommendedNoticeTitle')}
+                                    </p>
+                                    <p className="mt-0.5 text-[13px] leading-relaxed text-charcoal-500">
+                                        {currentWeight === 'optional'
+                                            ? t('profileSetup.optionalNoticeBody')
+                                            : t('profileSetup.recommendedNoticeBody')}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                         <div className="bg-white border border-charcoal-200 rounded-2xl shadow-sm p-6 sm:p-8 lg:p-10">
                             {renderCurrentStep()}
                         </div>
@@ -1062,7 +1111,13 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             type="button"
                             onClick={() => handleNext()}
                             disabled={saving}
-                            className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-700 text-charcoal-50 rounded-full font-semibold text-sm hover:bg-brand-800 disabled:bg-charcoal-400 disabled:cursor-not-allowed transition-colors"
+                            className={`inline-flex items-center gap-2 px-6 py-2.5 min-h-11 rounded-full font-semibold text-sm transition-colors disabled:cursor-not-allowed ${
+                                showSkip
+                                    // Nothing is required here, so the button
+                                    // stops looking like the thing you must do.
+                                    ? 'border border-charcoal-300 text-brand-600 hover:bg-charcoal-100 disabled:opacity-40'
+                                    : 'bg-brand-700 text-charcoal-50 hover:bg-brand-800 disabled:bg-charcoal-400'
+                            }`}
                         >
                             {saving ? (
                                 <>

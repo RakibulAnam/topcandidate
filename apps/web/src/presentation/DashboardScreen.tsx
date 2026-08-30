@@ -50,7 +50,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const t = useT();
   const { locale } = useLocale();
   const rel = useRelativeTime();
-  const { credits, generalResume, setGeneralResume, openPurchase } = useDashboardShell();
+  const { credits, generalResume, setGeneralResume, openPurchase, loadingShell } = useDashboardShell();
 
   const [company, setCompany] = useState('');
   const [title, setTitle] = useState('');
@@ -163,6 +163,76 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
   const masterUpdatedAt = generalResume?.updatedAt ?? generalResume?.date;
 
+  // The master resume is the free foundation every tailored application is
+  // built from, and it is the thing users lose right after profile setup —
+  // when it does not exist yet. So while it is missing it leads the page,
+  // ABOVE the new-application card; once built it drops back to its normal
+  // slot below. Order is the cue, not another line of copy.
+  // `loadingShell` is load-bearing, not defensive. generalResume is null until
+  // the shell's fetch returns, so keying only on it made EVERY dashboard load
+  // start in the "missing" layout — the banner rendered above the dark card and
+  // then jumped back down once the data arrived. The overwhelmingly common case
+  // (a returning user who has a master resume) must not move at all, so the
+  // default while loading is the settled position, and the promotion happens
+  // only once we actually know the resume is absent.
+  const masterMissing = !loadingShell && !generalResume;
+  const masterBanner = (
+      <section>
+        <div
+          className={`flex flex-wrap items-center gap-x-5 gap-y-4 rounded-[18px] border px-[clamp(18px,3vw,28px)] py-[22px] shadow-[0_8px_24px_-12px_rgba(199,126,16,0.25)] ${
+            masterMissing ? 'ring-2 ring-accent-300 ring-offset-2 ring-offset-[#F6F4EE]' : ''
+          }`}
+          style={{ background: 'linear-gradient(120deg, #FFFDF8, #FBF4E4)', borderColor: '#EBD9B4' }}
+        >
+          <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] border bg-white" style={{ borderColor: '#EFE3C8' }}>
+            <FileText size={20} className="text-accent-600" />
+            {masterMissing && (
+              // Same dot as the nav item, so the two read as one thing to do.
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-accent-500 ring-2 ring-white" aria-hidden />
+            )}
+          </span>
+          <span className="min-w-0 flex-[1_1_320px]">
+            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+              <span className="font-display text-[19px] font-semibold text-brand-700">{t('dashboard.bannerTitle')}</span>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700">{t('dashboard.masterCostNote')}</span>
+            </span>
+            <span className="mt-1 block text-[13px] leading-relaxed text-charcoal-500">
+              {masterUpdatedAt
+                ? t('dashboard.bannerBody', { when: rel(masterUpdatedAt) ?? '' })
+                : t('dashboard.bannerBodyNoDate')}
+            </span>
+          </span>
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); onEditProfile(); }}
+            className="whitespace-nowrap text-[13.5px] font-semibold text-charcoal-500 transition-colors hover:text-accent-600"
+          >
+            {t('dashboard.bannerUpdateProfile')}
+          </a>
+          {generalResume ? (
+            <button
+              type="button"
+              onClick={() => onOpenResume(generalResume.id)}
+              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 sm:w-auto"
+            >
+              {t('dashboard.masterOpenCta')}
+              <ArrowRight size={14} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleBuildMaster}
+              disabled={buildingMaster}
+              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 disabled:opacity-60 sm:w-auto"
+            >
+              {buildingMaster ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+              {buildingMaster ? t('dashboard.masterBuilding') : t('dashboard.masterBuildCta')}
+            </button>
+          )}
+        </div>
+      </section>
+  );
+
   return (
     <div className="flex flex-col gap-[clamp(28px,4vw,40px)]">
       {/* Incomplete-profile warning — no education/experience means nothing can
@@ -200,6 +270,8 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           {t('dashboard.heroSubRest')}
         </p>
       </section>
+
+      {masterMissing && masterBanner}
 
       {/* Start a new application (dark) */}
       <section>
@@ -275,55 +347,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
         </div>
       </section>
 
-      {/* Master Resume banner */}
-      <section>
-        <div
-          className="flex flex-wrap items-center gap-x-5 gap-y-4 rounded-[18px] border px-[clamp(18px,3vw,28px)] py-[22px] shadow-[0_8px_24px_-12px_rgba(199,126,16,0.25)]"
-          style={{ background: 'linear-gradient(120deg, #FFFDF8, #FBF4E4)', borderColor: '#EBD9B4' }}
-        >
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] border bg-white" style={{ borderColor: '#EFE3C8' }}>
-            <FileText size={20} className="text-accent-600" />
-          </span>
-          <span className="min-w-0 flex-[1_1_320px]">
-            <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-              <span className="font-display text-[19px] font-semibold text-brand-700">{t('dashboard.bannerTitle')}</span>
-              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700">{t('dashboard.masterCostNote')}</span>
-            </span>
-            <span className="mt-1 block text-[13px] leading-relaxed text-charcoal-500">
-              {masterUpdatedAt
-                ? t('dashboard.bannerBody', { when: rel(masterUpdatedAt) ?? '' })
-                : t('dashboard.bannerBodyNoDate')}
-            </span>
-          </span>
-          <a
-            href="#"
-            onClick={(e) => { e.preventDefault(); onEditProfile(); }}
-            className="whitespace-nowrap text-[13.5px] font-semibold text-charcoal-500 transition-colors hover:text-accent-600"
-          >
-            {t('dashboard.bannerUpdateProfile')}
-          </a>
-          {generalResume ? (
-            <button
-              type="button"
-              onClick={() => onOpenResume(generalResume.id)}
-              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 sm:w-auto"
-            >
-              {t('dashboard.masterOpenCta')}
-              <ArrowRight size={14} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleBuildMaster}
-              disabled={buildingMaster}
-              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-brand-700 px-[22px] py-3 text-sm font-semibold text-charcoal-50 transition-colors hover:bg-brand-800 disabled:opacity-60 sm:w-auto"
-            >
-              {buildingMaster ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-              {buildingMaster ? t('dashboard.masterBuilding') : t('dashboard.masterBuildCta')}
-            </button>
-          )}
-        </div>
-      </section>
+      {!masterMissing && masterBanner}
 
       {/* Recent toolkits */}
       <section>
