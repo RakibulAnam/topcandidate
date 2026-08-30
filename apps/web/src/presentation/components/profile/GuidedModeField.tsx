@@ -10,7 +10,7 @@
 // by showing, never a format to follow. One required question; the rest are
 // optional and collapsed behind a gentle "a few more" disclosure.
 
-import React, { useId, useState } from 'react';
+import React, { useId, useState, useRef, useLayoutEffect } from 'react';
 import { useLocale } from '../../i18n/LocaleContext';
 import { InputMode, GuidedAnswers } from '../../../domain/entities/Resume';
 import {
@@ -34,6 +34,26 @@ interface Props {
   onFreeTextChange: (text: string) => void;
 }
 
+// Grow the box to fit what has been typed. Textareas ship with a drag handle,
+// but people do not find it — so a field that starts too short just gets typed
+// into blindly, a few visible lines at a time, and the writer cannot see the
+// paragraph they are composing. This raises the floor as content arrives.
+//
+// It only ever GROWS. Snapping back down on delete would fight anyone who did
+// find the handle and dragged the box taller, and a field that changes size in
+// both directions while you edit is its own kind of annoying.
+const useAutoGrow = (value: string, max: number) => {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (el.scrollHeight > el.clientHeight) {
+      el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    }
+  }, [value, max]);
+  return ref;
+};
+
 export const GuidedModeField: React.FC<Props> = ({
   section,
   mode,
@@ -46,6 +66,7 @@ export const GuidedModeField: React.FC<Props> = ({
 }) => {
   const { locale } = useLocale();
   const [showMore, setShowMore] = useState(false);
+  const freeRef = useAutoGrow(freeText, 560);
 
   const questions = GUIDED_QUESTIONS[section];
   const primary = questions.filter(q => q.primary);
@@ -153,7 +174,12 @@ export const GuidedModeField: React.FC<Props> = ({
         </div>
       ) : (
         <textarea
-          className="w-full p-2 border border-charcoal-300 rounded-lg h-40 text-sm"
+          ref={freeRef}
+          // Height comes from the class, not `rows` — rows would pin the same
+          // line count on a phone as on a desktop, and 18rem of textarea above
+          // a soft keyboard is most of the screen.
+          className="w-full p-2.5 border border-charcoal-300 rounded-lg h-48 md:h-72 text-sm leading-relaxed"
+          rows={8}
           value={freeText}
           onChange={e => onFreeTextChange(e.target.value)}
           placeholder={freePlaceholder}
@@ -173,6 +199,7 @@ const GuidedQuestionRow: React.FC<{
   onChange: (v: string) => void;
 }> = ({ label, example, required, requiredText, optionalText, value, onChange }) => {
   const fieldId = useId();
+  const rowRef = useAutoGrow(value, 320);
   // Only flag a required field red AFTER the user has interacted (touched) —
   // a red box on a pristine form reads as scolding, not "a friend asking".
   const [touched, setTouched] = useState(false);
@@ -189,8 +216,9 @@ const GuidedQuestionRow: React.FC<{
       <p className="text-xs text-charcoal-400 mb-1.5 leading-relaxed">{example}</p>
       <textarea
         id={fieldId}
-        className={`w-full p-2 border rounded-lg text-sm ${showError ? 'border-red-400' : 'border-charcoal-300'}`}
-        rows={2}
+        ref={rowRef}
+        className={`w-full p-2.5 border rounded-lg text-sm leading-relaxed min-h-[5.5rem] ${showError ? 'border-red-400' : 'border-charcoal-300'}`}
+        rows={4}
         value={value}
         onChange={e => onChange(e.target.value)}
         onBlur={() => setTouched(true)}

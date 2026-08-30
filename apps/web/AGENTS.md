@@ -742,6 +742,14 @@ The letterforms are the real Source Serif 4 semibold glyphs **converted to SVG p
   phase rail on `lg+` (numbered phase groups: "About you" → "Your work" →
   "Your credentials"), collapsing to a progress bar on mobile. Active step
   marker is saffron, completed is ink, untouched is charcoal.
+- **Description boxes in `GuidedModeField` are deliberately tall and grow-only.**
+  Guided answer rows are `rows={4}`; the free-write box is sized by class
+  (`h-48 md:h-72`), NOT by `rows` — `rows` would pin the same line count on a
+  phone as on a desktop. `useAutoGrow` then raises the height as content
+  arrives, capped (320px rows / 560px free-write). It never shrinks back: a
+  textarea's resize handle exists but people do not find it, so the box has to
+  arrive big enough on its own, and snapping down on delete would undo a drag
+  from anyone who did find it. Do not "fix" the one-way behaviour.
 - **Form primitives** (defined in `components/FormSteps.tsx`, shared across
   profile setup and builder) — use these rather than reinventing:
   - `TipCard` — always-on "Quick guide" panel (saffron-tinted) above form
