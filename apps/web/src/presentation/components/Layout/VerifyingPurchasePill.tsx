@@ -38,6 +38,13 @@ const FALLBACK_POLL_MS = 20_000;
 const TERMINAL: PurchaseStatus[] = ['completed', 'underpaid', 'msisdn_mismatch_review', 'expired', 'refunded', 'failed'];
 
 interface Props {
+  /** Distinguishes concurrently-mounted instances. The navbar renders this pill
+   *  twice — a `hidden md:flex` desktop row and a `flex md:hidden` mobile row —
+   *  and although only one is ever VISIBLE, React mounts both and runs both
+   *  sets of effects. Without a distinct suffix they open two Supabase Realtime
+   *  channels on the identical `purchase:<txn>` topic, and two joins on one
+   *  socket can cost one of them its subscription. */
+  channelSuffix?: string;
   /** Called when the customer clicks "Resubmit" on an expired pill so the
    *  shell can open PurchaseModal again. */
   onResubmit?: () => void;
@@ -46,7 +53,7 @@ interface Props {
   onCredited?: () => void;
 }
 
-export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited }) => {
+export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited, channelSuffix }) => {
   const t = useT();
   const [pending, setPending] = useState<PendingPurchaseRecord | null>(() => readPendingPurchase());
   const [statusResp, setStatusResp] = useState<PurchaseStatusResponse | null>(null);
@@ -106,7 +113,11 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
     };
 
     void refresh();
-    const unsubscribe = subscribeToPurchase(pending.txnId, () => { void refresh(); });
+    const unsubscribe = subscribeToPurchase(
+      pending.txnId,
+      () => { void refresh(); },
+      channelSuffix ? { channelSuffix } : undefined,
+    );
     const fallback = setInterval(() => { void refresh(); }, FALLBACK_POLL_MS);
 
     return () => {
@@ -114,7 +125,7 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited 
       unsubscribe();
       clearInterval(fallback);
     };
-  }, [pending?.txnId]);
+  }, [pending?.txnId, channelSuffix]);
 
   if (!pending) return null;
 

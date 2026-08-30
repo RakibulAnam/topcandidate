@@ -116,16 +116,30 @@ class _TestToolsPanelState extends State<TestToolsPanel> {
 
   Future<void> _sendHeartbeatNow() async {
     setState(() => _status = 'Pinging…');
-    await Heartbeat(
+    final res = await Heartbeat(
       webhookClient: widget.dispatcher.webhookClient,
       deviceIdProvider: widget.settings.deviceId,
       queueDepthProvider: widget.dao.pendingCount,
       pausedProvider: widget.settings.heartbeatPaused,
     ).maybeSend(force: true);
     if (!mounted) return;
-    setState(() => _status = _heartbeatPaused
-        ? '• Heartbeat is paused — nothing sent.'
-        : '✓ Heartbeat sent. The web app now counts us as live.');
+    // Report what actually happened. Claiming success unconditionally was
+    // worse than useless here: a wrong secret, an unset URL or no connectivity
+    // all produced a green tick, and the operator then trusted the liveness
+    // recipes in spec/09 that depend on the ping having landed.
+    setState(() {
+      if (res == null) {
+        _status = '• Heartbeat is paused — nothing sent.';
+      } else if (res.statusCode == 200) {
+        _status = '✓ Heartbeat accepted. The web app now counts us as live.';
+      } else if (res.statusCode != null) {
+        _status = '✗ Heartbeat rejected (HTTP ${res.statusCode}). '
+            '401 = wrong secret; 400 = this build of the server has no heartbeat route.';
+      } else {
+        _status = '✗ Heartbeat not delivered (${res.errorTag ?? "unknown"}). '
+            'Check the webhook URL and connectivity.';
+      }
+    });
   }
 
   Future<void> _togglePause(bool paused) async {

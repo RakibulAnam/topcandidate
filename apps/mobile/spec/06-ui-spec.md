@@ -110,7 +110,13 @@ A simple form (no async validators):
      variant to copy, "Pay ৳200", "Pay ৳150 (underpaid)", "Pay from another
      number", "Send heartbeat now", and a "Pause heartbeat" switch
      (`bkash_heartbeat_paused`) — the only way to reproduce the web app's
-     `watcher_stale` state on demand.
+     `watcher_stale` state on demand. Turning the master Test-tools switch off
+     also clears the pause, so the watcher cannot be left mute by accident.
+   - The heartbeat is SUPPRESSED whenever `READ_SMS` is not granted. A ping
+     asserts "this device is doing its job", and a watcher that cannot read SMS
+     is not — Android auto-revokes permissions for unused apps, so without this
+     a deaf watcher would report healthy and the web app would blame customers
+     for a silence that is ours.
    - `composeSyntheticBkashSms()` is covered by `test/sms/sms_ingest_test.dart`,
      which asserts the real parser accepts what the panel emits.
 

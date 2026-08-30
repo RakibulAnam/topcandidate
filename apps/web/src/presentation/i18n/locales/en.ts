@@ -708,6 +708,11 @@ export const en = {
     loadingBody: 'Your resume appears first — usually in 15–25 seconds. The cover letter, outreach email, LinkedIn note, and interview prep keep generating in the background and fill their tabs in as they finish.',
     generating: 'Generating…',
     // Full-screen generate / error states (tailored flow, no wizard)
+    idleTitle: 'Nothing is building right now',
+    idleBody: 'This application hasn’t started generating. Pick up where you left off, or head back to the dashboard.',
+    idleBodyNoCredits: 'You need a generation credit to build this application. Your work is saved — buy a pack and it will pick up right here.',
+    idleGenerateCta: 'Build it now',
+    idleBuyCta: 'Buy generations',
     generatingTitle: 'Building your application…',
     generatingBody: "We're tailoring your resume to the role, then writing the cover letter, recruiter email, LinkedIn note and interview prep. This takes a few moments.",
     generationErrorTitle: "That didn't go through",

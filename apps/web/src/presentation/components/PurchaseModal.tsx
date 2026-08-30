@@ -244,7 +244,13 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   // fallback poll for a dropped socket, and a hard deadline that converts
   // "still pending" into a specific verdict instead of an endless spinner.
   useEffect(() => {
-    if (!isOpen || phase !== 'verifying' || !trackedTxn) return;
+    // Keeps watching through BOTH phases. It used to tear down the moment the
+    // 20s window closed, but 20s is only the watcher's FIRST retry — the
+    // product itself promises "a few minutes". A payment settling at t=25s
+    // credited the account while this full-sheet takeover (which covers the
+    // navbar pill) went on insisting the payment had never arrived, and the
+    // primary button offered to retry it.
+    if (!isOpen || (phase !== 'verifying' && phase !== 'problem') || !trackedTxn) return;
     let active = true;
     let done = false;
 
@@ -261,6 +267,11 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       }
       // 'underpaid' / 'msisdn_mismatch_review' / 'expired' / 'refunded' /
       // 'failed' — all real problems. Never a success toast.
+      //
+      // 'failed' is skipped while already showing a problem card: that is the
+      // state a user-initiated void leaves behind, and overwriting a diagnosed
+      // verdict with it would replace useful guidance with a dead end.
+      if (phase === 'problem' && status === 'failed') return;
       setSettled({ observed, expected });
       setVerdict(status);
       track('purchase_problem', { verdict: status });
@@ -293,7 +304,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     );
     const poll = setInterval(() => { void refresh(); }, VERIFY_POLL_MS);
 
-    const deadline = setTimeout(() => {
+    // The verdict deadline belongs to the verifying phase only; in 'problem'
+    // the verdict is already shown and we are purely waiting for a late settle.
+    const deadline = phase !== 'verifying' ? null : setTimeout(() => {
       void (async () => {
         if (!active || done) return;
         try {
@@ -329,7 +342,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       active = false;
       unsubscribe();
       clearInterval(poll);
-      clearTimeout(deadline);
+      if (deadline) clearTimeout(deadline);
     };
   }, [isOpen, phase, trackedTxn]);
 
@@ -360,6 +373,27 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
 
   const handleSubmit = async () => {
     if (busy || !txnIsValid) return;
+
+    // Re-submitting the SAME id after a retry: the pending row already exists
+    // and is already ours, so submitting again would only earn a duplicate
+    // error. Resume watching it instead.
+    if (trackedTxn && trimmedTxn === trackedTxn) {
+      setPhase('verifying');
+      return;
+    }
+
+    // A genuine correction. Retire the superseded row so it does not hold a
+    // pending slot — but only now that we know the ID really changed.
+    if (trackedTxn) {
+      try {
+        await voidTxn(trackedTxn);
+      } catch {
+        // Already settled or gone — nothing to retire.
+      }
+      clearPendingPurchase();
+      setTrackedTxn('');
+    }
+
     const attempt = attempts + 1;
     setPhase('submitting');
     setAttempts(attempt);
@@ -437,26 +471,25 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     }
   };
 
-  /** "Check and try again" after a suspected typo. */
+  /** "Check and try again" — back to the field to re-read the SMS.
+   *
+   *  Deliberately does NOT void here. Voiding on entry was destructive: the
+   *  voided row KEEPS the TrxID (purchases_payment_reference_key is unique), so
+   *  a customer who had actually typed the right ID all along — very reachable
+   *  on 'nothing_found', where the advice is literally "check your SMS" — came
+   *  back, re-typed the same correct ID, and got duplicate_transaction_id with
+   *  their row already dead. The void now happens at resubmit time, and only
+   *  when the ID actually changed (see handleSubmit). */
   const handleRetry = async () => {
-    if (trackedTxn) {
-      try {
-        // Retire the mistyped row so the corrected submit doesn't consume
-        // another of the customer's 5 pending slots per 24h.
-        await voidTxn(trackedTxn);
-      } catch {
-        // Already settled or already gone — nothing to undo.
-      }
-      // Stop the navbar pill tracking a TrxID we've abandoned.
-      clearPendingPurchase();
-    }
-    setTrackedTxn('');
     setVerdict(null);
     setVerification(null);
     setSettled(null);
     setHelpOpen(false);
     setNotifyState('idle');
     setPhase('idle');
+    // trackedTxn is intentionally kept: handleSubmit compares against it to
+    // decide whether this is a correction (void the old row) or the same ID
+    // being resubmitted (nothing to void, just resume watching it).
     // Land them back on the field with the old value selected, ready to retype.
     setTimeout(() => {
       txnInputRef.current?.focus();
@@ -573,7 +606,13 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           tone: 'warn',
           title: t('purchaseModal.problemNothingTitle'),
           body: t('purchaseModal.problemNothingBody'),
-          primary: 'retry',
+          // 'wait', not 'retry'. This verdict is a guess, not evidence — the
+          // body literally says "if you've already sent it, give it another
+          // minute", and 20s is only the watcher's first retry. Making the
+          // prominent button the one that abandons a possibly-good submission
+          // pointed the customer at the worst available action. Retry is still
+          // offered, demoted, for someone who knows they mistyped.
+          primary: 'wait',
         };
       case 'watcher_stale':
         return {
@@ -789,7 +828,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             {t('common.close')}
           </button>
         )}
-        {escalated && problem.primary === 'wait' && (
+        {/* Retry stays available (demoted) on every 'wait' verdict, not only the
+            escalated ones — someone who knows they mistyped should not have to
+            fail three times to reach it. Safe now that retry no longer voids. */}
+        {problem.primary === 'wait' && (
           <button
             type="button"
             onClick={() => { void handleRetry(); }}

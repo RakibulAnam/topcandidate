@@ -23,6 +23,7 @@
 
 import 'dart:developer' as developer;
 
+import 'state.dart';
 import 'webhook_client.dart';
 
 class Heartbeat {
@@ -32,6 +33,7 @@ class Heartbeat {
     this.appVersion,
     this.queueDepthProvider,
     this.pausedProvider,
+    this.smsGrantedProvider,
     Duration interval = const Duration(minutes: 1),
     DateTime Function()? clock,
   })  : _interval = interval,
@@ -48,6 +50,17 @@ class Heartbeat {
   final String? appVersion;
 
   final Future<int> Function()? queueDepthProvider;
+
+  /// Whether the watcher can still READ SMS. A heartbeat asserts "this device is
+  /// doing its job"; without this it asserted only "this process is running".
+  /// Android auto-revokes permissions for unused apps and an OS upgrade can drop
+  /// them, so the watcher can go deaf while the foreground service keeps
+  /// pinging — the server would then mark us live, the web app would rule out
+  /// 'watcher_stale', and customers would be told their TrxID is wrong while we
+  /// are simply not listening. Suppressing the ping is the honest signal: no
+  /// heartbeat means "we cannot vouch for this device", which the server already
+  /// degrades to soft wording.
+  final Future<bool> Function()? smsGrantedProvider;
 
   /// Test seam (Settings > Test tools). When this returns true we stop
   /// pinging, so the operator can watch the web app fall back to its
@@ -66,17 +79,26 @@ class Heartbeat {
   /// The server treats a watcher as stale after 5 minutes, so the default
   /// 1-minute cadence tolerates four consecutive misses before the web app
   /// switches to its "verification is running behind" copy.
-  Future<void> maybeSend({bool force = false}) async {
-    if (_inFlight) return;
+  /// Returns the server's response when a ping was actually attempted, or null
+  /// when it was skipped (throttled, paused, or already in flight). Callers that
+  /// show the result to a human MUST render this rather than assuming success —
+  /// a wrong secret, an unset URL or no connectivity all fail silently otherwise.
+  Future<WebhookResponse?> maybeSend({bool force = false}) async {
+    if (_inFlight) return null;
     final now = _clock();
     final last = _lastSentAt;
-    if (!force && last != null && now.difference(last) < _interval) return;
+    if (!force && last != null && now.difference(last) < _interval) return null;
 
     _inFlight = true;
     try {
       if (await pausedProvider?.call() ?? false) {
         developer.log('heartbeat paused by test tools', name: 'heartbeat');
-        return;
+        return null;
+      }
+      // A deaf watcher must not claim liveness — see smsGrantedProvider.
+      if (smsGrantedProvider != null && !(await smsGrantedProvider!())) {
+        developer.log('heartbeat suppressed — SMS permission not granted', name: 'heartbeat');
+        return null;
       }
       final deviceId = await deviceIdProvider();
       final depth = await queueDepthProvider?.call();
@@ -93,9 +115,11 @@ class Heartbeat {
         'heartbeat -> ${res.statusCode ?? res.errorTag} depth=${depth ?? "?"}',
         name: 'heartbeat',
       );
+      return res;
     } catch (e) {
       // Never let telemetry break a dispatch tick.
       developer.log('heartbeat failed: $e', name: 'heartbeat');
+      return const WebhookResponse(statusCode: null, errorTag: 'unknown');
     } finally {
       _inFlight = false;
     }

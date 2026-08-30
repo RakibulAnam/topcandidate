@@ -229,6 +229,15 @@ const AppContent = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, loading]);
 
+  // Disarm auto-generate the moment we are not on the builder — including when
+  // the user leaves via the browser Back gesture, which runs no handler of
+  // ours. Without this the flag stays true, and pressing Forward remounts
+  // BuilderScreen with a fresh autoGenFired ref, silently starting a SECOND
+  // paid generation and saving a duplicate resume row.
+  useEffect(() => {
+    if (screen !== 'BUILDER' && builderAutoGenerate) setBuilderAutoGenerate(false);
+  }, [screen, builderAutoGenerate]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-charcoal-50">
@@ -290,8 +299,10 @@ const AppContent = () => {
     );
   }
 
-  const prefillFromProfile = async (opts?: { targetJob?: ResumeData['targetJob']; step?: AppStep; visibleSections?: string[] }) => {
-    if (!user) return;
+  /** Returns false when the profile could not be loaded, so callers can decide
+   *  whether it is safe to commit to a screen that assumes the data is there. */
+  const prefillFromProfile = async (opts?: { targetJob?: ResumeData['targetJob']; step?: AppStep; visibleSections?: string[] }): Promise<boolean> => {
+    if (!user) return false;
     try {
       const [profile, exps, projs, skls, edus, extras, awds, certs, affils, pubs, langs, refs] = await Promise.all([
         profileRepository.getProfile(user.id),
@@ -344,9 +355,11 @@ const AppContent = () => {
       });
 
       setBuilderStep(opts?.step ?? AppStep.SECTIONS);
+      return true;
     } catch (error) {
       console.error('Error loading profile data:', error);
       toast.error(t('common.profileLoadFailed'));
+      return false;
     }
   };
 
@@ -366,10 +379,16 @@ const AppContent = () => {
   // (the step wizard is bypassed).
   const handleGenerateFromSummary = async (visibleSections: string[]) => {
     setCurrentResumeId(null);
-    await prefillFromProfile({ targetJob: pendingTargetJob, step: AppStep.PERSONAL_INFO, visibleSections });
+    // Only commit to the builder if the prefill actually produced something to
+    // build from. It used to navigate unconditionally, so a failed profile load
+    // dropped the user onto the builder with empty data and an armed
+    // auto-generate that could never succeed.
+    const ok = await prefillFromProfile({ targetJob: pendingTargetJob, step: AppStep.PERSONAL_INFO, visibleSections });
+    if (ok === false) return;
     setBuilderAutoGenerate(true);
     navigate({ screen: 'BUILDER' });
   };
+
 
   const handleOpenResume = async (id: string) => {
     if (!user || !resumeService) return;

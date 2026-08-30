@@ -242,6 +242,12 @@ class _SettingsTabState extends State<SettingsTab> {
           value: _testTools,
           onChanged: (v) async {
             await widget.settings.setTestTools(v);
+            // Switching the tools off must also lift a heartbeat pause. The
+            // pause lives in secure storage and its ONLY control is inside this
+            // panel, so hiding the panel while paused left the watcher mute
+            // permanently — and the web app then tells every customer that
+            // verification is running behind.
+            if (!v) await widget.settings.setHeartbeatPaused(false);
             if (!mounted) return;
             setState(() => _testTools = v);
           },

@@ -49,7 +49,7 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
 
                     {/* Right Section - Language toggle + User Menu */}
                     <div className="hidden md:flex items-center gap-3 relative">
-                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} />
+                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} channelSuffix="nav-desktop" />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}
@@ -77,7 +77,7 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
                     {/* Mobile: credits pill stays visible; language moves into the
                         menu so the row never overflows. */}
                     <div className="flex items-center gap-1.5 md:hidden relative">
-                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} />
+                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} channelSuffix="nav-mobile" />
                         {credits !== undefined && onBuyCredits && (
                             <CreditsBadge credits={credits} onBuy={onBuyCredits} />
                         )}

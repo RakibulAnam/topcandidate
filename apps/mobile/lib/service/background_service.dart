@@ -6,6 +6,7 @@ import 'dart:developer' as developer;
 import 'dart:ui';
 
 import 'package:another_telephony/telephony.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -145,6 +146,7 @@ Future<void> _onStart(ServiceInstance service) async {
     deviceIdProvider: settings.deviceId,
     queueDepthProvider: dao.pendingCount,
     pausedProvider: settings.heartbeatPaused,
+    smsGrantedProvider: () => Permission.sms.isGranted,
   );
   final smsListener = SmsListener(
     telephony: Telephony.instance,
@@ -219,6 +221,7 @@ void workmanagerCallback() {
         deviceIdProvider: settings.deviceId,
         queueDepthProvider: dao.pendingCount,
         pausedProvider: settings.heartbeatPaused,
+        smsGrantedProvider: () => Permission.sms.isGranted,
       ).maybeSend(force: true);
     } catch (e, st) {
       developer.log(

@@ -1,47 +1,41 @@
 -- ════════════════════════════════════════════════════════════════════════
--- Migration 029 — stop describing OTHER people's payments
+-- Migration 030 — close the msisdn oracle for real, and fix 029's grants
 -- ════════════════════════════════════════════════════════════════════════
--- Corrects a privacy hole in 028's diagnose_pending_purchase.
+-- 029 removed the amount and masked sender from the RESPONSE and declared the
+-- oracle closed. It wasn't. The leak simply moved from the payload into the
+-- verdict, because the msisdn match still decided the verdict:
 --
--- 028 already refused to return the payment_reference of an unclaimed
--- payment, for the right reason: purchases.sender_msisdn is typed by the
--- customer at submit time and is never verified, so it proves nothing about
--- ownership. But it then used that same unverified value to decide whether to
--- reveal the payment's amount and a masked sender. That is the same mistake
--- one level down, and it opens two leaks:
+--   where (v_purchase.sender_msisdn = c.cand_msisdn) or similarity(...) >= floor
 --
---   1. msisdn oracle. Submit a junk TrxID claiming a victim's bKash number as
---      your own. If the victim has an unclaimed payment, near_msisdn_match
---      comes back true and the UI says "we can see a ৳200 payment from
---      01712•••78" — confirming that number paid, and how much.
+-- So: create a purchase with a junk TrxID and a VICTIM'S bKash number as
+-- sender_msisdn, wait past the grace window, read the verdict.
+--   'likely_typo'   -> that number has an unclaimed payment
+--   anything else   -> it does not
+-- One bit, but it is the same bit 029's own header calls "the oracle", and
+-- /api/purchase-ops/void-txn (added in 028) frees the pending slot afterwards,
+-- so the 5-pending-per-24h cap does not bound the probing.
 --
---   2. Similarity oracle. The near-miss search matches on pg_trgm similarity,
---      which is NOT ownership. An honest customer's typo can land next to a
---      stranger's genuine unclaimed payment, and we would disclose its amount
---      to the wrong person.
+-- Fix: decide the verdict on TrxID similarity ALONE. That requires the prober
+-- to already hold a near-correct reference — which is the system's actual proof
+-- of ownership — so it is not an oracle over other people's phone numbers.
 --
--- In this system the ONLY evidence of ownership is possession of the correct
--- TrxID — that is the whole security model. Nothing available at diagnosis
--- time proves the near-miss belongs to the person asking, so the function now
--- describes it to nobody: no reference, no amount, no sender, and not even the
--- booleans, since `near_msisdn_match = true` IS the oracle in (1).
+-- Cost: a customer whose typo is too mangled for trigram similarity now gets
+-- 'nothing_found' instead of 'likely_typo'. Both tell them to re-check the ID
+-- against their SMS; only the emphasis differs. That is a fair price.
 --
--- The near-miss search itself is kept — it still decides between the
--- 'likely_typo' and 'nothing_found' verdicts, which is what changes the advice
--- the customer gets. The verdict alone carries that, and the reassurance moves
--- into copy that makes no claim about anyone's payment.
---
--- Idempotent (create or replace). Mirrored in supabase/schema.sql.
+-- ALSO: 029 recreated the function with DROP + CREATE, and Supabase's
+-- ALTER DEFAULT PRIVILEGES re-granted EXECUTE to anon EXPLICITLY. `revoke ...
+-- from public` does not remove an explicit role grant, so the function became
+-- anon-callable over /rest/v1/rpc again. Revoke from BOTH here, for both
+-- user-callable functions, so the migration history alone reproduces prod.
 -- ════════════════════════════════════════════════════════════════════════
-
-drop function if exists diagnose_pending_purchase(text);
 
 create or replace function diagnose_pending_purchase(p_transaction_id text)
 returns table (
   verdict           text,
   purchase_status   text,
-  amount_taka       integer,   -- the CALLER'S own pack price, not anyone else's
-  observed_amount   integer,   -- the CALLER'S own settled row
+  amount_taka       integer,
+  observed_amount   integer,
   age_seconds       integer,
   watcher_last_seen timestamp with time zone,
   watcher_live      boolean,
@@ -49,8 +43,8 @@ returns table (
 )
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
-  -- Must stay below PurchaseModal's VERIFY_WINDOW_MS (20s) or the firm
-  -- verdicts are unreachable — see migration 028's fix.
+  -- Must stay below PurchaseModal's VERIFY_WINDOW_MS (20s), or the modal always
+  -- asks inside the grace window and the firm verdicts become unreachable.
   c_grace_seconds  constant integer := 15;
   c_stale_interval constant interval := interval '5 minutes';
   c_sim_floor      constant real := 0.45;
@@ -95,28 +89,25 @@ begin
     return;
   end if;
 
-  -- Is there an unclaimed verified payment that resembles what they typed, or
-  -- that came from the number they gave us? The ANSWER stays inside this
-  -- function: it only chooses the verdict. Nothing about that payment is
-  -- returned, because nothing here proves it is theirs.
+  -- Reference similarity ONLY. The customer-supplied sender_msisdn is
+  -- deliberately NOT consulted: it is unverified, and letting it decide the
+  -- verdict turns this function into a lookup for "does this phone number have
+  -- an unclaimed payment?". See the header.
   select exists (
     with candidates as (
-      select ip.payment_reference as cand_ref, ip.sender_msisdn as cand_msisdn
+      select ip.payment_reference as cand_ref
       from public.inbound_payments ip
       where ip.consumed_at is null
         and ip.received_at > now() - interval '24 hours'
       union all
-      select us.payment_reference as cand_ref, us.sender_msisdn as cand_msisdn
+      select us.payment_reference as cand_ref
       from public.unmatched_inbound_sms us
       where us.matched_to_purchase_id is null
         and us.reviewed_at is null
         and us.created_at > now() - interval '24 hours'
     )
     select 1 from candidates c
-    where (v_purchase.sender_msisdn is not null
-           and c.cand_msisdn is not null
-           and c.cand_msisdn = v_purchase.sender_msisdn)
-       or similarity(c.cand_ref, p_transaction_id) >= c_sim_floor
+    where similarity(c.cand_ref, p_transaction_id) >= c_sim_floor
   ) into v_near_found;
 
   if v_near_found then
@@ -137,10 +128,10 @@ begin
     v_last_seen, v_live, v_attempts;
 end; $$;
 
--- Revoke from BOTH public and anon. This function is created with DROP +
--- CREATE above, and Supabase ships ALTER DEFAULT PRIVILEGES that grant EXECUTE
--- on NEW functions to anon/authenticated/service_role — as an EXPLICIT role
--- grant, which `revoke ... from public` does NOT remove. Revoking only from
--- public left it callable over /rest/v1/rpc with no JWT.
+-- Revoke from public AND anon: a DROP+CREATE re-grants anon explicitly via
+-- Supabase's default privileges, which a public-only revoke leaves in place.
 revoke execute on function diagnose_pending_purchase(text) from public, anon;
 grant  execute on function diagnose_pending_purchase(text) to authenticated, service_role;
+
+revoke execute on function void_pending_purchase(text) from public, anon;
+grant  execute on function void_pending_purchase(text) to authenticated, service_role;

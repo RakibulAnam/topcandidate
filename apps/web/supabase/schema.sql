@@ -1848,24 +1848,24 @@ begin
     return;
   end if;
 
+  -- Reference similarity ONLY (migration 030). The customer-supplied
+  -- sender_msisdn is unverified; letting it decide the verdict made this a
+  -- "does this phone number have an unclaimed payment?" oracle.
   select exists (
     with candidates as (
-      select ip.payment_reference as cand_ref, ip.sender_msisdn as cand_msisdn
+      select ip.payment_reference as cand_ref
       from public.inbound_payments ip
       where ip.consumed_at is null
         and ip.received_at > now() - interval '24 hours'
       union all
-      select us.payment_reference as cand_ref, us.sender_msisdn as cand_msisdn
+      select us.payment_reference as cand_ref
       from public.unmatched_inbound_sms us
       where us.matched_to_purchase_id is null
         and us.reviewed_at is null
         and us.created_at > now() - interval '24 hours'
     )
     select 1 from candidates c
-    where (v_purchase.sender_msisdn is not null
-           and c.cand_msisdn is not null
-           and c.cand_msisdn = v_purchase.sender_msisdn)
-       or similarity(c.cand_ref, p_transaction_id) >= c_sim_floor
+    where similarity(c.cand_ref, p_transaction_id) >= c_sim_floor
   ) into v_near_found;
 
   if v_near_found then
@@ -1885,7 +1885,7 @@ begin
     v_purchase.observed_amount_taka, v_age,
     v_last_seen, v_live, v_attempts;
 end; $$;
-revoke execute on function diagnose_pending_purchase(text) from public;
+revoke execute on function diagnose_pending_purchase(text) from public, anon;
 grant  execute on function diagnose_pending_purchase(text) to authenticated, service_role;
 
 -- "Edit & resubmit" after a mistyped TrxID. User-callable; own pending rows only.
@@ -1910,10 +1910,40 @@ begin
   values (v_id, 'pending', 'failed', 'user-corrected',
           'Customer voided a mistyped TrxID before resubmitting');
 end; $$;
+revoke execute on function void_pending_purchase(text) from public, anon;
+grant  execute on function void_pending_purchase(text) to authenticated, service_role;
 -- Same lockdown as diagnose_pending_purchase: no PUBLIC grant, so `anon`
 -- cannot reach it over the REST RPC endpoint.
 revoke execute on function void_pending_purchase(text) from public;
 grant  execute on function void_pending_purchase(text) to authenticated, service_role;
 
--- expire_stale_pending_purchases() also prunes watcher_heartbeats (30 days).
--- Canonical body lives in migrations/028_purchase_verification_ux.sql.
+-- expire_stale_pending_purchases() gains the heartbeat prune here. schema.sql is
+-- written to be replayable over a live database, and without this redeclaration
+-- a replay silently reverted the deployed function to its pre-028 body and
+-- dropped the watcher_heartbeats cleanup.
+create or replace function expire_stale_pending_purchases() returns integer
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare v_affected integer;
+begin
+  with expired as (
+    update purchases set status = 'expired'
+      where status = 'pending' and created_at < now() - interval '24 hours'
+      returning id
+  ),
+  audited as (
+    insert into purchase_state_changes (purchase_id, from_status, to_status, actor, reason)
+      select id, 'pending', 'expired', 'system', 'TTL exceeded (24h)' from expired
+      returning 1
+  )
+  select count(*) into v_affected from expired;
+
+  delete from inbound_payments
+    where consumed_at is not null
+       or received_at < now() - interval '48 hours';
+
+  delete from watcher_heartbeats
+    where last_seen_at < now() - interval '30 days';
+
+  return v_affected;
+end; $$;
+revoke execute on function expire_stale_pending_purchases() from public, anon, authenticated;
