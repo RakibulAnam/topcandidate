@@ -8,6 +8,7 @@ export const bn: Dictionary = {
     appName: 'TOP CANDIDATE',
     loading: 'লোড হচ্ছে…',
     loadingProfile: 'প্রোফাইল লোড হচ্ছে…',
+    loadingResume: 'আপনার অ্যাপ্লিকেশন খোলা হচ্ছে…',
     appInitFailed: 'অ্যাপ চালু করা যায়নি। কনফিগারেশন একবার দেখে নিন।',
     profileLoadFailed: 'প্রোফাইলের তথ্য আনতে পারিনি।',
     resumeLoadFailed: 'রিজিউমে খোলা যায়নি।',

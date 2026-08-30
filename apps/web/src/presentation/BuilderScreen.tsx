@@ -16,6 +16,16 @@ import { apiErrorMessage, isRetryPointless } from './i18n/apiErrorMessage.js';
 import { useT } from './i18n/LocaleContext';
 
 
+// Every generation-failure toast carries this id. Two things follow: a second
+// failure REPLACES the first instead of stacking, and — the reason it exists —
+// a new attempt can clear the old one. Sonner dismisses a toast when its own
+// action button is pressed, but a retry started from anywhere else (the
+// full-screen panel's Retry, the idle panel's Generate, the automatic resume
+// after a purchase lands) left a red "generation failed" toast sitting on top
+// of a progress panel animating "Building your application" for the remaining
+// 12-15 seconds of its duration. Same for a retry that then succeeds.
+const GENERATION_TOAST_ID = 'builder-generation-error';
+
 interface BuilderScreenProps {
   initialData: ResumeData;
   initialStep: AppStep;
@@ -26,6 +36,10 @@ interface BuilderScreenProps {
   // once credits are known and this screen renders only Generating → Preview
   // (or an error + retry). The step wizard has been retired.
   autoGenerate?: boolean;
+  // Fired once, with the row id, when a generation persists a NEW resume.
+  // App stamps that id into the history entry so Back/Forward and reload can
+  // restore this preview instead of the builder's idle panel.
+  onGenerated?: (id: string) => void;
 }
 
 export const BuilderScreen: React.FC<BuilderScreenProps> = ({
@@ -35,6 +49,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   resumeService,
   onExit,
   autoGenerate = false,
+  onGenerated,
 }) => {
   const { user } = useAuth();
   const t = useT();
@@ -345,7 +360,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     }
 
     // Past every precondition — this generation is really starting, so the
-    // queued intent is spent and the in-flight guard goes up.
+    // queued intent is spent and the in-flight guard goes up. Any failure
+    // toast from the previous attempt is now stale.
+    toast.dismiss(GENERATION_TOAST_ID);
     resumeAfterPurchaseRef.current = false;
     generatingRef.current = true;
     setGenerationRetryable(true);
@@ -422,6 +439,10 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
             const newId = await resumeService.saveGeneratedResume(user.id, mergedData, title);
             setActiveResumeId(newId);
             savedId = newId;
+            // Only while we are still the screen the user is looking at. A save
+            // that resolves after they navigated away must not rewrite the
+            // history entry they moved to.
+            if (mountedRef.current) onGenerated?.(newId);
           }
           // Just persisted — sync the preview-edit autosave snapshot so the
           // effect doesn't immediately re-write the same data.
@@ -504,7 +525,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         // Retrying the identical content is deterministic: it fails again.
         setGenerationErrorBody(err.message);
         setGenerationRetryable(false);
-        toast.error(err.message);
+        toast.error(err.message, { id: GENERATION_TOAST_ID });
       } else if (errCode === 'refund_failed') {
         // The user was charged but got nothing AND the automatic refund
         // failed — never leave this ambiguous. Long duration: this one matters.
@@ -517,13 +538,14 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         setGenerationErrorBody(t('builder.refundFailed'));
         setGenerationRetryable(false);
         setCredits(prev => (prev === null ? prev : Math.max(0, prev - 1)));
-        toast.error(t('builder.refundFailed'), { duration: 15000 });
+        toast.error(t('builder.refundFailed'), { id: GENERATION_TOAST_ID, duration: 15000 });
       } else if (errCode === 'client_timeout' || errCode === 'network_error') {
         // Hung connection or offline — retryable, so offer the retry inline
         // instead of making the user re-find the Generate button.
         toast.error(
           errCode === 'client_timeout' ? t('builder.generationTimeout') : t('builder.networkError'),
           {
+            id: GENERATION_TOAST_ID,
             duration: 12000,
             action: {
               label: t('builder.retryCta'),
@@ -537,6 +559,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         // guaranteed rejection, so the button is removed rather than lying.
         if (isRetryPointless(err)) setGenerationRetryable(false);
         toast.error(localized, {
+          id: GENERATION_TOAST_ID,
           duration: 12000,
           ...(isRetryPointless(err) ? {} : {
             action: {
@@ -547,6 +570,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         });
       } else {
         toast.error(t('builder.optimizeFailed'), {
+          id: GENERATION_TOAST_ID,
           duration: 10000,
           action: {
             label: t('builder.retryCta'),

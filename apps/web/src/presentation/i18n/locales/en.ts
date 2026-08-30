@@ -6,6 +6,7 @@ export const en = {
     appName: 'TOP CANDIDATE',
     loading: 'Loading…',
     loadingProfile: 'Loading Profile…',
+    loadingResume: 'Opening your application…',
     appInitFailed: 'Failed to initialize application. Please check your configuration.',
     profileLoadFailed: 'Failed to load profile data',
     resumeLoadFailed: 'Failed to load resume',
