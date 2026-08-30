@@ -169,6 +169,11 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
 
+    // True when the prefill fetch THREW. Load-bearing: saveProfile writes all
+    // seven contact columns unconditionally, so continuing on an empty form we
+    // failed to populate would blank location/linkedin/github/website for a
+    // user who has them. We do not know what is stored, so we must not write.
+    const [prefillFailed, setPrefillFailed] = useState(false);
     const [isGeneratingResume, setIsGeneratingResume] = useState(false);
     const [generationFailed, setGenerationFailed] = useState(false);
     const [generationError, setGenerationError] = useState<string | null>(null);
@@ -207,12 +212,12 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
 
     useEffect(() => {
         if (user?.id) {
-            loadExistingData();
+            loadExistingData({ resetStep: true });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id]);
 
-    const loadExistingData = async () => {
+    const loadExistingData = async (opts?: { resetStep?: boolean }) => {
         if (!user) return;
         setLoading(true);
         try {
@@ -247,12 +252,18 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
 
             // Returning users who already have contact details skip the import
             // splash and resume at the form; everyone else starts at import.
-            const nextStep = (profile?.fullName && profile?.email)
-                ? SetupStep.PERSONAL_INFO
-                : SetupStep.IMPORT_RESUME;
-            setCurrentStep(nextStep);
+            // Only on the first load. A retry fired mid-wizard must not yank
+            // the user back to the start of the form.
+            if (opts?.resetStep) {
+                const nextStep = (profile?.fullName && profile?.email)
+                    ? SetupStep.PERSONAL_INFO
+                    : SetupStep.IMPORT_RESUME;
+                setCurrentStep(nextStep);
+            }
+            setPrefillFailed(false);
         } catch (error) {
             console.error('Error loading profile data:', error);
+            setPrefillFailed(true);
         } finally {
             setLoading(false);
         }
@@ -441,6 +452,21 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
 
     const saveCurrentStep = async (): Promise<boolean> => {
         if (!user) return false;
+        // The prefill never landed, so this form is empty because we failed to
+        // read, not because the user has nothing. Refuse and have another go at
+        // loading — if it succeeds the fields populate and they carry on.
+        //
+        // PERSONAL_INFO only, because it is the only destructive save: it
+        // UPDATEs all seven contact columns unconditionally, so blank state
+        // wipes location/linkedin/github/website. Every other step upserts the
+        // items held in an array, and an empty array writes nothing at all —
+        // and the import splash writes nothing either, so neither should be
+        // blocked behind a failed read.
+        if (prefillFailed && currentStep === SetupStep.PERSONAL_INFO) {
+            toast.error(t('profileSetup.prefillFailed'));
+            void loadExistingData();
+            return false;
+        }
         setSaving(true);
         try {
             switch (currentStep) {
@@ -641,6 +667,16 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         setGenerationFailed(false);
         setGenerationError(null);
         try {
+            // Someone walking the wizard a SECOND time already has one, and
+            // generateGeneralResume throws on that — which surfaced as a red
+            // failure panel quoting an internal English string, at the end of a
+            // run that had in fact saved everything. There is nothing to do
+            // here but finish.
+            if (await resumeService.hasGeneralResume(user.id)) {
+                setIsGeneratingResume(false);
+                onComplete();
+                return;
+            }
             await resumeService.generateGeneralResume(user.id);
             toast.success(t('profileSetup.generalResumeReady'));
             onComplete();

@@ -742,6 +742,20 @@ The letterforms are the real Source Serif 4 semibold glyphs **converted to SVG p
   phase rail on `lg+` (numbered phase groups: "About you" → "Your work" →
   "Your credentials"), collapsing to a progress bar on mobile. Active step
   marker is saffron, completed is ink, untouched is charcoal.
+- **`ProfileSetupScreen` is re-enterable, and both guards there are load-bearing.**
+  `/profile-setup` is reachable by URL for anyone signed in, including users who
+  already finished it — the route is auth-gated (`AUTHED_SCREENS`) but the real
+  boundary is RLS, and the wizard is safe to re-run: it prefills from the DB,
+  every section save is an upsert on `id`, and nothing deletes. Two edges needed
+  guarding. (1) `saveCurrentStep` refuses `PERSONAL_INFO` when the prefill THREW
+  (`prefillFailed`) and retries the load instead — `saveProfile` UPDATEs all
+  seven contact columns unconditionally, so an empty form we failed to populate
+  would blank location/linkedin/github/website. Other steps and the import
+  splash are NOT blocked: they upsert arrays, and an empty array writes nothing.
+  (2) `handleGenerateGeneralResume` checks `hasGeneralResume` first — a second
+  run through the wizard used to hit `generateGeneralResume`'s "already exists"
+  throw and render the red failure panel quoting that internal English string,
+  at the end of a run that had saved everything correctly.
 - **Description boxes in `GuidedModeField` are deliberately tall and grow-only.**
   Guided answer rows are `rows={4}`; the free-write box is sized by class
   (`h-48 md:h-72`), NOT by `rows` — `rows` would pin the same line count on a

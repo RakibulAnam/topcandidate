@@ -829,6 +829,7 @@ export const en = {
     deleteError: 'Failed to delete account. Please try again.',
   },
   profileSetup: {
+    prefillFailed: 'We could not load your saved profile just now, so nothing was saved — trying again.',
     optionalNoticeTitle: 'Optional — skip if it isn’t you',
     optionalNoticeBody: 'Adding this makes your profile richer, so every application can draw on it. But if you have nothing here, or it has nothing to do with your career, skip it — an empty section never weakens your resume.',
     recommendedNoticeTitle: 'Worth filling in',
