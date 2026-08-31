@@ -24,6 +24,7 @@
 // outlive, contradict, or be deleted independently of the payment itself.
 import { purchaseRepository } from '../config/dependencies';
 import type { Purchase } from '../../domain/repositories/IPurchaseRepository';
+import type { PurchaseVerdict } from './purchaseStatusClient';
 
 /** undefined = not resolved yet, null = nothing open. The distinction matters:
  *  rendering "no payment in flight" before the read lands is the same class of
@@ -34,10 +35,52 @@ let current: OpenPurchaseState = undefined;
 let inFlight: Promise<void> | null = null;
 const listeners = new Set<(v: OpenPurchaseState) => void>();
 
+// The last DIAGNOSIS for the open purchase, keyed by TrxID.
+//
+// A verdict is not a row status — there is no column for `nothing_found`, and
+// there should not be, because it is a judgement about the world at a moment
+// (did the watcher see anything?) rather than a fact about the purchase. But
+// the pill has to know it: without it, a payment diagnosed as never-arrived
+// eighty minutes ago is indistinguishable from one submitted five seconds ago,
+// and the pill spins on both. It spun on both, next to a modal that had
+// already said "we haven't received this payment yet" — two surfaces on one
+// screen, disagreeing about whether anyone was still working.
+//
+// Cached here so the modal's diagnosis is free for the pill to reuse, and so a
+// pill that has to fetch its own does it once per purchase rather than once
+// per poll.
+let verdictTxn: string | null = null;
+let verdictValue: PurchaseVerdict | null = null;
+// Verdicts need their OWN subscription. Re-emitting on the purchase channel
+// does not work: the value is the same object reference, so React bails out of
+// the re-render and the pill keeps rendering the verdict it read on mount —
+// which is exactly the "modal has diagnosed, pill still spinning" split this
+// whole change exists to close.
+const verdictListeners = new Set<() => void>();
+
 const emit = () => { listeners.forEach((l) => l(current)); };
+const emitVerdict = () => { verdictListeners.forEach((l) => l()); };
 
 export function getOpenPurchaseSnapshot(): OpenPurchaseState {
   return current;
+}
+
+/** The cached verdict, but only if it belongs to `txnId` — a verdict from a
+ *  superseded transaction is worse than none. */
+export function getOpenPurchaseVerdict(txnId: string): PurchaseVerdict | null {
+  return verdictTxn === txnId ? verdictValue : null;
+}
+
+export function setOpenPurchaseVerdict(txnId: string, verdict: PurchaseVerdict): void {
+  if (verdictTxn === txnId && verdictValue === verdict) return;
+  verdictTxn = txnId;
+  verdictValue = verdict;
+  emitVerdict();
+}
+
+export function subscribeOpenPurchaseVerdict(fn: () => void): () => void {
+  verdictListeners.add(fn);
+  return () => { verdictListeners.delete(fn); };
 }
 
 export function subscribeOpenPurchase(fn: (v: OpenPurchaseState) => void): () => void {
@@ -56,7 +99,13 @@ export function refreshOpenPurchase(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = purchaseRepository
     .getOpenPurchase()
-    .then((row) => { current = row; emit(); })
+    .then((row) => {
+      // A different purchase (or none) invalidates the diagnosis we hold.
+      const ref = row?.paymentReference ?? null;
+      if (ref !== verdictTxn) { verdictTxn = ref; verdictValue = null; emitVerdict(); }
+      current = row;
+      emit();
+    })
     .catch((err) => {
       // Keep the previous answer. Flipping to "nothing open" on a transient
       // read failure tells the customer their payment vanished, which is a
@@ -71,5 +120,8 @@ export function refreshOpenPurchase(): Promise<void> {
  *  the next account the previous one's pending payment. */
 export function resetOpenPurchase(): void {
   current = undefined;
+  verdictTxn = null;
+  verdictValue = null;
   emit();
+  emitVerdict();
 }

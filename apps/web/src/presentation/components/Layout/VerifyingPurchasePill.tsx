@@ -28,11 +28,14 @@ import {
   fetchPurchaseStatus,
   filePurchaseDispute,
   subscribeToPurchase,
+  verifyTxn,
   voidTxn,
   type PurchaseStatus,
   type PurchaseStatusResponse,
+  type PurchaseVerdict,
 } from '../../../infrastructure/api/purchaseStatusClient';
-import { refreshOpenPurchase, useOpenPurchase } from '../../hooks/useOpenPurchase';
+import { refreshOpenPurchase, useOpenPurchase, useOpenPurchaseVerdict } from '../../hooks/useOpenPurchase';
+import { setOpenPurchaseVerdict } from '../../../infrastructure/api/openPurchaseStore';
 import { useT } from '../../i18n/LocaleContext';
 import { CONTACT_EMAIL, contactMailto } from '../../support';
 
@@ -41,6 +44,11 @@ import { CONTACT_EMAIL, contactMailto } from '../../support';
 // the pill resolves whenever the grant lands.
 const FALLBACK_POLL_MS = 20_000;
 const TERMINAL: PurchaseStatus[] = ['completed', 'underpaid', 'msisdn_mismatch_review', 'expired', 'refunded', 'failed'];
+
+// How long a purchase must have been open before the pill stops saying
+// "Verifying" and asks what actually happened. Matches the modal's own verify
+// window: the same grace period the watcher gets to see the bKash SMS.
+const DIAGNOSE_AFTER_MS = 20_000;
 
 interface Props {
   /** Distinguishes concurrently-mounted instances. The navbar renders this pill
@@ -76,6 +84,11 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
   // deliberately not a delete: the purchase stays live, the modal still opens
   // straight into it, and any status change unhides the pill again.
   const [hiddenTxn, setHiddenTxn] = useState<string | null>(null);
+  // The diagnosis for this purchase, if anyone has one. Usually the modal put
+  // it there; if the customer never opened the modal we fetch it once below.
+  // Read through the store's subscription so a verdict reached in the modal
+  // updates this pill live, without waiting for a remount.
+  const verdict = useOpenPurchaseVerdict(pending?.txnId ?? null);
   const stopRef = useRef(false);
   const creditedRef = useRef(false);
   // Keep the latest onCredited without making it an effect dependency — hosts
@@ -144,11 +157,37 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
     };
   }, [pending?.txnId, channelSuffix]);
 
+  // Get a verdict for this purchase, once.
+  //
+  // The row status alone cannot carry this: `pending` covers both "submitted
+  // five seconds ago" and "we looked eighty minutes ago and there is no such
+  // payment". Rendering a spinner over the second one claims work that is not
+  // happening — the same lie the builder's progress panel used to tell — and
+  // it contradicted the modal, which had already diagnosed and said so.
+  //
+  // Prefer whatever the modal already published; only pay for a request when
+  // nobody has one and the grace period is over.
+  useEffect(() => {
+    if (!pending || verdict) return;
+    const age = openPurchase ? Date.now() - new Date(openPurchase.createdAt).getTime() : 0;
+    if (age < DIAGNOSE_AFTER_MS) return;
+    let active = true;
+    verifyTxn(pending.txnId)
+      // Write it to the STORE, not to local state — that is what feeds this
+      // pill, the second mounted pill, and the modal from one request.
+      .then((v) => { if (active) setOpenPurchaseVerdict(pending.txnId, v.verdict); })
+      .catch(() => { /* keep the neutral pending look; the poll continues */ });
+    return () => { active = false; };
+  }, [pending?.txnId, verdict, openPurchase?.createdAt]);
+
   if (!pending) return null;
   if (hiddenTxn === pending.txnId) return null;
 
   const status: PurchaseStatus = statusResp?.status ?? 'pending';
-  const visual = STATUS_VISUALS[status];
+  // A verdict only reshapes the PENDING look. Once the row reaches a real
+  // status that status is the truth and outranks any diagnosis.
+  const visual = (status === 'pending' && verdict && PENDING_VERDICT_VISUALS[verdict])
+    || STATUS_VISUALS[status];
 
   // Hide: fold the pill away for this session. Non-destructive, so no confirm.
   const onHide = () => {
@@ -230,14 +269,19 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
           </div>
 
           <div className="mt-3 text-[13.5px] text-brand-700 leading-snug">
-            {statusResp?.message ?? t('verifyPill.pendingDetail')}
+            {status === 'pending' && verdict === 'nothing_found'
+              ? t('verifyPill.notReceivedDetail')
+              : status === 'pending' && verdict === 'watcher_stale'
+                ? t('verifyPill.onOurSideDetail')
+                : statusResp?.message ?? t('verifyPill.pendingDetail')}
           </div>
 
-          <PurchaseTimeline status={status} />
+          <PurchaseTimeline status={status} verdict={verdict} />
 
           <ActionCard
             status={status}
             response={statusResp}
+            verdict={verdict}
             onResubmit={onResubmit}
             onContactSupport={() => setDisputeOpen(true)}
             onFileDispute={() => setDisputeOpen(true)}
@@ -328,6 +372,26 @@ interface Visual {
   label: (t: ReturnType<typeof useT>, r: PurchaseStatusResponse | null) => string;
 }
 
+// How a still-`pending` row looks once we know WHY it is still pending. The
+// difference that matters is who is being asked to do something: `nothing_found`
+// puts it on the customer (check your SMS), `watcher_stale` puts it on us, and
+// neither is work-in-progress, so neither spins. `likely_typo` and
+// `awaiting_sms` are absent on purpose — a near-miss is worth a firm nudge only
+// inside the sheet where the Transaction ID can actually be corrected, and
+// `awaiting_sms` genuinely IS "still checking", which is the default look.
+const PENDING_VERDICT_VISUALS: Partial<Record<PurchaseVerdict, Visual>> = {
+  nothing_found: {
+    icon: <Clock size={14} className="text-accent-600" />,
+    chipClass: 'bg-accent-50 border-accent-200 text-brand-700 hover:bg-accent-100',
+    label: (t) => t('verifyPill.notReceivedChip'),
+  },
+  watcher_stale: {
+    icon: <Clock size={14} className="text-charcoal-500" />,
+    chipClass: 'bg-charcoal-100 border-charcoal-300 text-brand-700 hover:bg-charcoal-200',
+    label: (t) => t('verifyPill.onOurSideChip'),
+  },
+};
+
 const STATUS_VISUALS: Record<PurchaseStatus, Visual> = {
   pending: {
     icon: <Loader2 size={14} className="animate-spin text-accent-600" />,
@@ -370,14 +434,22 @@ const STATUS_VISUALS: Record<PurchaseStatus, Visual> = {
 // Brand palette only (emerald = done, saffron accent = active, red = error).
 type StepState = 'done' | 'active' | 'error' | 'idle';
 
-const PurchaseTimeline: React.FC<{ status: PurchaseStatus }> = ({ status }) => {
+const PurchaseTimeline: React.FC<{ status: PurchaseStatus; verdict?: PurchaseVerdict | null }> = ({ status, verdict }) => {
   const t = useT();
   const isTerminal = TERMINAL.includes(status);
   const ok = status === 'completed';
+  // We looked and there is nothing to find, or we could not look at all.
+  // Either way nobody is mid-verification, so the step must stop spinning —
+  // an animated dot beside "this payment has not reached us" is the same
+  // contradiction the chip had, just smaller.
+  const settledWaiting = !isTerminal && (verdict === 'nothing_found' || verdict === 'watcher_stale');
 
   const steps: { label: string; state: StepState }[] = [
     { label: t('verifyPill.timelineSubmitted'), state: 'done' },
-    { label: t('verifyPill.timelineVerifying'), state: isTerminal ? 'done' : 'active' },
+    {
+      label: settledWaiting ? t('verifyPill.timelineWaiting') : t('verifyPill.timelineVerifying'),
+      state: isTerminal ? 'done' : settledWaiting ? 'idle' : 'active',
+    },
     {
       label: ok ? t('verifyPill.timelineDone') : isTerminal ? t('verifyPill.timelineActionNeeded') : t('verifyPill.timelineDone'),
       state: ok ? 'done' : isTerminal ? 'error' : 'idle',
@@ -417,12 +489,13 @@ const PurchaseTimeline: React.FC<{ status: PurchaseStatus }> = ({ status }) => {
 interface ActionCardProps {
   status: PurchaseStatus;
   response: PurchaseStatusResponse | null;
+  verdict?: PurchaseVerdict | null;
   onResubmit?: () => void;
   onContactSupport: () => void;
   onFileDispute: () => void;
 }
 
-const ActionCard: React.FC<ActionCardProps> = ({ status, response, onResubmit, onContactSupport, onFileDispute }) => {
+const ActionCard: React.FC<ActionCardProps> = ({ status, response, verdict, onResubmit, onContactSupport, onFileDispute }) => {
   const t = useT();
   if (status === 'underpaid' && response?.missing && response.missing > 0) {
     return (
@@ -492,7 +565,11 @@ const ActionCard: React.FC<ActionCardProps> = ({ status, response, onResubmit, o
   if (status === 'pending') {
     return (
       <div className="mt-3 text-[12px] text-charcoal-500 leading-snug">
-        {t('verifyPill.pendingHelp')}
+        {/* "Most payments confirm within a minute" is true right after
+            submitting and a lie once we have diagnosed that nothing arrived. */}
+        {verdict === 'nothing_found' || verdict === 'watcher_stale'
+          ? t('verifyPill.diagnosedHelp')
+          : t('verifyPill.pendingHelp')}
         <button
           type="button"
           onClick={onFileDispute}
