@@ -89,6 +89,7 @@ import {
   type PurchaseVerification,
 } from '../../infrastructure/api/purchaseStatusClient';
 import { refreshOpenPurchase, useOpenPurchase } from '../hooks/useOpenPurchase';
+import { setOpenPurchaseVerdict } from '../../infrastructure/api/openPurchaseStore';
 import { track } from '../../infrastructure/analytics/track';
 import { CONTACT_EMAIL, CONTACT_FACEBOOK_URL, contactMailto } from '../support';
 
@@ -290,6 +291,14 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   const finishRef = useRef(finishAndClose);
   finishRef.current = finishAndClose;
 
+  // Hand every diagnosis to the shared store. The navbar pill has no way to
+  // derive one — a verdict is not a row status — and without it a payment we
+  // decided eighty minutes ago had never arrived still animated "Verifying"
+  // beside this sheet saying the opposite.
+  const publishVerdict = (v: PurchaseVerdict) => {
+    if (trackedTxn) setOpenPurchaseVerdict(trackedTxn, v);
+  };
+
   // ── Verification watch ───────────────────────────────────────────────────
   // Realtime first (sub-second via migration 012's publication), a slow
   // fallback poll for a dropped socket, and a hard deadline that converts
@@ -325,6 +334,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       if (phase === 'problem' && status === 'failed') return;
       setSettled({ observed, expected });
       setVerdict(status);
+      publishVerdict(status);
       track('purchase_problem', { verdict: status });
       setPhase('problem');
     };
@@ -372,6 +382,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           done = true;
           setVerification(v);
           setVerdict(v.verdict);
+          publishVerdict(v.verdict);
           setSettled({ observed: v.observedAmountTaka, expected: v.amountTaka });
           // Server-side attempt count wins over our per-session counter: it
           // sees tries from earlier sessions and other devices too.
@@ -386,6 +397,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           // wrong — the pill keeps tracking either way.
           done = true;
           setVerdict('awaiting_sms');
+          publishVerdict('awaiting_sms');
           setPhase('problem');
         }
       })();
