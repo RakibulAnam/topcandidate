@@ -90,6 +90,7 @@ import {
   type PurchaseVerdict,
   type PurchaseVerification,
 } from '../../infrastructure/api/purchaseStatusClient';
+import { refreshOpenPurchase, useOpenPurchase } from '../hooks/useOpenPurchase';
 import { track } from '../../infrastructure/analytics/track';
 import { CONTACT_EMAIL, CONTACT_FACEBOOK_URL, contactMailto } from '../support';
 
@@ -148,6 +149,12 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   // The TrxID currently being verified. Held separately from `transactionId`
   // so that going back to edit the input never changes what we're tracking.
   const [trackedTxn, setTrackedTxn] = useState('');
+  // When the tracked purchase was CREATED, not when this sheet opened. The
+  // verify window is a grace period for the watcher to see the bKash SMS; a
+  // purchase resumed twenty minutes later has already had it, so re-serving
+  // the full spinner would make the customer wait out a deadline that expired
+  // long ago before the screen will tell them anything.
+  const [trackedSince, setTrackedSince] = useState<number | null>(null);
   const [verdict, setVerdict] = useState<PurchaseVerdict | null>(null);
   const [verification, setVerification] = useState<PurchaseVerification | null>(null);
   const [settled, setSettled] = useState<{ observed: number | null; expected: number } | null>(null);
@@ -157,6 +164,42 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   const [creditsGranted, setCreditsGranted] = useState<number | null>(null);
   const txnInputRef = useRef<HTMLInputElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
+
+  // The server's answer to "is a payment already in flight for this user".
+  const openPurchase = useOpenPurchase();
+  // Guards the rehydration below so it runs once per open, not on every change
+  // the store emits while the sheet is up.
+  const rehydratedFor = useRef<string | null>(null);
+
+  // ── Resume, do not restart ───────────────────────────────────────────────
+  // Reopening the sheet on a payment that is still in flight must land on that
+  // payment, not on a blank form. Previously the modal only knew what its own
+  // component state remembered, and `handleDismiss` wiped that on close — so a
+  // customer who closed mid-verification came back to an empty field with no
+  // way to reach the transaction they had already submitted.
+  //
+  // The server row is the authority: if it says something is open, we mount
+  // straight into the takeover and re-derive the verdict. Terminal rows are
+  // deliberately NOT resumed — a completed or expired purchase should give a
+  // clean form rather than be dragged back onto the screen.
+  useEffect(() => {
+    if (!isOpen) { rehydratedFor.current = null; return; }
+    if (!openPurchase?.paymentReference) return;
+    const txn = openPurchase.paymentReference;
+    if (rehydratedFor.current === txn) return;
+    if (trackedTxn === txn) { rehydratedFor.current = txn; return; }
+    rehydratedFor.current = txn;
+    setTransactionId(txn);
+    setTrackedTxn(txn);
+    setTrackedSince(new Date(openPurchase.createdAt).getTime());
+    // 'verifying' rather than 'problem': the watch effect below re-runs
+    // verifyTxn and will move us to a problem card if the verdict warrants it.
+    // Opening on a problem we have not re-checked would show stale bad news.
+    setVerdict(null);
+    setVerification(null);
+    setSettled(null);
+    setPhase('verifying');
+  }, [isOpen, openPurchase?.paymentReference, trackedTxn]);
 
   // Funnel: one event per open (effect re-fires only when isOpen flips true).
   useEffect(() => {
@@ -218,6 +261,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     setFeaturesOpen(false);
     setCopied(false);
     setTrackedTxn('');
+    setTrackedSince(null);
     setVerdict(null);
     setVerification(null);
     setSettled(null);
@@ -230,6 +274,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
 
   const finishAndClose = () => {
     reset();
+    // The row is `completed` now, so it is no longer "open" — re-reading
+    // retires the navbar pill and lets the next open start clean.
+    void refreshOpenPurchase();
     onSuccess?.();
     onClose();
   };
@@ -306,6 +353,8 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
 
     // The verdict deadline belongs to the verifying phase only; in 'problem'
     // the verdict is already shown and we are purely waiting for a late settle.
+    const elapsed = trackedSince === null ? 0 : Date.now() - trackedSince;
+    const wait = Math.max(0, VERIFY_WINDOW_MS - elapsed);
     const deadline = phase !== 'verifying' ? null : setTimeout(() => {
       void (async () => {
         if (!active || done) return;
@@ -336,7 +385,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           setPhase('problem');
         }
       })();
-    }, VERIFY_WINDOW_MS);
+    }, wait);
 
     return () => {
       active = false;
@@ -344,7 +393,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       clearInterval(poll);
       if (deadline) clearTimeout(deadline);
     };
-  }, [isOpen, phase, trackedTxn]);
+  }, [isOpen, phase, trackedTxn, trackedSince]);
 
   // Hold the green check briefly, then refresh credits and close. One place,
   // so both success paths behave the same: match-on-submit (settled inside the
@@ -391,7 +440,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
         // Already settled or gone — nothing to retire.
       }
       clearPendingPurchase();
+      void refreshOpenPurchase();
       setTrackedTxn('');
+      setTrackedSince(null);
+      rehydratedFor.current = null;
     }
 
     const attempt = attempts + 1;
@@ -410,6 +462,12 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       // still tracked. Cleared again only if they void a mistyped TrxID.
       writePendingPurchase({ txnId: trimmedTxn, submittedAt: Date.now() });
       setTrackedTxn(trimmedTxn);
+      setTrackedSince(Date.now());
+      // Mark it handled BEFORE the store catches up, so the rehydration effect
+      // does not treat our own fresh submission as a purchase to resume and
+      // stomp the phase we are about to set.
+      rehydratedFor.current = trimmedTxn;
+      void refreshOpenPurchase();
 
       // Match-on-submit (migration 012): if the verified bKash SMS already
       // arrived, the server settled the purchase synchronously.
@@ -851,14 +909,13 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     phase === 'confirmed' ? confirmedContent : phase === 'verifying' ? verifyingContent : problemContent;
   const showTakeover = phase === 'confirmed' || phase === 'verifying' || phase === 'problem';
 
-  // Closing mid-verification is safe (the navbar pill keeps tracking), but the
-  // panel state must not survive into the next open.
+  // Closing is a VIEW action, never an edit. It used to call reset() while the
+  // takeover was up — the comment said "the panel state must not survive into
+  // the next open", which is exactly backwards: the payment survives, so the
+  // panel must too. State that genuinely should not survive is cleared where
+  // it is genuinely finished (finishAndClose after a confirmed purchase, and
+  // handleUseDifferentTxn when the customer abandons this ID on purpose).
   const handleDismiss = () => {
-    if (showTakeover) {
-      reset();
-      onClose();
-      return;
-    }
     onClose();
   };
 

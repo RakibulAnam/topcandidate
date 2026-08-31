@@ -7,6 +7,8 @@
 import { supabase } from '../supabase/client';
 import {
   IPurchaseRepository,
+  OPEN_PURCHASE_MAX_AGE_MS,
+  OPEN_PURCHASE_STATUSES,
   Purchase,
   PurchaseStatus,
 } from '../../domain/repositories/IPurchaseRepository';
@@ -46,5 +48,22 @@ export class SupabasePurchaseRepository implements IPurchaseRepository {
       throw new Error(`Failed to load purchases: ${error.message}`);
     }
     return ((data ?? []) as PurchaseRow[]).map(toDomain);
+  }
+
+  async getOpenPurchase(): Promise<Purchase | null> {
+    const since = new Date(Date.now() - OPEN_PURCHASE_MAX_AGE_MS).toISOString();
+    const { data, error } = await supabase
+      .from('purchases')
+      .select('id, payment_reference, amount_taka, observed_amount_taka, credits_granted, status, created_at')
+      .in('status', OPEN_PURCHASE_STATUSES)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw new Error(`Failed to load open purchase: ${error.message}`);
+    const row = (data ?? [])[0] as PurchaseRow | undefined;
+    // A row with no payment_reference cannot be tracked or verified — every
+    // lookup downstream is keyed on the TrxID — so it is not resumable.
+    if (!row || !row.payment_reference) return null;
+    return toDomain(row);
   }
 }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, initialAuthParams } from '../supabase/client';
+import { resetOpenPurchase } from '../api/openPurchaseStore';
 import { track, getFirstTouch } from '../analytics/track';
 
 /**
@@ -263,6 +264,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.removeItem('topcandidate.pendingPurchase');
             window.dispatchEvent(new Event('topcandidate:pending-purchase-changed'));
         } catch { /* ignore — quota or private mode */ }
+        // The open-purchase cache is a MODULE-level store, so it outlives the
+        // React tree and would otherwise hand user B user A's pending payment
+        // — the same shared-browser hazard the localStorage wipe above exists
+        // for, one layer up.
+        resetOpenPurchase();
     };
 
     // 'email', 'google', … — sourced from app_metadata.provider (set by GoTrue).

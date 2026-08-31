@@ -2,13 +2,20 @@
 // bKash purchase end-to-end on the customer's screen.
 //
 // Lifecycle:
-//   - Hidden when localStorage has no PENDING_PURCHASE_KEY entry.
-//   - Visible the moment PurchaseModal writes one (we subscribe to a custom
-//     window event so we update without a refresh).
-//   - Polls /api/my-purchase-status every 10s for up to 5 min (POLL_LIMIT_MS).
+//   - Visible whenever the SERVER says this user has a purchase they can still
+//     act on (`useOpenPurchase`), not when a localStorage crumb says so.
+//   - Polls /api/my-purchase-status as a fallback; Realtime is the fast path.
 //   - On terminal status: shows the matching action card and stops polling.
-//   - "Dismiss" clears the localStorage entry and hides the pill until the
-//     next purchase.
+//   - Two DIFFERENT exits, deliberately not one button:
+//       "Hide"   — folds the pill away for this session. The purchase is
+//                  untouched and the modal still reopens straight into it.
+//       "Cancel" — actually voids the row (`voidTxn`), which frees a slot
+//                  against the 5-per-24h cap AND releases the Transaction ID
+//                  so it can be entered again. Never offered while a payment
+//                  may still be in flight.
+//     The old single "Dismiss" did neither: it deleted the only pointer to a
+//     still-pending server row, so the customer lost the payment from view and
+//     could not re-submit the same (correct) TrxID afterwards.
 //
 // Design: Saffron/Ink/Charcoal only. No gradients. No blue/indigo/purple.
 // The bKash magenta exception is scoped to PurchaseModal; this widget uses
@@ -21,13 +28,12 @@ import {
   clearPendingPurchase,
   fetchPurchaseStatus,
   filePurchaseDispute,
-  PENDING_PURCHASE_EVENT,
-  readPendingPurchase,
   subscribeToPurchase,
-  type PendingPurchaseRecord,
+  voidTxn,
   type PurchaseStatus,
   type PurchaseStatusResponse,
 } from '../../../infrastructure/api/purchaseStatusClient';
+import { refreshOpenPurchase, useOpenPurchase } from '../../hooks/useOpenPurchase';
 import { useT } from '../../i18n/LocaleContext';
 import { CONTACT_EMAIL, contactMailto } from '../../support';
 
@@ -51,28 +57,34 @@ interface Props {
   /** Called once when the tracked purchase reaches 'completed' so the host can
    *  refresh the credits badge without a page reload. */
   onCredited?: () => void;
+  /** Called after the customer cancels (voids) the tracked purchase, so hosts
+   *  holding their own derived state can re-read. */
+  onPurchaseChanged?: () => void;
 }
 
-export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited, channelSuffix }) => {
+export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited, onPurchaseChanged, channelSuffix }) => {
   const t = useT();
-  const [pending, setPending] = useState<PendingPurchaseRecord | null>(() => readPendingPurchase());
+  const openPurchase = useOpenPurchase();
+  const pending = openPurchase && openPurchase.paymentReference
+    ? { txnId: openPurchase.paymentReference }
+    : null;
   const [statusResp, setStatusResp] = useState<PurchaseStatusResponse | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
-  const [confirmDismiss, setConfirmDismiss] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  // Folded away for THIS session only. Deliberately not persisted and
+  // deliberately not a delete: the purchase stays live, the modal still opens
+  // straight into it, and any status change unhides the pill again.
+  const [hiddenTxn, setHiddenTxn] = useState<string | null>(null);
   const stopRef = useRef(false);
   const creditedRef = useRef(false);
   // Keep the latest onCredited without making it an effect dependency — hosts
   // pass an inline arrow whose identity changes every render.
   const onCreditedRef = useRef(onCredited);
   onCreditedRef.current = onCredited;
-
-  // Re-read when the modal writes / clears the key.
-  useEffect(() => {
-    const onChange = () => setPending(readPendingPurchase());
-    window.addEventListener(PENDING_PURCHASE_EVENT, onChange);
-    return () => window.removeEventListener(PENDING_PURCHASE_EVENT, onChange);
-  }, []);
+  const onPurchaseChangedRef = useRef(onPurchaseChanged);
+  onPurchaseChangedRef.current = onPurchaseChanged;
 
   // Reset tracking whenever the underlying pending purchase changes.
   useEffect(() => {
@@ -80,7 +92,8 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
     creditedRef.current = false;
     setStatusResp(null);
     setExpanded(false);
-    setConfirmDismiss(false);
+    setConfirmCancel(false);
+    setHiddenTxn(null);
   }, [pending?.txnId]);
 
   // Push-based status tracking: an initial fetch (covers match-on-submit having
@@ -102,8 +115,14 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
           if (s.status === 'completed' && !creditedRef.current) {
             creditedRef.current = true;
             onCreditedRef.current?.();
-            // Auto-dismiss the pill shortly after a successful credit grant.
-            setTimeout(() => { if (active) clearPendingPurchase(); }, 4000);
+            // Let the customer read the green state, then re-resolve: the row
+            // is `completed` now, so it is no longer "open" and the pill
+            // retires on its own. No local delete — the server decides.
+            setTimeout(() => {
+              if (!active) return;
+              clearPendingPurchase();
+              void refreshOpenPurchase();
+            }, 4000);
           }
         }
       } catch {
@@ -128,29 +147,44 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
   }, [pending?.txnId, channelSuffix]);
 
   if (!pending) return null;
+  if (hiddenTxn === pending.txnId) return null;
 
   const status: PurchaseStatus = statusResp?.status ?? 'pending';
   const visual = STATUS_VISUALS[status];
 
-  // Dismissing a stuck-but-non-completed purchase hides the pill, which
-  // means the customer loses their navbar entry-point to the recovery
-  // flow (dispute, contact support). Gate that with a confirm step.
-  const needsDismissConfirm =
-    status === 'underpaid' || status === 'msisdn_mismatch_review' || status === 'expired';
-
-  const onDismissClick = () => {
-    if (needsDismissConfirm) {
-      setConfirmDismiss(true);
-    } else {
-      clearPendingPurchase();
-      setExpanded(false);
-    }
+  // Hide: fold the pill away for this session. Non-destructive, so no confirm.
+  const onHide = () => {
+    setHiddenTxn(pending.txnId);
+    setExpanded(false);
   };
 
-  const onDismissConfirmed = () => {
-    clearPendingPurchase();
-    setConfirmDismiss(false);
-    setExpanded(false);
+  // Cancel is only safe once we know no payment is still on its way. While the
+  // status is plain `pending` the watcher may be seconds from matching a real
+  // bKash SMS, and voiding then is exactly how a paying customer's money goes
+  // quiet. `underpaid` and `msisdn_mismatch_review` have already been matched
+  // and stalled, so releasing them is a real choice the customer can make.
+  const canCancel = status === 'underpaid' || status === 'msisdn_mismatch_review' || status === 'expired';
+
+  const onCancelConfirmed = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      // Void the SERVER row, not a browser key. This is what frees a slot
+      // against the 5-per-24h cap and releases the Transaction ID so the same
+      // (correct) one can be submitted again.
+      await voidTxn(pending.txnId);
+      clearPendingPurchase();
+      await refreshOpenPurchase();
+      onPurchaseChangedRef.current?.();
+      toast.success(t('verifyPill.cancelDone'));
+    } catch (err) {
+      console.error('Could not cancel the purchase', err);
+      toast.error(t('verifyPill.cancelFailed'));
+    } finally {
+      setCancelling(false);
+      setConfirmCancel(false);
+      setExpanded(false);
+    }
   };
 
   return (
@@ -190,7 +224,7 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
             </div>
             <button
               type="button"
-              onClick={() => { setExpanded(false); setConfirmDismiss(false); }}
+              onClick={() => { setExpanded(false); setConfirmCancel(false); }}
               className="-mt-1 -mr-1 p-1.5 text-charcoal-400 hover:text-brand-700 rounded-full transition-colors"
               aria-label={t('verifyPill.close')}
             >
@@ -212,33 +246,35 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
             onFileDispute={() => setDisputeOpen(true)}
           />
 
-          {confirmDismiss ? (
+          {confirmCancel ? (
             <div className="mt-3 pt-3 border-t border-charcoal-100">
               <div className="text-[12.5px] font-semibold text-brand-700">
-                {t('verifyPill.dismissConfirmTitle')}
+                {t('verifyPill.cancelConfirmTitle')}
               </div>
               <div className="mt-1 text-[12px] text-charcoal-600 leading-snug">
-                {t('verifyPill.dismissConfirmBody')}
+                {t('verifyPill.cancelConfirmBody')}
               </div>
               <div className="mt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setConfirmDismiss(false)}
+                  onClick={() => setConfirmCancel(false)}
                   className="px-3 py-2 rounded-full text-[12px] font-semibold text-charcoal-500 hover:text-brand-700"
                 >
-                  {t('common.cancel')}
+                  {t('verifyPill.cancelKeep')}
                 </button>
                 <button
                   type="button"
-                  onClick={onDismissConfirmed}
-                  className="px-3 py-2 rounded-full text-[12px] font-semibold bg-brand-700 hover:bg-brand-800 text-white transition-colors"
+                  disabled={cancelling}
+                  onClick={() => { void onCancelConfirmed(); }}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-[12px] font-semibold bg-brand-700 hover:bg-brand-800 text-white transition-colors disabled:opacity-60"
                 >
-                  {t('verifyPill.dismissConfirm')}
+                  {cancelling && <Loader2 size={12} className="animate-spin" />}
+                  {t('verifyPill.cancelConfirm')}
                 </button>
               </div>
             </div>
           ) : (
-            <div className="mt-3 pt-3 border-t border-charcoal-100 flex items-center justify-between gap-3">
+            <div className="mt-3 pt-3 border-t border-charcoal-100 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <a
                 href={contactMailto(t('verifyPill.emailSubject', { txn: pending.txnId }))}
                 title={CONTACT_EMAIL}
@@ -247,13 +283,26 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
                 <Mail size={13} />
                 {t('verifyPill.contactUs')}
               </a>
-              <button
-                type="button"
-                onClick={onDismissClick}
-                className="text-[12px] text-charcoal-500 hover:text-brand-700 underline underline-offset-2"
-              >
-                {t('verifyPill.dismiss')}
-              </button>
+              <div className="flex items-center gap-3">
+                {/* Two exits, and the labels have to earn the difference:
+                    Hide is a view control, Cancel ends the transaction. */}
+                <button
+                  type="button"
+                  onClick={onHide}
+                  className="text-[12px] text-charcoal-500 hover:text-brand-700 underline underline-offset-2"
+                >
+                  {t('verifyPill.hide')}
+                </button>
+                {canCancel && (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCancel(true)}
+                    className="text-[12px] text-charcoal-500 hover:text-brand-700 underline underline-offset-2"
+                  >
+                    {t('verifyPill.cancelTxn')}
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>
