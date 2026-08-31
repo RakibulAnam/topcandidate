@@ -12,6 +12,7 @@ import '../dispatch/webhook_client.dart';
 import '../notifications/notifier.dart';
 import '../settings/settings_repository.dart';
 import '../sms/bkash_parser.dart';
+import '../sms/sms_ingest.dart';
 import '../sms/sms_kind.dart';
 import '../storage/database.dart';
 import '../storage/processed_sms_dao.dart';
@@ -66,66 +67,31 @@ class SmsListener {
       return;
     }
     final body = message.body ?? '';
-    final parsed = BkashSms.parse(body);
-    if (parsed == null) {
-      developer.log('fg: parse returned null', name: 'sms_listener.$isolate');
-      // Best-effort observability dump — operator updates the parser later.
-      // No DB row, no retry. See spec/01-server-contract.md "Other webhooks".
-      _dumpParserFailure(
-        client: dispatcher.webhookClient,
-        rawBody: body,
-        smsTimestamp: message.date != null
-            ? DateTime.fromMillisecondsSinceEpoch(message.date!)
-            : DateTime.now(),
-      );
-      return;
-    }
-    developer.log(
-      'fg parsed kind=${parsed.kind} trxId=${parsed.trxId} '
-      'amount=${parsed.amountTaka} hasMsisdn=${parsed.senderMsisdn != null}',
-      name: 'sms_listener.$isolate',
-    );
-    final now = DateTime.now();
     final smsTs = message.date != null
         ? DateTime.fromMillisecondsSinceEpoch(message.date!)
-        : now;
-    dao
-        .insertParsed(parsed: parsed, smsTimestamp: smsTs, now: now)
-        .then((id) {
-      if (id == null) {
-        developer.log(
-          'fg: duplicate trxId=${parsed.trxId}, not dispatching',
-          name: 'sms_listener.$isolate',
+        : DateTime.now();
+
+    // Shared with the Settings test panel — see lib/sms/sms_ingest.dart. Keep
+    // the pipeline in one place so a passing test says something real.
+    ingestBkashSms(
+      body: body,
+      smsTimestamp: smsTs,
+      dao: dao,
+      dispatcher: dispatcher,
+      isolate: 'fg.$isolate',
+    ).then((result) {
+      if (result.outcome == SmsIngestOutcome.unparsed) {
+        // Best-effort observability dump — operator updates the parser later.
+        // No DB row, no retry. See spec/01-server-contract.md "Other webhooks".
+        _dumpParserFailure(
+          client: dispatcher.webhookClient,
+          rawBody: body,
+          smsTimestamp: smsTs,
         );
-        return;
-      }
-      developer.log(
-        'fg: inserted id=$id kind=${parsed.kind}',
-        name: 'sms_listener.$isolate',
-      );
-      // Kick the dispatcher when the row was inserted in a dispatchable state.
-      // Reversal SMS now go through the dispatcher (POST /api/reverse-purchase)
-      // since migration 007; previously they terminated as ignoredRefund.
-      if (parsed.kind == BkashSmsKind.received ||
-          parsed.kind == BkashSmsKind.refund) {
-        developer.log('fg: kicking dispatcher', name: 'sms_listener.$isolate');
-        dispatcher.tick().then((processed) {
-          developer.log(
-            'fg: dispatcher.tick complete, processed=$processed',
-            name: 'sms_listener.$isolate',
-          );
-        }).catchError((Object e, StackTrace st) {
-          developer.log(
-            'fg: dispatcher.tick failed: $e',
-            name: 'sms_listener.$isolate',
-            error: e,
-            stackTrace: st,
-          );
-        });
       }
     }).catchError((Object e, StackTrace st) {
       developer.log(
-        'fg: insert failed: $e',
+        'fg: ingest failed: $e',
         name: 'sms_listener.$isolate',
         error: e,
         stackTrace: st,

@@ -6,7 +6,14 @@
 // (First slice: "+ Add" links to the Profile screen; the inline add-drawer that
 // saves back to the profile with AI-refine is the next step. Generate hands off
 // to the builder's existing generation via autoGenerate.)
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+//
+// CREDIT GATE. The zero-credit check happens HERE, before we hand off — not in
+// the builder. The builder has no wizard left to fall back to, so entering it
+// without credits used to strand the user on a progress screen for a
+// generation that never started. Declining the purchase now simply leaves them
+// on this screen with every control intact; completing it hands off
+// automatically, because that was plainly what they were trying to do.
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, ChevronDown, Plus, Check, Loader2, Info,
   Briefcase, GraduationCap, Sparkles, FolderGit2, BadgeCheck,
@@ -17,6 +24,7 @@ import { profileRepository } from '../infrastructure/config/dependencies';
 import type { ResumeData } from '../domain/entities';
 import { useT } from './i18n/LocaleContext';
 import { SectionAddDrawer } from './components/dashboard/SectionAddDrawer';
+import { useDashboardShell } from './components/dashboard/DashboardShell';
 
 interface Props {
   targetJob: ResumeData['targetJob'];
@@ -55,11 +63,36 @@ const CHIPS = [
 ] as const;
 
 export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: Props) => {
+  const { credits, openPurchase } = useDashboardShell();
+  // Set when Generate was pressed at zero credits, so a purchase completed
+  // without leaving this screen resumes the hand-off. A ref would not do: the
+  // resume is driven by `credits` changing, which only a render can observe.
+  //
+  // A boolean, NOT a snapshot of the sections: freezing the selection here meant
+  // a user who dismissed the sheet, changed their sections (the whole point of
+  // the add-drawer), and only then completed a purchase got a generation built
+  // from the OLD selection. The live `selected` is read at fire time instead.
+  const [pendingGenerate, setPendingGenerate] = useState(false);
+  // The balance we were blocked at. If credits never rise above it the intent
+  // is not armed, so an unrelated later top-up cannot silently spend a credit.
+  const blockedAtCredits = useRef<number | null>(null);
   const { user } = useAuth();
   const t = useT();
   const [data, setData] = useState<Loaded | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [jdOpen, setJdOpen] = useState(false);
+  // Credits can land after the sheet closes (bKash confirms out of band), so
+  // this watches the balance rather than the modal's lifecycle.
+  useEffect(() => {
+    if (!pendingGenerate || credits === null || credits <= 0) return;
+    // Only fire for credits that arrived AFTER we were blocked.
+    if (blockedAtCredits.current !== null && credits <= blockedAtCredits.current) return;
+    setPendingGenerate(false);
+    blockedAtCredits.current = null;
+    onGenerate([...selected]);   // read live, not a frozen snapshot
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [credits, pendingGenerate]);
+
   const [addSection, setAddSection] = useState<{ key: string; label: string } | null>(null);
 
   const loadProfile = useCallback(async (): Promise<Loaded | null> => {
@@ -244,7 +277,18 @@ export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: 
           <button
             type="button"
             disabled={!canGenerate}
-            onClick={() => onGenerate([...selected])}
+            onClick={() => {
+              // credits === null means the balance is still loading or failed
+              // to load; let it through and let the server decide rather than
+              // blocking someone who does have credits.
+              if (credits === 0) {
+                blockedAtCredits.current = credits;
+                setPendingGenerate(true);
+                openPurchase();
+                return;
+              }
+              onGenerate([...selected]);
+            }}
             className="ml-auto inline-flex items-center gap-2.5 rounded-xl bg-accent-400 px-[26px] py-3 text-[15px] font-bold text-brand-800 transition-all hover:-translate-y-px hover:bg-accent-300 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
           >
             {t('summary.generateCta')}

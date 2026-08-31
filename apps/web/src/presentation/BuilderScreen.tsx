@@ -16,6 +16,16 @@ import { apiErrorMessage, isRetryPointless } from './i18n/apiErrorMessage.js';
 import { useT } from './i18n/LocaleContext';
 
 
+// Every generation-failure toast carries this id. Two things follow: a second
+// failure REPLACES the first instead of stacking, and — the reason it exists —
+// a new attempt can clear the old one. Sonner dismisses a toast when its own
+// action button is pressed, but a retry started from anywhere else (the
+// full-screen panel's Retry, the idle panel's Generate, the automatic resume
+// after a purchase lands) left a red "generation failed" toast sitting on top
+// of a progress panel animating "Building your application" for the remaining
+// 12-15 seconds of its duration. Same for a retry that then succeeds.
+const GENERATION_TOAST_ID = 'builder-generation-error';
+
 interface BuilderScreenProps {
   initialData: ResumeData;
   initialStep: AppStep;
@@ -26,6 +36,10 @@ interface BuilderScreenProps {
   // once credits are known and this screen renders only Generating → Preview
   // (or an error + retry). The step wizard has been retired.
   autoGenerate?: boolean;
+  // Fired once, with the row id, when a generation persists a NEW resume.
+  // App stamps that id into the history entry so Back/Forward and reload can
+  // restore this preview instead of the builder's idle panel.
+  onGenerated?: (id: string) => void;
 }
 
 export const BuilderScreen: React.FC<BuilderScreenProps> = ({
@@ -35,6 +49,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   resumeService,
   onExit,
   autoGenerate = false,
+  onGenerated,
 }) => {
   const { user } = useAuth();
   const t = useT();
@@ -48,17 +63,51 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // boolean — so a user who hit the daily cap was told to try again, next to a
   // Retry button that could only fail. Null = keep the default copy.
   const [generationErrorBody, setGenerationErrorBody] = useState<string | null>(null);
+  // Whether the full-screen panel should offer Retry at all. The panel used to
+  // offer it unconditionally — including after a refund failure (where the user
+  // WAS charged and retrying spends a second credit) and after the daily cap
+  // (where every press is a guaranteed rejection). The toast already reasoned
+  // about this via isRetryPointless; the persistent surface did not.
+  const [generationRetryable, setGenerationRetryable] = useState(true);
 
   // Toolkit credits — null while loading, integer once fetched. We fetch on
   // mount and after every purchase so the user always sees a fresh balance
   // before clicking Generate. The server is the source of truth; this number
   // only drives the UI (the gate is enforced in /api/optimize).
   const [credits, setCredits] = useState<number | null>(null);
+  // Whether the credits fetch has SETTLED, regardless of outcome. Distinct from
+  // `credits !== null`: a failed fetch leaves credits null forever, and gating
+  // auto-generation on a non-null value therefore deadlocked the screen on a
+  // progress panel for a request that was never sent.
+  const [creditsLoaded, setCreditsLoaded] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
-  // True if the user clicked Generate while at zero credits — after a
-  // successful purchase we resume the generation automatically rather than
-  // making them click again.
-  const [resumeGenerateAfterPurchase, setResumeGenerateAfterPurchase] = useState(false);
+  // Set when the user hit the zero-credit gate — after the credits actually
+  // land we resume the generation rather than making them ask again.
+  //
+  // A ref, not state, and deliberately NOT cleared when the modal closes. bKash
+  // credits can land seconds after the sheet is dismissed (the watcher confirms
+  // out of band), and clearing on close threw away the intent of someone who
+  // had genuinely paid — leaving them on a progress screen with credits in
+  // their account and no control to spend them. Cleared only when a generation
+  // actually starts, or when the user leaves.
+  const resumeAfterPurchaseRef = useRef(false);
+  // Guards against two triggers racing into one generation — the navbar pill's
+  // onCredited and the modal's onSuccess both fire on a purchase, and the retry
+  // toast stays tappable while a retry is already running. Each duplicate costs
+  // a real credit and writes a duplicate resume row.
+  const generatingRef = useRef(false);
+  // False after unmount, so a late callback cannot start a generation the user
+  // can no longer see.
+  const mountedRef = useRef(true);
+  // MUST re-arm on mount, not only clear on unmount. React 18 StrictMode runs
+  // effects mount -> cleanup -> mount in development, so a cleanup-only version
+  // left this false for the component's entire life: handlePurchaseSuccess
+  // early-returned (no credit refresh, no post-purchase resume) and the
+  // autosave's teardown flush fired on every keystroke instead of on teardown.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // Validation errors map field paths (e.g. "personalInfo.fullName") to error messages
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -129,20 +178,27 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // ref avoids redundant writes (e.g. right after handleGenerate already
   // saved the merged data, or when opening an existing resume read-only).
   const lastPersistedRef = useRef<string>(JSON.stringify(initialData));
+  // The not-yet-written autosave, and a flag that distinguishes a genuine
+  // teardown from the effect simply re-running on the next keystroke.
+  // Teardown detection reuses mountedRef, which is declared above this effect —
+  // React runs cleanups in definition order, so mountedRef is already false by
+  // the time the autosave cleanup below asks.
+  const pendingSaveRef = useRef<null | (() => Promise<void>)>(null);
   useEffect(() => {
     if (!resumeService || !activeResumeId || isGenerating) return;
     if (step !== AppStep.PREVIEW) return;
     const snapshot = JSON.stringify(resumeData);
     if (snapshot === lastPersistedRef.current) return;
-    const handle = window.setTimeout(async () => {
+    // General resumes are identified by their fixed title — never rename
+    // them here or isGeneralResume detection breaks on next load.
+    const title = isGeneralResume
+      ? ResumeService.GENERAL_RESUME_TITLE
+      : resumeData.targetJob?.title
+        ? `${resumeData.targetJob.title} Resume`
+        : `Resume - ${new Date().toLocaleDateString()}`;
+
+    const persist = async () => {
       try {
-        // General resumes are identified by their fixed title — never rename
-        // them here or isGeneralResume detection breaks on next load.
-        const title = isGeneralResume
-          ? ResumeService.GENERAL_RESUME_TITLE
-          : resumeData.targetJob?.title
-            ? `${resumeData.targetJob.title} Resume`
-            : `Resume - ${new Date().toLocaleDateString()}`;
         await resumeService.updateGeneratedResume(activeResumeId, resumeData, title);
         lastPersistedRef.current = snapshot;
         console.info('[builder] preview edits persisted');
@@ -150,8 +206,23 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         console.error('Preview edit autosave failed', err);
         toast.error(t('builder.autosaveFailed'));
       }
-    }, 1500);
-    return () => window.clearTimeout(handle);
+    };
+
+    const handle = window.setTimeout(() => { pendingSaveRef.current = null; void persist(); }, 1500);
+    // Hold the un-flushed write so a teardown can still send it. Without this
+    // the cleanup below only cancelled the timer, so an edit whose committing
+    // blur was the SAME click that left the screen was silently dropped — the
+    // exact loss this effect exists to prevent. Deterministic, not a race: any
+    // exit within 1.5s of the last keystroke lost it.
+    pendingSaveRef.current = persist;
+    return () => {
+      window.clearTimeout(handle);
+      const flush = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      // Only flush on a real teardown (unmount / leaving PREVIEW), not on the
+      // re-run that every keystroke causes — otherwise every character writes.
+      if (flush && !mountedRef.current) void flush();
+    };
   }, [resumeService, resumeData, activeResumeId, step, isGenerating, isGeneralResume, t]);
 
   // Skills the user accumulated during profile setup. Used by SkillsStep to
@@ -173,9 +244,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   }, [user]);
 
   // Pull the user's credit balance once on mount (and whenever the user
-  // changes). On failure we leave it as null — the server still gates the
-  // call, so a missing client-side balance just means we don't show the
-  // remaining-count hint until the next refresh.
+  // changes). On failure we leave the balance null — the server still gates the
+  // call — but we MUST still mark the fetch as settled, or the auto-generate
+  // effect below waits forever for a number that will never arrive.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -184,7 +255,10 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       .then(n => {
         if (!cancelled) setCredits(n);
       })
-      .catch(err => console.warn('Could not load toolkit credits', err));
+      .catch(err => console.warn('Could not load toolkit credits', err))
+      .finally(() => {
+        if (!cancelled) setCreditsLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -260,6 +334,15 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       return;
     }
 
+    // One generation at a time. Two triggers can arrive for a single user
+    // action (purchase success from both the modal and the navbar pill; the
+    // retry toast still tappable during a retry), and each duplicate spends a
+    // real credit and saves a duplicate resume row.
+    if (generatingRef.current) {
+      console.info('[builder] handleGenerate ignored — a generation is already in flight');
+      return;
+    }
+
     console.info(`[builder] handleGenerate clicked creditsBefore=${credits ?? 'loading'} skipCreditCheck=${!!opts?.skipCreditCheck}`);
 
     // Client-side credit gate. The server enforces the real check (atomic in
@@ -271,11 +354,18 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     // user back into the modal.
     if (!opts?.skipCreditCheck && credits === 0) {
       console.info('[builder] credit pre-check refused (credits=0), opening purchase modal');
-      setResumeGenerateAfterPurchase(true);
+      resumeAfterPurchaseRef.current = true;
       setPurchaseModalOpen(true);
       return;
     }
 
+    // Past every precondition — this generation is really starting, so the
+    // queued intent is spent and the in-flight guard goes up. Any failure
+    // toast from the previous attempt is now stale.
+    toast.dismiss(GENERATION_TOAST_ID);
+    resumeAfterPurchaseRef.current = false;
+    generatingRef.current = true;
+    setGenerationRetryable(true);
     setIsGenerating(true);
     setGenerationError(null);
       setGenerationErrorBody(null);
@@ -349,6 +439,10 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
             const newId = await resumeService.saveGeneratedResume(user.id, mergedData, title);
             setActiveResumeId(newId);
             savedId = newId;
+            // Only while we are still the screen the user is looking at. A save
+            // that resolves after they navigated away must not rewrite the
+            // history entry they moved to.
+            if (mountedRef.current) onGenerated?.(newId);
           }
           // Just persisted — sync the preview-edit autosave snapshot so the
           // effect doesn't immediately re-write the same data.
@@ -423,22 +517,35 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       // mount fetch failed and we let the call proceed).
       if (err instanceof ApiCallError && err.code === 'insufficient_credits') {
         setCredits(0);
-        setResumeGenerateAfterPurchase(true);
+        resumeAfterPurchaseRef.current = true;
         setPurchaseModalOpen(true);
       } else if (err instanceof Error && err.name === 'GibberishContentError') {
         // GibberishContentError carries a user-actionable message naming the
         // offending field — surface it verbatim so the user knows where to fix.
-        toast.error(err.message);
+        // Retrying the identical content is deterministic: it fails again.
+        setGenerationErrorBody(err.message);
+        setGenerationRetryable(false);
+        toast.error(err.message, { id: GENERATION_TOAST_ID });
       } else if (errCode === 'refund_failed') {
         // The user was charged but got nothing AND the automatic refund
         // failed — never leave this ambiguous. Long duration: this one matters.
-        toast.error(t('builder.refundFailed'), { duration: 15000 });
+        //
+        // The persistent panel must say the same thing. It used to fall back to
+        // generationErrorBody's default copy — "Your credit was not charged" —
+        // which is the exact opposite of the truth here, sitting next to a
+        // Retry that would spend another credit. The toast vanishes; the panel
+        // is what the user is left staring at.
+        setGenerationErrorBody(t('builder.refundFailed'));
+        setGenerationRetryable(false);
+        setCredits(prev => (prev === null ? prev : Math.max(0, prev - 1)));
+        toast.error(t('builder.refundFailed'), { id: GENERATION_TOAST_ID, duration: 15000 });
       } else if (errCode === 'client_timeout' || errCode === 'network_error') {
         // Hung connection or offline — retryable, so offer the retry inline
         // instead of making the user re-find the Generate button.
         toast.error(
           errCode === 'client_timeout' ? t('builder.generationTimeout') : t('builder.networkError'),
           {
+            id: GENERATION_TOAST_ID,
             duration: 12000,
             action: {
               label: t('builder.retryCta'),
@@ -450,7 +557,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         // A recognized server failure: show WHY, localized. Offer Retry only when
         // retrying can actually succeed — on a daily-cap 429 every press is a
         // guaranteed rejection, so the button is removed rather than lying.
+        if (isRetryPointless(err)) setGenerationRetryable(false);
         toast.error(localized, {
+          id: GENERATION_TOAST_ID,
           duration: 12000,
           ...(isRetryPointless(err) ? {} : {
             action: {
@@ -461,6 +570,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         });
       } else {
         toast.error(t('builder.optimizeFailed'), {
+          id: GENERATION_TOAST_ID,
           duration: 10000,
           action: {
             label: t('builder.retryCta'),
@@ -469,6 +579,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         });
       }
     } finally {
+      generatingRef.current = false;
       setIsGenerating(false);
     }
   };
@@ -478,37 +589,41 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // initialData by App before navigating here, so no step input is needed.
   const autoGenFired = useRef(false);
   useEffect(() => {
-    if (autoGenerate && !autoGenFired.current && resumeService && credits !== null) {
+    // `creditsLoaded`, not `credits !== null`: a failed balance fetch must not
+    // strand the screen. handleGenerate already tolerates a null balance and
+    // lets the server enforce the real gate.
+    if (autoGenerate && !autoGenFired.current && resumeService && creditsLoaded) {
       autoGenFired.current = true;
       void handleGenerate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoGenerate, resumeService, credits]);
+  }, [autoGenerate, resumeService, creditsLoaded]);
 
+  // Fires from BOTH the modal's onSuccess and the navbar pill's onCredited —
+  // one purchase can trigger it twice. The intent is read-and-cleared
+  // synchronously, before any await, so the second caller finds it spent
+  // instead of starting a second paid generation.
   const handlePurchaseSuccess = () => {
     if (!user) return;
-    // Re-fetch credits immediately. In dev/mock mode the credits are already
-    // in the DB by the time onSuccess fires; in production they may still be
-    // pending, but a single re-fetch is cheap and correct for the mock path.
     profileRepository
       .getToolkitCredits(user.id)
       .then(n => {
+        if (!mountedRef.current) return;
         setCredits(n);
-        if (resumeGenerateAfterPurchase && n > 0) {
-          setResumeGenerateAfterPurchase(false);
-          void handleGenerate({ skipCreditCheck: true });
-        } else {
-          setResumeGenerateAfterPurchase(false);
-        }
+        setCreditsLoaded(true);
+        if (!resumeAfterPurchaseRef.current || n <= 0) return;
+        resumeAfterPurchaseRef.current = false;
+        void handleGenerate({ skipCreditCheck: true });
       })
-      .catch(() => {
-        setResumeGenerateAfterPurchase(false);
-      });
+      .catch(err => console.warn('Could not refresh credits after purchase', err));
   };
 
+  // Closing the sheet is NOT abandoning the purchase. bKash credits can land
+  // after it closes, and the intent must outlive the dismissal so the pill's
+  // onCredited can still resume the generation the user paid for. The intent is
+  // cleared when a generation starts, or when the user leaves the builder.
   const handlePurchaseClose = () => {
     setPurchaseModalOpen(false);
-    setResumeGenerateAfterPurchase(false);
   };
 
   const handleExportWord = async (data: ResumeData) => {
@@ -554,6 +669,13 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // autoGenerate fires generation on mount; this shows a calm progress screen
   // while it runs and a retry on failure. Opening an existing resume returns
   // <Preview> above, so this render only ever shows generate / error states.
+  // Auto-generate is armed but has not fired yet — the credits pre-flight is
+  // still in the air. This IS work in progress from the user's point of view
+  // (they just pressed Generate), so it must render as progress. Without it the
+  // new idle panel flashed "Nothing is building right now" on the happy path of
+  // every tailored generation, for the length of one Supabase round-trip.
+  const startingUp = autoGenerate && !autoGenFired.current;
+
   const artifactChips = ['chipResume', 'chipCover', 'chipEmail', 'chipLinkedin', 'chipInterview'];
   return (
     <div className="flex min-h-screen flex-col" style={{ background: '#F6F4EE' }}>
@@ -580,13 +702,58 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               >
                 {t('builder.backToDashboard')}
               </button>
+              {generationRetryable && (
+                <button
+                  type="button"
+                  onClick={() => { void handleGenerate(); }}
+                  className="inline-flex items-center gap-2 rounded-full bg-accent-400 px-6 py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
+                >
+                  <RefreshCw size={15} /> {t('builder.retryCta')}
+                </button>
+              )}
+            </div>
+          </div>
+        ) : !isGenerating && !startingUp ? (
+          /* NOT generating, and no error to show. Previously this fell through
+             to the progress panel below, which then animated "Building your
+             application…" for work that was never started — the zero-credit
+             gate returns early, a failed credits fetch never fired, and a
+             Back/Forward replay lands here too. A screen that lies about
+             working is worse than one that admits it is idle, so say so and
+             give the user the two controls that actually help. */
+          <div className="w-full max-w-md text-center">
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-100">
+              <Sparkles size={26} className="text-accent-600" />
+            </div>
+            <h1 className="font-display text-2xl font-semibold text-brand-700">{t('builder.idleTitle')}</h1>
+            <p className="mt-2 text-[15px] leading-relaxed text-charcoal-500">
+              {credits === 0 ? t('builder.idleBodyNoCredits') : t('builder.idleBody')}
+            </p>
+            <div className="mt-6 flex items-center justify-center gap-3">
               <button
                 type="button"
-                onClick={() => { void handleGenerate(); }}
-                className="inline-flex items-center gap-2 rounded-full bg-accent-400 px-6 py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
+                onClick={onExit}
+                className="rounded-full border border-charcoal-300 px-5 py-3 text-sm font-semibold text-brand-700 transition-colors hover:border-brand-700"
               >
-                <RefreshCw size={15} /> {t('builder.retryCta')}
+                {t('builder.backToDashboard')}
               </button>
+              {credits === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => { resumeAfterPurchaseRef.current = true; setPurchaseModalOpen(true); }}
+                  className="inline-flex items-center gap-2 rounded-full bg-accent-400 px-6 py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
+                >
+                  {t('builder.idleBuyCta')}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { void handleGenerate(); }}
+                  className="inline-flex items-center gap-2 rounded-full bg-accent-400 px-6 py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
+                >
+                  <Sparkles size={15} /> {t('builder.idleGenerateCta')}
+                </button>
+              )}
             </div>
           </div>
         ) : (

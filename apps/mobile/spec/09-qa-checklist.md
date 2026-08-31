@@ -81,6 +81,44 @@ item should be reproducible from a fresh install.
 - [ ] Open Settings tab → SMS permission shows `Denied`.
 - [ ] Status pill turns amber "Service running but SMS read denied".
 
+## Driving the web app's purchase states (Settings > Test tools)
+
+Preferred over adb injection: it needs no emulator, no real money, and it runs
+the same pipeline a real SMS does. Enable **Settings > Test tools** first
+(default off). Every TrxID it makes starts with `TST`.
+
+Ordering is the whole trick — the web modal reacts differently depending on
+whether the payment reaches the server before or after the customer submits.
+
+| Web state to see | Steps |
+|---|---|
+| Instant credit (green check) | Tap **Pay ৳200**, then paste the TrxID into the web modal and submit. The server already holds the payment, so it settles inside the submit request. |
+| Verifying panel → green check | Submit the TrxID on web FIRST, then tap **Pay ৳200** within 20s. The panel flips to the check live over Realtime. |
+| `likely_typo` | Tap **Pay ৳200**, then submit the **Copy typo** value on web. After 20s the modal reports the mismatch and offers a retry. The card describes NO payment — no amount, no sender, masked or otherwise (web migrations 029/030). Nothing at diagnosis time proves the near-miss belongs to the person asking, and letting the customer-supplied sender number decide the verdict turned it into a "does this number have an unclaimed payment?" oracle. Detection is by TrxID similarity alone. |
+| `awaiting_sms` | Only reachable when `watcher_heartbeats` is EMPTY (no ping has ever landed), or while the row is younger than the **15s** grace window. Clear the table, submit an unused TrxID, send nothing. |
+| `nothing_found` | Tap **Send heartbeat now** first and confirm it reports "✓ Heartbeat accepted" — a rejection means that server build has no heartbeat route. Then submit an unused TrxID and wait out the modal's 20s window. A live watcher plus no payment is what makes the firmer copy honest. |
+| `watcher_stale` | Turn on **Pause heartbeat**, wait ~5 min for the server's staleness threshold, then submit on web. Switching the master **Test tools** toggle off also lifts the pause, so the watcher cannot be left mute by accident. |
+| `underpaid` | Submit the TrxID on web, then tap **Pay ৳150 (underpaid)**. |
+| `msisdn_mismatch_review` | On web, expand "Add your bKash phone" and enter `01711234567`; then tap **Pay from another number**. |
+
+**Cleanup.** These create real rows and can grant real credits to whichever
+account submitted the TrxID. Sweep them afterwards:
+
+```sql
+-- inspect first
+select payment_reference, status, credits_granted, created_at
+from purchases where payment_reference like 'TST%' order by created_at desc;
+
+delete from inbound_payments      where payment_reference like 'TST%';
+delete from unmatched_inbound_sms where payment_reference like 'TST%';
+-- purchases: prefer the admin panel so the credit ledger stays consistent;
+-- pending rows also expire on their own after 24h.
+```
+
+Credits granted by a test purchase are real — deduct them from the test
+account via the admin panel rather than editing `profiles` directly, so
+`credit_ledger` stays truthful.
+
 ## adb test-SMS injection
 
 To inject without a real bKash, run:

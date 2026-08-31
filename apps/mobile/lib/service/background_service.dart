@@ -6,6 +6,7 @@ import 'dart:developer' as developer;
 import 'dart:ui';
 
 import 'package:another_telephony/telephony.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -13,6 +14,7 @@ import 'package:workmanager/workmanager.dart' as wm;
 
 import '../diagnostics.dart';
 import '../dispatch/dispatcher.dart';
+import '../dispatch/heartbeat.dart';
 import '../notifications/notifier.dart';
 import '../settings/settings_repository.dart';
 import '../storage/database.dart';
@@ -137,6 +139,15 @@ Future<void> _onStart(ServiceInstance service) async {
     webhookClient: webhook,
     notifier: notifier,
   );
+  // Liveness ping so the web app can tell "wrong TrxID" from "phone offline"
+  // (web migration 028). Throttled internally; safe to call every tick.
+  final heartbeat = Heartbeat(
+    webhookClient: webhook,
+    deviceIdProvider: settings.deviceId,
+    queueDepthProvider: dao.pendingCount,
+    pausedProvider: settings.heartbeatPaused,
+    smsGrantedProvider: () => Permission.sms.isGranted,
+  );
   final smsListener = SmsListener(
     telephony: Telephony.instance,
     dao: dao,
@@ -147,6 +158,8 @@ Future<void> _onStart(ServiceInstance service) async {
 
   // Run a dispatch tick on startup to drain anything queued while we were off.
   unawaited(dispatcher.tick());
+  // And announce we're alive immediately, rather than up to a minute later.
+  unawaited(heartbeat.maybeSend(force: true));
 
   // UI -> service kick channel.
   service.on('kick').listen((_) {
@@ -162,6 +175,7 @@ Future<void> _onStart(ServiceInstance service) async {
   // serialized, and is a cheap no-op when nothing is due.
   final ticker = Timer.periodic(const Duration(seconds: 15), (_) {
     unawaited(dispatcher.tick());
+    unawaited(heartbeat.maybeSend());
   });
   service.on('stop').listen((_) {
     ticker.cancel();
@@ -198,6 +212,17 @@ void workmanagerCallback() {
         notifier: notifier,
       );
       await dispatcher.tick();
+      // Fresh isolate every run, so the in-memory throttle is always empty —
+      // force is equivalent here and states the intent. This is the only
+      // liveness signal once the foreground service is dead, which is exactly
+      // when the web app most needs to know we're still around.
+      await Heartbeat(
+        webhookClient: webhook,
+        deviceIdProvider: settings.deviceId,
+        queueDepthProvider: dao.pendingCount,
+        pausedProvider: settings.heartbeatPaused,
+        smsGrantedProvider: () => Permission.sms.isGranted,
+      ).maybeSend(force: true);
     } catch (e, st) {
       developer.log(
         'wm tick failed: $e',

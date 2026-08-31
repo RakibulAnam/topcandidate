@@ -189,6 +189,17 @@ class ProcessedSmsDao implements DispatcherDao {
     return DateTime.fromMillisecondsSinceEpoch(rows.first['updated_at'] as int);
   }
 
+  /// How many rows the watcher still owes the server — reported as
+  /// diagnostic telemetry on the liveness heartbeat (web migration 028) so the
+  /// operator can see a backlog building without opening the app.
+  Future<int> pendingCount() async {
+    final rows = await _raw.rawQuery(
+      "SELECT COUNT(*) AS c FROM processed_sms "
+      "WHERE state IN ('queued','retrying','waiting_user','reversing')",
+    );
+    return (rows.first['c'] as int?) ?? 0;
+  }
+
   Future<DateTime?> lastSmsSeenAt() async {
     final rows = await _raw.query(
       'processed_sms',

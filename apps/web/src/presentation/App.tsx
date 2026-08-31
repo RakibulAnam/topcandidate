@@ -17,7 +17,7 @@ import { DashboardShell } from './components/dashboard/DashboardShell';
 import { ApplicationsScreen } from './ApplicationsScreen';
 import { PurchaseHistoryScreen } from './PurchaseHistoryScreen';
 import { SummaryScreen } from './SummaryScreen';
-import { useBrowserNav, NavScreen } from './hooks/useBrowserNav';
+import { useBrowserNav, NavScreen, NavState } from './hooks/useBrowserNav';
 import { track } from '../infrastructure/analytics/track';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
@@ -229,6 +229,66 @@ const AppContent = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, loading]);
 
+  // Disarm auto-generate the moment we are not on the builder — including when
+  // the user leaves via the browser Back gesture, which runs no handler of
+  // ours. Without this the flag stays true, and pressing Forward remounts
+  // BuilderScreen with a fresh autoGenFired ref, silently starting a SECOND
+  // paid generation and saving a duplicate resume row.
+  useEffect(() => {
+    if (screen !== 'BUILDER' && builderAutoGenerate) setBuilderAutoGenerate(false);
+  }, [screen, builderAutoGenerate]);
+
+  // Which resume the builder hand-off state (builderData/builderStep/
+  // currentResumeId) currently holds. Cleared on every departure from
+  // /builder, so any return to it reloads from the server.
+  const builderLoadedIdRef = useRef<string | null>(null);
+
+  // Restore the builder from the history entry. /builder entries carry the
+  // resume id, so Back-then-Forward — and a hard reload — land back on the
+  // generated toolkit instead of the idle "nothing is building right now"
+  // panel. Before this, nav state was just { screen }: BuilderScreen kept the
+  // generated resume in ITS OWN state, App still held the pre-generation
+  // prefill, and a remount therefore came back at step PERSONAL_INFO with no
+  // resume id and rendered the idle panel over a toolkit that existed and was
+  // already paid for.
+  //
+  // Always refetches rather than reusing an in-memory copy. The toolkit bundle
+  // is written in a SECOND update that routinely lands after the user has
+  // navigated away, so the Supabase row is the only version guaranteed to be
+  // complete — an in-memory copy would silently restore a resume with empty
+  // toolkit tabs.
+  useEffect(() => {
+    if (screen !== 'BUILDER') {
+      builderLoadedIdRef.current = null;
+      return;
+    }
+    const wanted = navState.resumeId;
+    if (!wanted || !user || !resumeService) return;
+    if (builderLoadedIdRef.current === wanted) return;
+    let cancelled = false;
+    resumeService.getGeneratedResume(wanted)
+      .then((data) => {
+        if (cancelled) return;
+        if (!data) throw new Error(`resume ${wanted} not found`);
+        builderLoadedIdRef.current = wanted;
+        setBuilderData(data);
+        setBuilderStep(AppStep.PREVIEW);
+        setCurrentResumeId(wanted);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('Failed to restore builder from history', error);
+        toast.error(t('common.resumeLoadFailed'));
+        // Mark it handled so this cannot refetch on every render, and send the
+        // user somewhere real rather than to an idle panel they never asked
+        // for. replace, not push, so Back does not bounce back into the void.
+        builderLoadedIdRef.current = wanted;
+        navigate({ screen: 'DASHBOARD' }, { replace: true });
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, navState.resumeId, user, resumeService]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-charcoal-50">
@@ -290,8 +350,10 @@ const AppContent = () => {
     );
   }
 
-  const prefillFromProfile = async (opts?: { targetJob?: ResumeData['targetJob']; step?: AppStep; visibleSections?: string[] }) => {
-    if (!user) return;
+  /** Returns false when the profile could not be loaded, so callers can decide
+   *  whether it is safe to commit to a screen that assumes the data is there. */
+  const prefillFromProfile = async (opts?: { targetJob?: ResumeData['targetJob']; step?: AppStep; visibleSections?: string[] }): Promise<boolean> => {
+    if (!user) return false;
     try {
       const [profile, exps, projs, skls, edus, extras, awds, certs, affils, pubs, langs, refs] = await Promise.all([
         profileRepository.getProfile(user.id),
@@ -344,9 +406,11 @@ const AppContent = () => {
       });
 
       setBuilderStep(opts?.step ?? AppStep.SECTIONS);
+      return true;
     } catch (error) {
       console.error('Error loading profile data:', error);
       toast.error(t('common.profileLoadFailed'));
+      return false;
     }
   };
 
@@ -366,9 +430,29 @@ const AppContent = () => {
   // (the step wizard is bypassed).
   const handleGenerateFromSummary = async (visibleSections: string[]) => {
     setCurrentResumeId(null);
-    await prefillFromProfile({ targetJob: pendingTargetJob, step: AppStep.PERSONAL_INFO, visibleSections });
+    // Only commit to the builder if the prefill actually produced something to
+    // build from. It used to navigate unconditionally, so a failed profile load
+    // dropped the user onto the builder with empty data and an armed
+    // auto-generate that could never succeed.
+    const ok = await prefillFromProfile({ targetJob: pendingTargetJob, step: AppStep.PERSONAL_INFO, visibleSections });
+    if (ok === false) return;
     setBuilderAutoGenerate(true);
     navigate({ screen: 'BUILDER' });
+  };
+
+
+  // The builder just persisted a NEW resume. Stamp its id into the CURRENT
+  // history entry (replace, not push — the user pressed Generate once and
+  // should get one Back) so Forward and reload can restore this preview.
+  const handleBuilderGenerated = (id: string) => {
+    // Live read, not the `screen` closure: this fires from an async save that
+    // can resolve after the user has already navigated away, and rewriting a
+    // DASHBOARD entry into a BUILDER one would corrupt their history.
+    if ((window.history.state as NavState | null)?.screen !== 'BUILDER') return;
+    builderLoadedIdRef.current = id;
+    setCurrentResumeId(id);
+    setBuilderStep(AppStep.PREVIEW);
+    navigate({ screen: 'BUILDER', resumeId: id }, { replace: true });
   };
 
   const handleOpenResume = async (id: string) => {
@@ -380,7 +464,8 @@ const AppContent = () => {
         setCurrentResumeId(id);
         setBuilderStep(AppStep.PREVIEW);
         setBuilderAutoGenerate(false);
-        navigate({ screen: 'BUILDER' });
+        builderLoadedIdRef.current = id;
+        navigate({ screen: 'BUILDER', resumeId: id });
       }
     } catch (error) {
       console.error('Failed to load resume', error);
@@ -410,6 +495,21 @@ const AppContent = () => {
   }
 
   if (screen === 'BUILDER') {
+    // The history entry names a resume the hand-off state has not loaded yet
+    // (Forward gesture, or a reload straight onto /builder). Read the ref
+    // DURING RENDER rather than mirroring it in state: a state flag is set
+    // from an effect, which lets one frame of the idle panel paint first —
+    // the same class of flash the dashboard banner had.
+    if (navState.resumeId && builderLoadedIdRef.current !== navState.resumeId) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-charcoal-50">
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="animate-spin text-brand-600" size={40} />
+            <p className="text-charcoal-500">{t('common.loadingResume')}</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <BuilderScreen
         initialData={builderData}
@@ -417,6 +517,7 @@ const AppContent = () => {
         currentResumeId={currentResumeId}
         resumeService={resumeService}
         autoGenerate={builderAutoGenerate}
+        onGenerated={handleBuilderGenerated}
         onExit={() => { setBuilderAutoGenerate(false); navigate({ screen: 'DASHBOARD' }); }}
       />
     );

@@ -75,6 +75,24 @@ abstract class WebhookClient {
     DateTime? smsTimestamp,
     String? reason,
   });
+
+  /// `POST /api/confirm-purchase` with `{ kind: 'heartbeat', ... }` — liveness
+  /// ping carrying no transaction (web migration 028). Same URL, same secret,
+  /// same v2 signature as [post]; the server branches on `kind` and returns
+  /// `{ success: true, heartbeat: true }`.
+  ///
+  /// It exists so the customer-facing purchase modal can distinguish "we
+  /// haven't seen your bKash SMS because your TrxID is wrong" from "...because
+  /// the operator's phone is offline". Without it the web app would end up
+  /// telling paying customers to re-check a correct TrxID during OUR outages.
+  ///
+  /// Best-effort: never retried and never surfaced to the operator. A missed
+  /// ping just means the web app stays on its softer wording for a while.
+  Future<WebhookResponse> postHeartbeat({
+    required String deviceId,
+    String? appVersion,
+    int? queueDepth,
+  });
 }
 
 class HttpWebhookClient implements WebhookClient {
@@ -168,6 +186,24 @@ class HttpWebhookClient implements WebhookClient {
         'reason': ?reason,
       },
       path: '/api/admin/parser-failures',
+    );
+  }
+
+  @override
+  Future<WebhookResponse> postHeartbeat({
+    required String deviceId,
+    String? appVersion,
+    int? queueDepth,
+  }) {
+    return _postToPath(
+      <String, dynamic>{
+        'kind': 'heartbeat',
+        'deviceId': deviceId,
+        'appVersion': ?appVersion,
+        'queueDepth': ?queueDepth,
+      },
+      // Null path = the operator's configured confirm-purchase URL, unchanged.
+      path: null,
     );
   }
 

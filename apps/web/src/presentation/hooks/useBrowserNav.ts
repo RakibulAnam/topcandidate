@@ -15,6 +15,12 @@ export type NavScreen =
 
 export interface NavState {
   screen: NavScreen;
+  /** BUILDER only: which generated resume this history entry is showing.
+   *  Stamped in when the builder saves (replaceState) or when an existing
+   *  resume is opened, so a Back-then-Forward gesture — and a hard reload,
+   *  since the browser persists history.state — can restore the preview
+   *  instead of dropping the user on the builder's idle panel. */
+  resumeId?: string;
 }
 
 const SCREEN_PATHS: Record<NavScreen, string> = {

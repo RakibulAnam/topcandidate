@@ -1,6 +1,8 @@
 // Encrypted key/value store for the webhook URL + HMAC secret.
 // See spec/08-security.md.
 
+import 'dart:math';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SettingsRepository {
@@ -17,6 +19,9 @@ class SettingsRepository {
   static const _kSecret = 'bkash_webhook_secret';
   static const _kBiometricLock = 'bkash_biometric_lock';
   static const _kBatteryPrompted = 'bkash_battery_prompted';
+  static const _kDeviceId = 'bkash_device_id';
+  static const _kTestTools = 'bkash_test_tools';
+  static const _kHeartbeatPaused = 'bkash_heartbeat_paused';
 
   Future<String?> webhookUrl() => _storage.read(key: _kUrl);
   Future<void> setWebhookUrl(String value) =>
@@ -27,6 +32,44 @@ class SettingsRepository {
       _storage.write(key: _kSecret, value: value);
 
   Future<bool> hasSecret() async => (await hmacSecret())?.isNotEmpty ?? false;
+
+  /// Reveals the Settings > Test tools panel, which can post SYNTHETIC bKash
+  /// payments to the live server. Off by default and persisted, so the panel
+  /// can never be tapped by accident during normal operation.
+  Future<bool> testToolsEnabled() async =>
+      (await _storage.read(key: _kTestTools)) == 'true';
+
+  Future<void> setTestTools(bool enabled) =>
+      _storage.write(key: _kTestTools, value: enabled ? 'true' : 'false');
+
+  /// Stops the liveness heartbeat. The only way to reproduce the web app's
+  /// 'watcher_stale' state on demand: pause, wait out the server's 5-minute
+  /// staleness threshold, and the purchase modal switches to "verification is
+  /// running behind". Remember to switch it back off.
+  Future<bool> heartbeatPaused() async =>
+      (await _storage.read(key: _kHeartbeatPaused)) == 'true';
+
+  Future<void> setHeartbeatPaused(bool paused) =>
+      _storage.write(key: _kHeartbeatPaused, value: paused ? 'true' : 'false');
+
+  /// Stable per-install id for the liveness heartbeat (web migration 028).
+  /// Generated on first use and persisted; the server keys
+  /// `watcher_heartbeats` on it so reinstalling produces a new row rather
+  /// than silently masquerading as the old device.
+  ///
+  /// Not a hardware identifier on purpose — a random opaque value is enough
+  /// to answer "is a watcher alive?" and carries no device fingerprint.
+  Future<String> deviceId() async {
+    final existing = await _storage.read(key: _kDeviceId);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final rnd = Random.secure();
+    final id = List<String>.generate(
+      16,
+      (_) => rnd.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+    await _storage.write(key: _kDeviceId, value: id);
+    return id;
+  }
 
   Future<bool> biometricLockEnabled() async {
     final v = await _storage.read(key: _kBiometricLock);

@@ -95,6 +95,31 @@ A simple form (no async validators):
      launch**. No biometric plugin is in `pubspec.yaml`. Treat this as a
      reserved hook, not a shipped feature.
 
+7. **Test tools** (added with web migration 028)
+   - A persisted switch, **default off** (`bkash_test_tools`), revealing a
+     panel that simulates incoming bKash payments. Off by default because the
+     panel posts to the LIVE server — there is one environment.
+   - The panel composes a synthetic "money received" SMS and hands it to
+     `ingestBkashSms()`, the same entry point the Android broadcast uses. Real
+     parser, real dedupe, real state machine, real HMAC, real webhook; only the
+     handset delivery is simulated. Do NOT let it call the webhook client
+     directly — a green test would then say nothing about production.
+   - Generated TrxIDs are `TST` + 7 chars (exactly the 10 the parser demands,
+     see spec/02-sms-formats.md) so test rows are greppable server-side.
+   - Controls: the TrxID under test (copy / regenerate) plus a one-character-off
+     variant to copy, "Pay ৳200", "Pay ৳150 (underpaid)", "Pay from another
+     number", "Send heartbeat now", and a "Pause heartbeat" switch
+     (`bkash_heartbeat_paused`) — the only way to reproduce the web app's
+     `watcher_stale` state on demand. Turning the master Test-tools switch off
+     also clears the pause, so the watcher cannot be left mute by accident.
+   - The heartbeat is SUPPRESSED whenever `READ_SMS` is not granted. A ping
+     asserts "this device is doing its job", and a watcher that cannot read SMS
+     is not — Android auto-revokes permissions for unused apps, so without this
+     a deaf watcher would report healthy and the web app would blame customers
+     for a silence that is ours.
+   - `composeSyntheticBkashSms()` is covered by `test/sms/sms_ingest_test.dart`,
+     which asserts the real parser accepts what the panel emits.
+
 ## State badge colors
 
 | State            | Background | Foreground |

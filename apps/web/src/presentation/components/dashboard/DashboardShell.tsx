@@ -120,16 +120,33 @@ export const DashboardShell: React.FC<Props> = ({
     else onNavigate('DASHBOARD');
   };
 
-  const navLink = (label: string, on: () => void, isActive: boolean) => (
+  const navLink = (
+    label: string,
+    on: () => void,
+    isActive: boolean,
+    opts?: { Icon?: React.ComponentType<{ size?: number }>; attention?: boolean },
+  ) => (
     <a
       href="#"
       onClick={(e) => { e.preventDefault(); on(); }}
       aria-current={isActive ? 'page' : undefined}
-      className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-[13.5px] transition-colors ${
-        isActive ? 'bg-charcoal-200 font-semibold text-brand-700' : 'font-medium text-charcoal-500 hover:bg-charcoal-100 hover:text-brand-700'
+      className={`relative inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[13.5px] transition-colors ${
+        isActive
+          ? 'bg-charcoal-200 font-semibold text-brand-700'
+          : opts?.attention
+            // Not built yet. The one destination that is free, foundational and
+            // most-missed right after profile setup, so it gets a standing
+            // treatment rather than blending into three identical text links.
+            ? 'border border-accent-200 bg-accent-50 font-semibold text-accent-700 hover:bg-accent-100'
+            : 'font-medium text-charcoal-500 hover:bg-charcoal-100 hover:text-brand-700'
       }`}
     >
+      {opts?.Icon && <opts.Icon size={14} />}
       {label}
+      {opts?.attention && (
+        // A dot, not a word: the eye finds it without reading the bar.
+        <span className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-accent-500" aria-hidden />
+      )}
     </a>
   );
 
@@ -139,7 +156,10 @@ export const DashboardShell: React.FC<Props> = ({
   const DESTINATIONS = [
     { key: 'home', icon: Home, label: t('dashboard.navHome'), tabLabel: t('dashboard.navHome'), on: () => onNavigate('DASHBOARD'), isActive: active === 'home' },
     { key: 'applications', icon: LayoutGrid, label: t('dashboard.navApplications'), tabLabel: t('dashboard.navApplications'), on: () => onNavigate('APPLICATIONS'), isActive: active === 'applications' },
-    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false },
+    // `attention` = the master resume does not exist yet. Users lose this
+    // destination immediately after profile setup, which is exactly when it has
+    // never been built — so mark it until it has been.
+    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false, attention: !loadingShell && !generalResume },
     { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
   ];
 
@@ -161,7 +181,9 @@ export const DashboardShell: React.FC<Props> = ({
                 Below lg the bottom tab bar carries the same four destinations. */}
             <nav className="ml-2 hidden items-center gap-1 lg:flex">
               {DESTINATIONS.map((d) => (
-                <React.Fragment key={d.key}>{navLink(d.label, d.on, d.isActive)}</React.Fragment>
+                <React.Fragment key={d.key}>
+                  {navLink(d.label, d.on, d.isActive, d.key === 'master' ? { Icon: d.icon, attention: d.attention } : undefined)}
+                </React.Fragment>
               ))}
             </nav>
 
@@ -252,17 +274,22 @@ export const DashboardShell: React.FC<Props> = ({
           {/* Capped so the tabs stay a group on a tablet instead of drifting to
               the far corners; on a phone the cap never binds. */}
           <div className="mx-auto flex w-full max-w-[520px]">
-          {DESTINATIONS.map(({ key, icon: Icon, tabLabel, on, isActive }) => (
+          {DESTINATIONS.map(({ key, icon: Icon, tabLabel, on, isActive, attention }) => (
             <a
               key={key}
               href="#"
               onClick={(e) => { e.preventDefault(); on(); }}
               aria-current={isActive ? 'page' : undefined}
-              className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-2 transition-colors ${
-                isActive ? 'text-accent-600' : 'text-charcoal-500'
+              className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-2 transition-colors ${
+                isActive ? 'text-accent-600' : attention ? 'text-accent-600' : 'text-charcoal-500'
               }`}
             >
-              <Icon size={19} strokeWidth={isActive ? 2.4 : 1.9} />
+              <span className="relative">
+                <Icon size={19} strokeWidth={isActive || attention ? 2.4 : 1.9} />
+                {attention && (
+                  <span className="absolute -right-1.5 -top-0.5 h-2 w-2 rounded-full bg-accent-500 ring-2 ring-[#F6F4EE]" aria-hidden />
+                )}
+              </span>
               <span className={`max-w-full truncate px-0.5 text-[10.5px] leading-none ${isActive ? 'font-bold' : 'font-medium'}`}>
                 {tabLabel}
               </span>

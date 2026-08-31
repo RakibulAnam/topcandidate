@@ -10,7 +10,8 @@
 //   /api/dispute-purchase     -> /api/purchase-ops/dispute
 //   /api/cron/expire-pending  -> /api/purchase-ops/expire-pending
 // so the frontend (purchaseStatusClient) and any manual cron trigger keep
-// calling the same URLs. Files under `_handlers/` are NOT treated as
+// calling the same URLs. Two later additions (verify-txn, void-txn) have no
+// rewrite — the frontend calls /api/purchase-ops/<action> directly. Files under `_handlers/` are NOT treated as
 // functions by Vercel because the segment starts with an underscore.
 //
 // NOTE: the HMAC webhook endpoints (confirm-purchase, reverse-purchase,
@@ -23,6 +24,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import status from './_handlers/status.js';
 import dispute from './_handlers/dispute.js';
 import expirePending from './_handlers/expire-pending.js';
+import verifyTxn from './_handlers/verify-txn.js';
+import voidTxn from './_handlers/void-txn.js';
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
@@ -30,6 +33,11 @@ const HANDLERS: Record<string, Handler> = {
   'status': status,
   'dispute': dispute,
   'expire-pending': expirePending,
+  // Added with migration 028 (in-modal purchase verification). Folded in here
+  // rather than as new function files because the Vercel Hobby plan caps a
+  // deployment at 12 Serverless Functions and we are AT that cap.
+  'verify-txn': verifyTxn,
+  'void-txn': voidTxn,
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
