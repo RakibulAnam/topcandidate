@@ -17,9 +17,11 @@
 // sign-out, and infrastructure must not import from presentation. The hook
 // wrapper lives in presentation/hooks/useOpenPurchase.ts.
 //
-// localStorage keeps exactly one job now: seeding the first paint so the pill
-// does not blink in after the query returns. A hint, never the truth — the
-// server's answer always overwrites it.
+// There is no localStorage fallback, deliberately. `current` stays undefined
+// until the first read lands, so the pill appears a few hundred ms late on a
+// cold load. Seeding it from a browser crumb would buy back that flash by
+// reintroducing exactly the thing this replaced: a local guess that can
+// outlive, contradict, or be deleted independently of the payment itself.
 import { purchaseRepository } from '../config/dependencies';
 import type { Purchase } from '../../domain/repositories/IPurchaseRepository';
 

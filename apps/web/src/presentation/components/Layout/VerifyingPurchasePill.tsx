@@ -25,7 +25,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, CheckCircle2, AlertTriangle, Clock, XCircle, X, Check, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  clearPendingPurchase,
   fetchPurchaseStatus,
   filePurchaseDispute,
   subscribeToPurchase,
@@ -120,7 +119,6 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
             // retires on its own. No local delete — the server decides.
             setTimeout(() => {
               if (!active) return;
-              clearPendingPurchase();
               void refreshOpenPurchase();
             }, 4000);
           }
@@ -173,7 +171,6 @@ export const VerifyingPurchasePill: React.FC<Props> = ({ onResubmit, onCredited,
       // against the 5-per-24h cap and releases the Transaction ID so the same
       // (correct) one can be submitted again.
       await voidTxn(pending.txnId);
-      clearPendingPurchase();
       await refreshOpenPurchase();
       onPurchaseChangedRef.current?.();
       toast.success(t('verifyPill.cancelDone'));

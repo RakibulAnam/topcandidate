@@ -10,7 +10,7 @@
 //      owner's phone, matches the TrxID, and POSTs to /api/confirm-purchase
 //      which flips the row to 'completed' and grants credits.
 //   6. The VerifyingPurchasePill in the navbar tracks the purchase in the
-//      background. This modal hands off to it via writePendingPurchase().
+//      background. Both resolve the same server row via openPurchaseStore.
 //
 // VERIFICATION UX (migration 028)
 // ===============================
@@ -79,13 +79,11 @@ import { useT } from '../i18n/LocaleContext';
 import { purchasePackage, type PackageId } from '../../infrastructure/api/purchaseClient';
 import { ApiCallError } from '../../infrastructure/ai/proxy/ProxyClients';
 import {
-  clearPendingPurchase,
   fetchPurchaseStatus,
   filePurchaseDispute,
   subscribeToPurchase,
   verifyTxn,
   voidTxn,
-  writePendingPurchase,
   type PurchaseStatus,
   type PurchaseVerdict,
   type PurchaseVerification,
@@ -187,14 +185,20 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     if (!openPurchase?.paymentReference) return;
     const txn = openPurchase.paymentReference;
     if (rehydratedFor.current === txn) return;
+    // Already tracking this one in THIS session (they closed and came back).
+    // Leave the phase alone: the panel they were looking at is still the right
+    // panel, and re-entering 'verifying' would throw away a diagnosed verdict
+    // to re-derive the same answer behind a spinner. The watch effect below
+    // runs in 'problem' too, and its first fetchPurchaseStatus corrects the
+    // card within one round trip if the purchase settled while we were closed.
     if (trackedTxn === txn) { rehydratedFor.current = txn; return; }
     rehydratedFor.current = txn;
     setTransactionId(txn);
     setTrackedTxn(txn);
     setTrackedSince(new Date(openPurchase.createdAt).getTime());
-    // 'verifying' rather than 'problem': the watch effect below re-runs
-    // verifyTxn and will move us to a problem card if the verdict warrants it.
-    // Opening on a problem we have not re-checked would show stale bad news.
+    // Cold entry (fresh page load, or a purchase this session has never seen):
+    // start at 'verifying' and let the watch effect derive the verdict. The
+    // window is age-aware, so an old purchase resolves almost immediately.
     setVerdict(null);
     setVerification(null);
     setSettled(null);
@@ -439,7 +443,6 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       } catch {
         // Already settled or gone — nothing to retire.
       }
-      clearPendingPurchase();
       void refreshOpenPurchase();
       setTrackedTxn('');
       setTrackedSince(null);
@@ -460,7 +463,6 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       // Hand off to the navbar pill immediately, whatever happens next: if the
       // customer closes the modal or the tab mid-verification, the purchase is
       // still tracked. Cleared again only if they void a mistyped TrxID.
-      writePendingPurchase({ txnId: trimmedTxn, submittedAt: Date.now() });
       setTrackedTxn(trimmedTxn);
       setTrackedSince(Date.now());
       // Mark it handled BEFORE the store catches up, so the rehydration effect

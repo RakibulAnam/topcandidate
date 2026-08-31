@@ -1,20 +1,13 @@
 // Client for /api/my-purchase-status, /api/dispute-purchase, and the two
 // purchase-ops verification actions (/api/purchase-ops/verify-txn, /void-txn).
 //
-// Storage convention: when PurchaseModal records a pending purchase it writes
-// to `localStorage[PENDING_PURCHASE_KEY]` and dispatches a custom DOM event
-// so the navbar pill picks it up without a refresh.
+// There is deliberately no localStorage here any more. "Is a payment in
+// flight" is answered by the SERVER row via `openPurchaseStore`; a browser-
+// local crumb was what let the pill's Dismiss delete a customer's only pointer
+// to a still-pending purchase.
 
 import { supabase } from '../supabase/client';
 import { ApiCallError } from '../ai/proxy/ProxyClients';
-
-export const PENDING_PURCHASE_KEY = 'topcandidate.pendingPurchase';
-export const PENDING_PURCHASE_EVENT = 'topcandidate:pending-purchase-changed';
-
-export interface PendingPurchaseRecord {
-  txnId: string;
-  submittedAt: number; // epoch ms
-}
 
 export type PurchaseStatus =
   | 'pending'
@@ -31,28 +24,6 @@ export interface PurchaseStatusResponse {
   observedAmountTaka: number | null;
   missing: number | null;
   message: string;
-}
-
-export function readPendingPurchase(): PendingPurchaseRecord | null {
-  try {
-    const raw = localStorage.getItem(PENDING_PURCHASE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as PendingPurchaseRecord;
-    if (!parsed.txnId || typeof parsed.submittedAt !== 'number') return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function writePendingPurchase(rec: PendingPurchaseRecord): void {
-  localStorage.setItem(PENDING_PURCHASE_KEY, JSON.stringify(rec));
-  window.dispatchEvent(new Event(PENDING_PURCHASE_EVENT));
-}
-
-export function clearPendingPurchase(): void {
-  localStorage.removeItem(PENDING_PURCHASE_KEY);
-  window.dispatchEvent(new Event(PENDING_PURCHASE_EVENT));
 }
 
 async function bearer(): Promise<string> {
