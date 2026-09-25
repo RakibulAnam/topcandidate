@@ -61,6 +61,7 @@ import { isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { track } from '../infrastructure/analytics/track';
+import { LogoMark } from './components/ui/LogoMark';
 
 interface Props {
     onComplete: () => void;
@@ -117,7 +118,8 @@ const stepCopyOf = (t: StepCopyT, step: SetupStep): { label: string; phase: stri
 };
 
 const Wordmark = () => (
-    <div className="flex items-baseline gap-1.5 select-none">
+    <div className="flex items-center gap-1.5 select-none">
+        <LogoMark className="h-6 mr-1" />
         <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
         <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
     </div>

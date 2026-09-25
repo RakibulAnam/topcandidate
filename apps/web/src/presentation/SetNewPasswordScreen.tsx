@@ -36,6 +36,7 @@ import { useAuth } from '../infrastructure/auth/AuthContext';
 import { initialAuthParams } from '../infrastructure/supabase/client';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
+import { LogoMark } from './components/ui/LogoMark';
 
 interface Props {
   onDone: () => void;
@@ -108,7 +109,8 @@ export const SetNewPasswordScreen: React.FC<Props> = ({ onDone, onRequestNewLink
         <div className="bg-charcoal-50 w-full max-w-md rounded-2xl border border-charcoal-200 shadow-2xl shadow-brand-900/5 overflow-hidden my-auto">
           <div className="p-6 sm:p-8">
             <div className="flex items-start justify-between mb-6">
-              <div className="inline-flex items-baseline gap-1.5">
+              <div className="inline-flex items-center gap-1.5">
+                <LogoMark className="h-8 mr-1" />
                 <span className="font-display text-2xl font-semibold tracking-tight text-brand-700">TOP</span>
                 <span className="font-display text-2xl font-semibold tracking-tight text-accent-500">CANDIDATE</span>
               </div>
@@ -136,7 +138,8 @@ export const SetNewPasswordScreen: React.FC<Props> = ({ onDone, onRequestNewLink
       <div className="bg-charcoal-50 w-full max-w-md rounded-2xl border border-charcoal-200 shadow-2xl shadow-brand-900/5 overflow-hidden">
         <div className="p-8">
           <div className="flex items-start justify-between mb-6">
-            <div className="inline-flex items-baseline gap-1.5">
+            <div className="inline-flex items-center gap-1.5">
+              <LogoMark className="h-8 mr-1" />
               <span className="font-display text-2xl font-semibold tracking-tight text-brand-700">TOP</span>
               <span className="font-display text-2xl font-semibold tracking-tight text-accent-500">CANDIDATE</span>
             </div>

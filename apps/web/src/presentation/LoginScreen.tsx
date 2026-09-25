@@ -41,6 +41,7 @@ import { useAuth } from '../infrastructure/auth/AuthContext';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { ContinueWithGoogleButton } from './auth/ContinueWithGoogleButton';
+import { LogoMark } from './components/ui/LogoMark';
 
 type Mode = 'login' | 'signup' | 'forgot';
 
@@ -151,7 +152,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
                 <div className="p-6 sm:p-8">
                     {/* Branding + language toggle */}
                     <div className="flex items-start justify-between mb-6">
-                        <div className="inline-flex items-baseline gap-1.5 select-none">
+                        <div className="inline-flex items-center gap-1.5 select-none">
+                            <LogoMark className="h-8 mr-1" />
                             <span className="font-display text-2xl font-semibold tracking-tight text-brand-700">TOP</span>
                             <span className="font-display text-2xl font-semibold tracking-tight text-accent-500">CANDIDATE</span>
                         </div>

@@ -1,8 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-  <rect width="200" height="200" rx="44" fill="#F4F1EA"/>
-  <g transform="translate(100 100) scale(1.2) translate(-102 -100)">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="24 24 156 152" role="img" aria-label="Top Candidate">
   <path d="M147.5 60.1 A62 62 0 1 0 147.5 139.9" fill="none" stroke="#0F1B2D" stroke-width="18" stroke-linecap="round"/>
   <line x1="100" y1="88" x2="100" y2="134" stroke="#0F1B2D" stroke-width="18" stroke-linecap="round"/>
   <line x1="74" y1="88" x2="166" y2="88" stroke="#E8743B" stroke-width="18" stroke-linecap="round"/>
-  </g>
 </svg>
