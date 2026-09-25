@@ -762,7 +762,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               <span className="absolute inset-0 animate-ping rounded-2xl bg-accent-200 opacity-40" />
               <span
                 className="relative flex h-16 w-16 items-center justify-center rounded-2xl"
-                style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
+                style={{ background: 'linear-gradient(135deg, #EC8752, #C95D27)' }}
               >
                 <Sparkles size={26} className="text-[#FFF7EA]" fill="#FFF7EA" />
               </span>

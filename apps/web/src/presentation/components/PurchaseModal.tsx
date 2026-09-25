@@ -604,7 +604,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
       >
         <Check size={32} strokeWidth={3} className="text-white" />
       </div>
-      <div className="font-display text-2xl font-semibold text-[#1A1812]">
+      <div className="font-display text-2xl font-semibold text-[#0F1B2D]">
         {t('purchaseModal.confirmedHeading')}
       </div>
       <div className="max-w-xs text-sm text-[#6B6759]">
@@ -624,7 +624,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
         <Loader2 size={30} className="animate-spin" style={{ color: BKASH }} />
       </div>
       <div>
-        <div className="font-display text-2xl font-semibold text-[#1A1812]">
+        <div className="font-display text-2xl font-semibold text-[#0F1B2D]">
           {t('purchaseModal.verifyingTitle')}
         </div>
         <div className="mt-1.5 max-w-xs text-sm text-[#6B6759]">
@@ -640,7 +640,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#6B6759]">
           {t('purchaseModal.verifyTxnLabel')}
         </div>
-        <div className="mt-0.5 break-all font-mono text-[13px] tracking-wide text-[#1A1812]">
+        <div className="mt-0.5 break-all font-mono text-[13px] tracking-wide text-[#0F1B2D]">
           {trackedTxn}
         </div>
       </div>
@@ -733,7 +733,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     <div className="mt-4 w-full rounded-2xl border border-[#EAE6DA] bg-[#FAF7F0] p-4 text-left">
       <div className="flex items-center gap-2">
         <LifeBuoy size={15} style={{ color: BKASH }} />
-        <div className="text-[13.5px] font-bold text-[#1A1812]">{t('purchaseModal.helpTitle')}</div>
+        <div className="text-[13.5px] font-bold text-[#0F1B2D]">{t('purchaseModal.helpTitle')}</div>
       </div>
       <p className="mt-1.5 text-[12.5px] leading-snug text-[#6B6759]">{t('purchaseModal.helpBody')}</p>
 
@@ -742,14 +742,14 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           href={`https://wa.me/${toIntlDigits(OWNER_BKASH_NUMBER)}?text=${encodeURIComponent(waMessage)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#1A1812] transition-colors hover:border-[#CFCBBC]"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#0F1B2D] transition-colors hover:border-[#CFCBBC]"
         >
           <MessageCircle size={14} style={{ color: BKASH }} />
           {t('purchaseModal.helpWhatsapp', { number: OWNER_BKASH_NUMBER })}
         </a>
         <a
           href={`tel:+${toIntlDigits(OWNER_BKASH_NUMBER)}`}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#1A1812] transition-colors hover:border-[#CFCBBC]"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#0F1B2D] transition-colors hover:border-[#CFCBBC]"
         >
           <Phone size={14} style={{ color: BKASH }} />
           {t('purchaseModal.helpCall', { number: OWNER_BKASH_NUMBER })}
@@ -758,7 +758,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           href={CONTACT_FACEBOOK_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#1A1812] transition-colors hover:border-[#CFCBBC]"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#0F1B2D] transition-colors hover:border-[#CFCBBC]"
         >
           <MessageCircle size={14} className="text-[#6B6759]" />
           {t('purchaseModal.helpFacebook')}
@@ -769,7 +769,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             `TrxID: ${trackedTxn}\nAmount: ${expectedTaka} BDT\nAttempts: ${attempts}`,
           )}
           title={CONTACT_EMAIL}
-          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#1A1812] transition-colors hover:border-[#CFCBBC]"
+          className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#EAE6DA] bg-white px-3 py-2 text-[13px] font-semibold text-[#0F1B2D] transition-colors hover:border-[#CFCBBC]"
         >
           <Mail size={14} className="text-[#6B6759]" />
           {t('purchaseModal.helpEmail')}
@@ -811,16 +811,16 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     <div className="flex w-full flex-col items-center px-6 text-center">
       <div
         className="flex h-14 w-14 items-center justify-center rounded-full"
-        style={{ backgroundColor: problem.tone === 'warn' ? '#FEF5E7' : '#F2F1EB' }}
+        style={{ backgroundColor: problem.tone === 'warn' ? '#FDF1EB' : '#F2F1EB' }}
       >
         {problem.tone === 'warn' ? (
-          <AlertTriangle size={26} style={{ color: '#9C6113' }} />
+          <AlertTriangle size={26} style={{ color: '#C95D27' }} />
         ) : (
           <Clock size={26} className="text-[#6B6759]" />
         )}
       </div>
 
-      <div className="mt-3 font-display text-xl font-semibold leading-tight text-[#1A1812]">
+      <div className="mt-3 font-display text-xl font-semibold leading-tight text-[#0F1B2D]">
         {problem.title}
       </div>
       <p className="mt-2 max-w-sm text-[13.5px] leading-relaxed text-[#6B6759]">{problem.body}</p>
@@ -836,7 +836,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             </span>
           )}
         </div>
-        <div className="mt-0.5 break-all font-mono text-[13px] tracking-wide text-[#1A1812]">
+        <div className="mt-0.5 break-all font-mono text-[13px] tracking-wide text-[#0F1B2D]">
           {trackedTxn}
         </div>
       </div>
@@ -875,7 +875,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           <button
             type="button"
             onClick={() => setHelpOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-1.5 py-2 text-[12.5px] font-semibold text-[#6B6759] transition-colors hover:text-[#1A1812]"
+            className="inline-flex w-full items-center justify-center gap-1.5 py-2 text-[12.5px] font-semibold text-[#6B6759] transition-colors hover:text-[#0F1B2D]"
           >
             <LifeBuoy size={13} />
             {t('purchaseModal.needHelpCta')}
@@ -894,7 +894,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           <button
             type="button"
             onClick={finishAndClose}
-            className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border-2 px-4 py-2.5 text-[13px] font-bold text-[#1A1812] transition-colors"
+            className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border-2 px-4 py-2.5 text-[13px] font-bold text-[#0F1B2D] transition-colors"
             style={{ borderColor: '#EAE6DA' }}
           >
             {t('common.close')}
@@ -907,7 +907,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
           <button
             type="button"
             onClick={() => { void handleRetry(); }}
-            className="inline-flex w-full items-center justify-center gap-1.5 py-2 text-[12.5px] font-semibold text-[#6B6759] transition-colors hover:text-[#1A1812]"
+            className="inline-flex w-full items-center justify-center gap-1.5 py-2 text-[12.5px] font-semibold text-[#6B6759] transition-colors hover:text-[#0F1B2D]"
           >
             <RefreshCw size={13} />
             {t('purchaseModal.retryCta')}
@@ -942,7 +942,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-[#0E0D09]/65 backdrop-blur-md"
+        className="absolute inset-0 bg-[#09121F]/65 backdrop-blur-md"
         onClick={busy ? undefined : handleDismiss}
       />
 
@@ -975,7 +975,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                 type="button"
                 onClick={handleDismiss}
                 disabled={busy}
-                className="-mr-2 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#1A1812] disabled:cursor-not-allowed disabled:opacity-40"
+                className="-mr-2 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#0F1B2D] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={t('common.close')}
               >
                 <X size={18} />
@@ -990,11 +990,11 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
               aria-label={t('purchaseModal.packEyebrow')}
               className="mt-1 flex w-full items-baseline gap-2 pb-3 text-left"
             >
-              <span className="font-display text-2xl font-semibold leading-none text-[#1A1812] tracking-tight">
+              <span className="font-display text-2xl font-semibold leading-none text-[#0F1B2D] tracking-tight">
                 {t('purchaseModal.packPrice')}
               </span>
               <span className="text-[#CFCBBC]">·</span>
-              <span className="min-w-0 truncate text-[13px] font-semibold text-[#1A1812]">
+              <span className="min-w-0 truncate text-[13px] font-semibold text-[#0F1B2D]">
                 {t('purchaseModal.packName')}
               </span>
               <span className="hidden text-[12px] text-[#6B6759] xs:inline">{t('purchaseModal.packPerUnit')}</span>
@@ -1010,7 +1010,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             >
               <ul className="min-h-0 space-y-1.5 overflow-hidden">
                 {features.map((f, i) => (
-                  <li key={i} className="flex items-center gap-2.5 text-[13px] text-[#1A1812]">
+                  <li key={i} className="flex items-center gap-2.5 text-[13px] text-[#0F1B2D]">
                     <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
                       <Check size={12} strokeWidth={3.5} />
                     </span>
@@ -1041,10 +1041,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
               <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
                 {t('purchaseModal.packEyebrow')}
               </div>
-              <div className="mt-2 font-display text-6xl font-semibold text-[#1A1812] leading-none tracking-tight">
+              <div className="mt-2 font-display text-6xl font-semibold text-[#0F1B2D] leading-none tracking-tight">
                 {t('purchaseModal.packPrice')}
               </div>
-              <div className="mt-3 text-lg font-semibold text-[#1A1812] leading-tight">
+              <div className="mt-3 text-lg font-semibold text-[#0F1B2D] leading-tight">
                 {t('purchaseModal.packName')}
               </div>
               <div className="text-[13px] text-[#6B6759] mt-0.5">
@@ -1055,7 +1055,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
             {/* Features */}
             <ul className="mt-8 space-y-2.5">
               {features.map((f, i) => (
-                <li key={i} className="flex items-center gap-2.5 text-[13.5px] text-[#1A1812]">
+                <li key={i} className="flex items-center gap-2.5 text-[13.5px] text-[#0F1B2D]">
                   <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 shrink-0">
                     <Check size={12} strokeWidth={3.5} />
                   </span>
@@ -1079,14 +1079,14 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
               dropped there because "Send your bKash payment" would contradict
               the panel underneath it. */}
           <header className="hidden shrink-0 items-start justify-between px-9 pt-6 pb-3 md:flex">
-            <h2 className="font-display text-lg font-semibold text-[#1A1812] tracking-tight">
+            <h2 className="font-display text-lg font-semibold text-[#0F1B2D] tracking-tight">
               {showTakeover ? '' : t('purchaseModal.panelTitle')}
             </h2>
             <button
               type="button"
               onClick={handleDismiss}
               disabled={busy}
-              className="-mt-1 -mr-2 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#1A1812] disabled:cursor-not-allowed disabled:opacity-40"
+              className="-mt-1 -mr-2 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#0F1B2D] disabled:cursor-not-allowed disabled:opacity-40"
               aria-label={t('common.close')}
             >
               <X size={18} />
@@ -1116,7 +1116,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[#6B6759] font-bold">
                     {t('purchaseModal.bkashNumberLabel')}
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-2xl font-bold tracking-wide text-[#1A1812]">
+                  <div className="mt-0.5 truncate font-mono text-2xl font-bold tracking-wide text-[#0F1B2D]">
                     {OWNER_BKASH_NUMBER}
                   </div>
                 </div>
@@ -1175,7 +1175,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                     onChange={(e) => setTransactionId(e.target.value.toUpperCase())}
                     placeholder={t('purchaseModal.bkashTxnIdPlaceholder')}
                     disabled={busy}
-                    className="block w-full px-4 py-3.5 pr-14 rounded-2xl border-2 bg-white font-mono text-xl tracking-wider text-[#1A1812] placeholder:text-[#CFCBBC] placeholder:font-sans placeholder:text-base focus:outline-none disabled:opacity-60 transition-colors"
+                    className="block w-full px-4 py-3.5 pr-14 rounded-2xl border-2 bg-white font-mono text-xl tracking-wider text-[#0F1B2D] placeholder:text-[#CFCBBC] placeholder:font-sans placeholder:text-base focus:outline-none disabled:opacity-60 transition-colors"
                     style={{
                       borderColor: txnIsValid ? '#10B981' : '#EAE6DA',
                       boxShadow: 'none',
@@ -1225,14 +1225,14 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                   <button
                     type="button"
                     onClick={() => setShowPhone(true)}
-                    className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#6B6759] hover:text-[#1A1812] transition-colors"
+                    className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#6B6759] hover:text-[#0F1B2D] transition-colors"
                   >
                     <Plus size={13} />
                     {t('purchaseModal.addPhoneToggle')}
                   </button>
                 ) : (
                   <label className="block">
-                    <span className="block text-[11.5px] font-semibold text-[#1A1812] mb-1">
+                    <span className="block text-[11.5px] font-semibold text-[#0F1B2D] mb-1">
                       {t('purchaseModal.bkashSenderLabel')}
                     </span>
                     <input
@@ -1241,7 +1241,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                       onChange={(e) => setSenderMsisdn(e.target.value)}
                       placeholder={t('purchaseModal.bkashSenderPlaceholder')}
                       disabled={busy}
-                      className="block w-full px-3 py-2.5 rounded-xl border-2 bg-white text-sm text-[#1A1812] placeholder:text-[#CFCBBC] focus:outline-none disabled:opacity-60 transition-colors"
+                      className="block w-full px-3 py-2.5 rounded-xl border-2 bg-white text-sm text-[#0F1B2D] placeholder:text-[#CFCBBC] focus:outline-none disabled:opacity-60 transition-colors"
                       style={{ borderColor: '#EAE6DA' }}
                       onFocus={(e) => {
                         e.currentTarget.style.borderColor = BKASH;
@@ -1304,7 +1304,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
                 type="button"
                 onClick={handleDismiss}
                 disabled={busy}
-                className="text-[12.5px] font-semibold text-[#6B6759] hover:text-[#1A1812] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="text-[12.5px] font-semibold text-[#6B6759] hover:text-[#0F1B2D] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {t('purchaseModal.cancel')}
               </button>
@@ -1338,7 +1338,7 @@ const VerifyBeat: React.FC<{ state: 'done' | 'active' | 'pending'; label: string
       {state === 'done' && <Check size={12} strokeWidth={3.5} />}
       {state === 'active' && <Loader2 size={12} className="animate-spin" />}
     </span>
-    <span className={state === 'pending' ? 'text-[#9F998A]' : 'font-semibold text-[#1A1812]'}>
+    <span className={state === 'pending' ? 'text-[#9F998A]' : 'font-semibold text-[#0F1B2D]'}>
       {label}
     </span>
   </li>
@@ -1352,7 +1352,7 @@ const StepLabel: React.FC<{ n: number; label: string }> = ({ n, label }) => (
     >
       {n}
     </span>
-    <h3 className="text-[13.5px] font-bold text-[#1A1812] tracking-tight uppercase">
+    <h3 className="text-[13.5px] font-bold text-[#0F1B2D] tracking-tight uppercase">
       {label}
     </h3>
   </div>

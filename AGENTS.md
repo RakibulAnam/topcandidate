@@ -35,7 +35,7 @@ Don't crawl the whole tree. Read the file that matches the layer you're in.
 
 ## Per-app rules (don't re-state here — read in the app's AGENTS.md)
 
-- Web brand palette (Saffron / Ink / Charcoal), Clean Architecture layering, 2-call hot-path budget for AI, migration discipline → `apps/web/AGENTS.md` + `apps/web/CLAUDE.md`.
+- Web brand palette (Orange / Navy ink / Stone), Clean Architecture layering, 2-call hot-path budget for AI, migration discipline → `apps/web/AGENTS.md` + `apps/web/CLAUDE.md`.
 - Mobile single-tenant model, isolate boundary, backoff schedule, retry semantics → `apps/mobile/AGENTS.md` + `apps/mobile/spec/`.
 
 ## When you're stuck

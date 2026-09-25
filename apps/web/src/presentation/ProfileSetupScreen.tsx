@@ -765,7 +765,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     <div className="mb-6 flex items-center gap-3">
                         <span
                             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
-                            style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
+                            style={{ background: 'linear-gradient(135deg, #EC8752, #C95D27)' }}
                         >
                             <AlertTriangle size={22} className="text-[#FFF7EA]" />
                         </span>

@@ -78,7 +78,7 @@ const ANGLE_STYLE: Record<JobSearchAngle, { color: string; bg: string; border: s
   // The only angle that leaves Bangladesh, and the one most users don't know is
   // open to them — so it gets the brand saffron, INVERTED into a solid tile
   // rather than a seventh muted hue. One standout beats a rainbow.
-  remoteGlobal: { color: '#E59321', bg: '#E59321', border: '#E59321', Icon: Globe, solid: true },
+  remoteGlobal: { color: '#EC8752', bg: '#EC8752', border: '#EC8752', Icon: Globe, solid: true },
 };
 
 /** An opened tile loses its colour, the way a visited link loses its blue. */
@@ -225,7 +225,7 @@ export const JobDiscovery: React.FC<Props> = ({ input }) => {
                   >
                     <Icon
                       size={14}
-                      style={{ color: !opened && ANGLE_STYLE[card.angle].solid ? '#0E0D09' : tint.color }}
+                      style={{ color: !opened && ANGLE_STYLE[card.angle].solid ? '#09121F' : tint.color }}
                       aria-hidden="true"
                     />
                   </span>
