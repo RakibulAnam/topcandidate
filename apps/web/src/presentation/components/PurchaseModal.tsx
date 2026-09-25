@@ -51,7 +51,7 @@
 //     field own the viewport, and the sheet is sized to window.visualViewport
 //     so the input and the sticky CTA stay above the soft keyboard.
 //   - bKash magenta (#E2136E) is the action color for THIS component only,
-//     authorised by the user. Saffron is intentionally not used here so the
+//     authorised by the user. Orange is intentionally not used here so the
 //     user feels they are in a bKash-branded surface for the duration of the
 //     payment. See AGENTS.md §10 for the scoped exception.
 //   - Body scroll is locked while open.

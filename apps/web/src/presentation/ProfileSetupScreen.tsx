@@ -3,7 +3,7 @@
 //
 // Layout: sticky left rail (phase groups) + right content card. Rail collapses
 // to a slim progress bar on mobile. Palette follows AGENTS.md §10 — Editorial
-// Ink + Saffron, no gradients.
+// Ink + Orange, no gradients.
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';

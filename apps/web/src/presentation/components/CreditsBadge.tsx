@@ -3,7 +3,7 @@
 // Three visual states:
 //   - null  → render nothing (still loading; don't flash a stale 0)
 //   - > 0   → quiet "✨ N" pill in charcoal/ink, click opens PurchaseModal
-//   - = 0   → saffron "✨ Buy generations" CTA, click opens PurchaseModal
+//   - = 0   → orange "✨ Buy generations" CTA, click opens PurchaseModal
 //
 // Stateless — receives credits + onBuy from the host screen, which is
 // responsible for the PurchaseModal itself. Keeps the badge composable across

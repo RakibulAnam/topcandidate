@@ -8,8 +8,8 @@
 // Status badge colors follow the project palette — no blue/indigo/purple:
 //   completed              → emerald (positive terminal)
 //   pending                → charcoal (neutral, in-flight)
-//   underpaid              → accent/saffron (needs review)
-//   msisdn_mismatch_review → accent/saffron
+//   underpaid              → accent/orange (needs review)
+//   msisdn_mismatch_review → accent/orange
 //   expired                → red
 //   refunded               → red
 //   failed                 → red

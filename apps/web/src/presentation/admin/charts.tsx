@@ -1,6 +1,6 @@
 // Dependency-free, on-brand SVG chart primitives for the admin panel.
 // No charting library — keeps the bundle lean and the visuals fully under our
-// brand system (warm-stone neutrals + saffron accent, NO gradients/blue/purple).
+// brand system (warm-stone neutrals + orange accent, NO gradients/blue/purple).
 // Colors are pulled from the CSS custom properties defined in src/index.css so
 // they stay in sync with the design tokens automatically.
 //
