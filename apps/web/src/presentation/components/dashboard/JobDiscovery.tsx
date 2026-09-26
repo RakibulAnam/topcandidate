@@ -16,7 +16,7 @@
 // opens with a dark hero card and a warm master-resume banner.
 //
 // So this is a SURFACE, not a list: an ink panel that anchors the bottom of the
-// page the way the CTA card anchors the top. Saffron-on-ink is the brand's
+// page the way the CTA card anchors the top. Orange-on-ink is the brand's
 // strongest pairing and the product only spent it once; this is the second
 // place it earns. The panel also settles the "is it a toolkit?" question by
 // material alone — a toolkit is a raised white card you own, this is a dark
@@ -68,7 +68,7 @@ const REASON_KEY: Record<JobSearchAngle, TKey> = {
 // rather than merely marking the row.
 const ANGLE_STYLE: Record<JobSearchAngle, { color: string; bg: string; border: string; Icon: typeof Target; solid?: boolean }> = {
   // Neutral on purpose: "where you already are" is the least aspirational angle,
-  // which frees the brand saffron to mark the one row that leaves the country.
+  // which frees the brand orange to mark the one row that leaves the country.
   currentTitle: { color: '#BDB5A2', bg: 'rgba(255,255,255,0.06)', border: 'rgba(255,255,255,0.12)', Icon: Target },
   nextTitle: { color: '#8CC9A0', bg: 'rgba(95,168,118,0.14)', border: 'rgba(95,168,118,0.32)', Icon: ArrowUp },
   adjacentTitle: { color: '#9DB8DF', bg: 'rgba(107,140,190,0.16)', border: 'rgba(107,140,190,0.34)', Icon: ArrowRight },
@@ -76,9 +76,9 @@ const ANGLE_STYLE: Record<JobSearchAngle, { color: string; bg: string; border: s
   largeEmployer: { color: '#B7A3D8', bg: 'rgba(150,120,190,0.16)', border: 'rgba(150,120,190,0.34)', Icon: Building2 },
   topSkill: { color: '#8FC7C4', bg: 'rgba(110,180,176,0.15)', border: 'rgba(110,180,176,0.33)', Icon: Wrench },
   // The only angle that leaves Bangladesh, and the one most users don't know is
-  // open to them — so it gets the brand saffron, INVERTED into a solid tile
+  // open to them — so it gets the brand orange, INVERTED into a solid tile
   // rather than a seventh muted hue. One standout beats a rainbow.
-  remoteGlobal: { color: '#E59321', bg: '#E59321', border: '#E59321', Icon: Globe, solid: true },
+  remoteGlobal: { color: '#EC8752', bg: '#EC8752', border: '#EC8752', Icon: Globe, solid: true },
 };
 
 /** An opened tile loses its colour, the way a visited link loses its blue. */
@@ -225,7 +225,7 @@ export const JobDiscovery: React.FC<Props> = ({ input }) => {
                   >
                     <Icon
                       size={14}
-                      style={{ color: !opened && ANGLE_STYLE[card.angle].solid ? '#0E0D09' : tint.color }}
+                      style={{ color: !opened && ANGLE_STYLE[card.angle].solid ? '#09121F' : tint.color }}
                       aria-hidden="true"
                     />
                   </span>

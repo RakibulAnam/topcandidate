@@ -17,7 +17,7 @@
 //     still-pending server row, so the customer lost the payment from view and
 //     could not re-submit the same (correct) TrxID afterwards.
 //
-// Design: Saffron/Ink/Charcoal only. No gradients. No blue/indigo/purple.
+// Design: Orange/Ink/Charcoal only. No gradients. No blue/indigo/purple.
 // The bKash magenta exception is scoped to PurchaseModal; this widget uses
 // the standard brand palette.
 
@@ -431,7 +431,7 @@ const STATUS_VISUALS: Record<PurchaseStatus, Visual> = {
 };
 
 // Compact vertical stepper: Submitted → Verifying → Done/Needs attention.
-// Brand palette only (emerald = done, saffron accent = active, red = error).
+// Brand palette only (emerald = done, orange accent = active, red = error).
 type StepState = 'done' | 'active' | 'error' | 'idle';
 
 const PurchaseTimeline: React.FC<{ status: PurchaseStatus; verdict?: PurchaseVerdict | null }> = ({ status, verdict }) => {

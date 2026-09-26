@@ -3,7 +3,7 @@
 //
 // Layout: sticky left rail (phase groups) + right content card. Rail collapses
 // to a slim progress bar on mobile. Palette follows AGENTS.md §10 — Editorial
-// Ink + Saffron, no gradients.
+// Ink + Orange, no gradients.
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
@@ -54,6 +54,7 @@ import {
     Star,
 } from 'lucide-react';
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
+import { TutorialVideoCard, TutorialVideoPlayer } from './components/profile/TutorialVideo';
 import { ExtractedProfileData } from '../domain/usecases/ExtractResumeUseCase';
 import { isGibberish } from '../application/validation/gibberishDetector';
 import { isValidEmail } from './components/ui/EmailInput';
@@ -61,6 +62,7 @@ import { isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { track } from '../infrastructure/analytics/track';
+import { LogoMark } from './components/ui/LogoMark';
 
 interface Props {
     onComplete: () => void;
@@ -117,7 +119,8 @@ const stepCopyOf = (t: StepCopyT, step: SetupStep): { label: string; phase: stri
 };
 
 const Wordmark = () => (
-    <div className="flex items-baseline gap-1.5 select-none">
+    <div className="flex items-center gap-1.5 select-none">
+        <LogoMark className="h-6 mr-1" />
         <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
         <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
     </div>
@@ -763,7 +766,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     <div className="mb-6 flex items-center gap-3">
                         <span
                             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
-                            style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
+                            style={{ background: 'linear-gradient(135deg, #EC8752, #C95D27)' }}
                         >
                             <AlertTriangle size={22} className="text-[#FFF7EA]" />
                         </span>
@@ -781,7 +784,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     <p className="mb-6 text-[17px] leading-relaxed text-brand-600">
                         {t('profileSetup.introLead')}
                     </p>
-                    <ul className="mb-8 flex flex-col gap-3">
+                    <ul className="mb-7 flex flex-col gap-3">
                         {[t('profileSetup.introPoint1'), t('profileSetup.introPoint2'), t('profileSetup.introPoint3')].map((p, i) => (
                             <li key={i} className="flex items-start gap-3 text-[15px] leading-snug text-brand-600">
                                 <Check size={18} className="mt-0.5 shrink-0 text-accent-500" />
@@ -789,6 +792,12 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             </li>
                         ))}
                     </ul>
+                    <div className="mb-8">
+                        <p className="mb-3 text-[14px] font-medium text-brand-600">
+                            {t('profileSetup.tutorialIntroLabel')}
+                        </p>
+                        <TutorialVideoPlayer placement="intro" />
+                    </div>
                     <button
                         type="button"
                         onClick={() => setShowIntro(false)}
@@ -990,10 +999,11 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             </p>
 
                             {/* ABOVE the step nav, deliberately. This is the fastest route
-                                to a filled profile, so it has to be the first thing in the
-                                rail — at the bottom it was both below the fold and clipped
+                                to a filled profile, so it sits at the top of the rail, right
+                                under the video guide — at the bottom it was both below the fold and clipped
                                 by the fixed bottom bar. Hidden on the import step itself,
                                 where it would advertise the page already open. */}
+                            <TutorialVideoCard layout="stacked" className="mb-4" />
                             {!isFirstStep && (
                                 <ImportResumeCard
                                     onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
@@ -1082,6 +1092,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             to the import step at all once it had been skipped. Hidden on
                             the import step itself, where it would point at the current
                             page. */}
+                        <TutorialVideoCard className="lg:hidden mb-4" />
                         {!isFirstStep && (
                             <ImportResumeCard
                                 onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}

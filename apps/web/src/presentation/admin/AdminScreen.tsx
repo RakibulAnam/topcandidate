@@ -40,6 +40,7 @@ import { ProductTab } from './ProductTab';
 import { MarketingTab } from './MarketingTab';
 import { CustomerIntelTab } from './CustomerIntelTab';
 import { SystemTab } from './SystemTab';
+import { LogoMark } from '../components/ui/LogoMark';
 
 type TabKey = 'dashboard' | 'revenue' | 'product' | 'marketing' | 'customers'
   | 'users' | 'purchases' | 'orphans' | 'disputes' | 'parser' | 'audit' | 'system' | 'settings';
@@ -190,7 +191,8 @@ export const AdminScreen: React.FC = () => {
         'flex flex-col h-screen',
       ].join(' ')}>
         <div className="px-5 pt-5 pb-3 flex items-center justify-between">
-          <div className="flex items-baseline gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <LogoMark className="h-6 mr-1" />
             <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
             <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
           </div>
@@ -346,7 +348,8 @@ const LoginGate: React.FC<{ onAuthed: (token: string) => void }> = ({ onAuthed }
   return (
     <div className="min-h-screen flex items-center justify-center bg-charcoal-50 px-6">
       <div className="w-full max-w-md bg-white border border-charcoal-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-baseline gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <LogoMark className="h-6 mr-1" />
           <span className="font-display text-lg font-semibold tracking-tight text-brand-700">TOP</span>
           <span className="font-display text-lg font-semibold tracking-tight text-accent-500">CANDIDATE</span>
         </div>

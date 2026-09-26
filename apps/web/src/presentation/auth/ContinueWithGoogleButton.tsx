@@ -8,7 +8,7 @@
 // On success the browser navigates to Google, so we keep the spinner until the
 // page leaves. Errors are surfaced as toasts (spec §8).
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../infrastructure/auth/AuthContext';
@@ -30,12 +30,31 @@ export const ContinueWithGoogleButton: React.FC = () => {
     const t = useT();
     const [loading, setLoading] = useState(false);
 
+    // A successful signInWithGoogle() navigates THIS tab to accounts.google.com,
+    // so onClick deliberately leaves the spinner on. But if the user presses
+    // Back from Google's account chooser without picking an account, the
+    // browser restores this page from the back-forward cache (bfcache) WITH
+    // its JavaScript state — React never remounts, `loading` is still true,
+    // and the button sits disabled and spinning forever. `pageshow` with
+    // `persisted === true` fires exactly on that restore (a fresh load mounts
+    // with loading=false anyway), so clear it there. Do NOT widen this to
+    // visibilitychange/focus: those also fire on a tab switch mid-redirect and
+    // would re-arm the button for a second, conflicting OAuth start.
+    useEffect(() => {
+        const onPageShow = (event: PageTransitionEvent) => {
+            if (event.persisted) setLoading(false);
+        };
+        window.addEventListener('pageshow', onPageShow);
+        return () => window.removeEventListener('pageshow', onPageShow);
+    }, []);
+
     const onClick = async () => {
         setLoading(true);
         try {
             await signInWithGoogle();
             // Success → the browser is redirecting to Google. Leave the spinner
-            // on; this component will unmount when navigation happens.
+            // on; the page is leaving. If the user comes Back instead, the
+            // pageshow handler above clears it.
         } catch (error) {
             setLoading(false);
             const msg = error instanceof Error ? error.message : '';

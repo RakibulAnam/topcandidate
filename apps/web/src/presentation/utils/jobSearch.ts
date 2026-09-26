@@ -738,7 +738,7 @@ export function deriveJobSearches(input: JobSearchInput, locale: 'en' | 'bn'): J
     // EXCEPT the remote row: it is the only angle that changes the MARKET
     // rather than the role, so "Software Engineer" appearing once for
     // Bangladesh and once for the world is the feature working, not a repeat —
-    // and the solid saffron globe plus a different board make it unmistakable.
+    // and the solid orange globe plus a different board make it unmistakable.
     // Without this exemption the row vanished for plain "Software Engineer",
     // the most common title in the database and the exact person it is for.
     const labelKey = `${label.text.toLowerCase()}|${label.employer ?? ''}`;

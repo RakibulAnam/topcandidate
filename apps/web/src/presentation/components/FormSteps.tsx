@@ -4,8 +4,8 @@
 // controlled component: parent owns the data, the step renders the UI.
 //
 // Design idioms (matches AGENTS.md §10):
-//   - Editorial Ink + Saffron, never blue/purple/gradients.
-//   - SectionHeader with a Saffron eyebrow + Fraunces display title.
+//   - Editorial Ink + Orange, never blue/purple/gradients.
+//   - SectionHeader with a Orange eyebrow + Fraunces display title.
 //   - TipCard — always-on "Quick guide" panel above the form (rules + real
 //     examples). User can hide it; defaults open.
 //   - PolishHint — small "type messy, the AI will polish" reassurance next
@@ -318,7 +318,7 @@ const WritingGuide = ({
   );
 };
 
-// Single-paragraph saffron callout for steps that don't need a full TipCard
+// Single-paragraph orange callout for steps that don't need a full TipCard
 // or WritingGuide — a friendly one-liner that orients the user without a rule
 // wall. Used in Awards, Certifications, Affiliations, Publications.
 const MiniGuide = ({
@@ -1489,7 +1489,7 @@ export const SkillsStep: React.FC<{
         </button>
       </form>
 
-      {/* JD-matched suggestions — saffron prominent. Surfaces the user's own
+      {/* JD-matched suggestions — orange prominent. Surfaces the user's own
           profile skills + curated dictionary entries that actually appear in
           the job description. Powered by fuse.js fuzzy matching. */}
       {hasJdMatches && (

@@ -287,7 +287,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           <div className="relative mb-4 flex items-center gap-2.5">
             <span
               className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[7px]"
-              style={{ background: 'linear-gradient(135deg, #E8960F, #C7590E)' }}
+              style={{ background: 'linear-gradient(135deg, #EC8752, #C95D27)' }}
             >
               <Sparkles size={12} className="text-[#FFF7EA]" fill="#FFF7EA" />
             </span>

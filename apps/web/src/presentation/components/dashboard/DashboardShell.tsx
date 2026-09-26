@@ -20,6 +20,7 @@ import { CreditsBadge } from '../CreditsBadge';
 import { VerifyingPurchasePill } from '../Layout/VerifyingPurchasePill';
 import { PurchaseModal } from '../PurchaseModal';
 import { CommandPalette } from './CommandPalette';
+import { LogoMark } from '../ui/LogoMark';
 
 interface ShellCtx {
   credits: number | null;
@@ -40,7 +41,8 @@ export const useDashboardShell = (): ShellCtx => {
 };
 
 const Wordmark = () => (
-  <div className="flex items-baseline gap-1 select-none">
+  <div className="flex items-center gap-1 select-none">
+    <LogoMark className="h-5 mr-0.5 sm:h-6" />
     <span className="font-display text-base font-semibold text-brand-700 sm:text-lg">TOP</span>
     <span className="font-display text-base font-semibold text-accent-500 sm:text-lg">CANDIDATE</span>
   </div>

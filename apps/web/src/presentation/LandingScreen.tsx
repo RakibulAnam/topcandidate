@@ -4,6 +4,7 @@ import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { contactMailto } from './support';
 import { track } from '../infrastructure/analytics/track';
+import { LogoMark } from './components/ui/LogoMark';
 
 interface Props {
     onGetStarted: () => void;
@@ -13,7 +14,8 @@ interface Props {
 const Wordmark = ({ size = 'md' }: { size?: 'sm' | 'md' }) => {
     const wordSize = size === 'sm' ? 'text-base' : 'text-lg';
     return (
-        <div className="flex items-baseline gap-1.5 select-none">
+        <div className="flex items-center gap-1.5 select-none">
+            <LogoMark className={size === 'sm' ? 'h-5 mr-0.5' : 'h-6 mr-1'} />
             <span className={`font-display font-semibold tracking-tight text-brand-700 ${wordSize}`}>TOP</span>
             <span className={`font-display font-semibold tracking-tight text-accent-500 ${wordSize}`}>CANDIDATE</span>
         </div>
