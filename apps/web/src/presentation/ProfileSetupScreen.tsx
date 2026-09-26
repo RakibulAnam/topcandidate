@@ -54,6 +54,7 @@ import {
     Star,
 } from 'lucide-react';
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
+import { TutorialVideoCard, TutorialVideoPlayer } from './components/profile/TutorialVideo';
 import { ExtractedProfileData } from '../domain/usecases/ExtractResumeUseCase';
 import { isGibberish } from '../application/validation/gibberishDetector';
 import { isValidEmail } from './components/ui/EmailInput';
@@ -783,7 +784,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     <p className="mb-6 text-[17px] leading-relaxed text-brand-600">
                         {t('profileSetup.introLead')}
                     </p>
-                    <ul className="mb-8 flex flex-col gap-3">
+                    <ul className="mb-7 flex flex-col gap-3">
                         {[t('profileSetup.introPoint1'), t('profileSetup.introPoint2'), t('profileSetup.introPoint3')].map((p, i) => (
                             <li key={i} className="flex items-start gap-3 text-[15px] leading-snug text-brand-600">
                                 <Check size={18} className="mt-0.5 shrink-0 text-accent-500" />
@@ -791,6 +792,12 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             </li>
                         ))}
                     </ul>
+                    <div className="mb-8">
+                        <p className="mb-3 text-[14px] font-medium text-brand-600">
+                            {t('profileSetup.tutorialIntroLabel')}
+                        </p>
+                        <TutorialVideoPlayer placement="intro" />
+                    </div>
                     <button
                         type="button"
                         onClick={() => setShowIntro(false)}
@@ -992,10 +999,11 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             </p>
 
                             {/* ABOVE the step nav, deliberately. This is the fastest route
-                                to a filled profile, so it has to be the first thing in the
-                                rail — at the bottom it was both below the fold and clipped
+                                to a filled profile, so it sits at the top of the rail, right
+                                under the video guide — at the bottom it was both below the fold and clipped
                                 by the fixed bottom bar. Hidden on the import step itself,
                                 where it would advertise the page already open. */}
+                            <TutorialVideoCard layout="stacked" className="mb-4" />
                             {!isFirstStep && (
                                 <ImportResumeCard
                                     onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
@@ -1084,6 +1092,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             to the import step at all once it had been skipped. Hidden on
                             the import step itself, where it would point at the current
                             page. */}
+                        <TutorialVideoCard className="lg:hidden mb-4" />
                         {!isFirstStep && (
                             <ImportResumeCard
                                 onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
