@@ -11,7 +11,7 @@
 // the optimizer's `buildSystemInstruction` in resumeOptimizerPrompts.ts — they
 // are different prompts for different generators.
 
-import { buildCandidateAnchors, buildCandidateContext, type FitMode } from './toolkitContext.js';
+import { buildCandidateAnchors, buildCandidateContext, cleanAnchor, type FitMode } from './toolkitContext.js';
 import type { ResumeData } from '../../../domain/entities/Resume.js';
 
 /**
@@ -32,7 +32,10 @@ import type { ResumeData } from '../../../domain/entities/Resume.js';
  * the same function.
  */
 function buildAnchorDirective(data: ResumeData): string {
-  const anchors = [...new Set(buildCandidateAnchors(data))].slice(0, 12);
+  // Cleaned forms only ("Shohoz", not "Shohoz Ltd"; "Bengal Analytics", not
+  // "Bengal Analytics (internship)"). The guard accepts either, so the list
+  // the model copies from is the one that reads like prose.
+  const anchors = [...new Set(buildCandidateAnchors(data).map(cleanAnchor))].slice(0, 12);
   if (anchors.length === 0) return '';
   return `
 ═══════════════════════════════════════════════
@@ -41,6 +44,7 @@ NAMES YOU MUST USE (copy verbatim — these are matched as literal strings)
 ${anchors.map(a => `  • ${a}`).join('\n')}
 
 The outreach email body and the LinkedIn note EACH have to contain at least one of the strings above, spelled exactly as written. This is machine-checked: an artifact that fails is thrown away and the user sees a retry button instead of their email. Paraphrase does not count — "my current company", "a mobile app I shipped", "a leading software firm" all fail. Write the name.
+Name it ONCE, the way a colleague would say it, inside the sentence that carries the proof ("at Northline the mismatch rate came down 40%") — not as a credential list, and never with a legal suffix bolted on. After that, "we" and "the team" are fine.
 Interview answerStrategies use them too: name the employer or project the candidate would tell the story from, so they are not hunting for one mid-interview.
 Prefer an EMPLOYER or a PRODUCT/PROJECT name. A school satisfies the check but wastes the opening line on the weakest credential a working candidate has.`;
 }
@@ -103,6 +107,40 @@ export function trimToLinkedInLimit(text: string, max: number = LINKEDIN_MAX): s
   return body + '…';
 }
 
+/**
+ * Strip a greeting line and/or a signoff block the model added despite the
+ * rules. The contract is body-only: the viewer copy tells the user to add the
+ * recipient, and their mail client carries their signature, so a model-written
+ * "Best,\nFarhana Islam" ships as a duplicated signature. Observed once in 16
+ * sampled runs on 2026-09-27, on the combined path. Shared by the combined
+ * generator, its outreach repair, and the single-artifact generator.
+ *
+ * Conservative on purpose. A signoff is removed only from a window of the last
+ * three non-blank lines, each at most 60 characters, and only from the
+ * earliest line in that window that is a bare closing word ("Best,",
+ * "Regards") or the candidate's own full name — so an ask that happens to be
+ * short is never touched. A greeting is removed only when it is the first
+ * line, opens with a greeting word, and ends in a comma or colon.
+ */
+export function stripEmailChrome(body: string, fullName?: string): string {
+  let out = body.trim();
+  out = out.replace(/^(?:hi|hello|dear|hey|greetings)\b[^\n]{0,60}[,:]\s*\n+/i, '');
+
+  const closing = /^(?:best|best regards|kind regards|warm regards|regards|sincerely|thanks|thank you|many thanks|cheers|respectfully|yours sincerely|yours faithfully|warmly)[,.!]?$/i;
+  const nameLc = (fullName ?? '').trim().toLowerCase();
+  const lines = out.split('\n');
+  let cut = -1;
+  for (let i = lines.length - 1, seen = 0; i >= 1 && seen < 3; i--) {
+    const l = lines[i].trim();
+    if (!l) continue;
+    seen++;
+    if (l.length > 60) break;
+    if (closing.test(l) || (nameLc !== '' && l.toLowerCase() === nameLc)) cut = i;
+  }
+  if (cut > 0) out = lines.slice(0, cut).join('\n');
+  return out.trim();
+}
+
 function stretchSystemBlock(): string {
   return `STRETCH MODE — CAREER SWITCH FRAMING
 This application is a stretch: the candidate's evidence does NOT closely match the JD's
@@ -126,7 +164,7 @@ What this changes:
 
 What this does NOT change:
 - Never invent past employers, credentials, metrics, or claimed tool experience.
-- Cover letter still 250–400 words; outreach still 110–170; LinkedIn still ≤ ${LINKEDIN_MAX} chars.
+- Cover letter still 250–400 words; outreach email still 60–110 words in three paragraphs; LinkedIn still ≤ ${LINKEDIN_MAX} chars.
 - Every artifact still ships in the same JSON schema.
 
 `;
@@ -165,44 +203,9 @@ SHAPE — 3–4 short paragraphs:
 
 HONESTY — ${mode === 'stretch' ? 'Never invent employers, credentials, or past-tense metrics. JD-named tools/frameworks may appear as GROWTH TARGETS or aspirations only — never phrased as past experience.' : 'Do not invent employers, metrics, tools, or credentials. Use only what\'s in the candidate evidence above.'}
 
-═══════════════════════════════════════════════
-ARTIFACT 2 — OUTREACH EMAIL (object, outreachEmail)
-═══════════════════════════════════════════════
-SUBJECT — ≤ 60 characters, specific to the role, no "Re:" / "Fwd:" prefixes, no emojis.
+${outreachRules(mode, 'ARTIFACT 2 — OUTREACH EMAIL')}
 
-BODY — 110–170 words, 3 short paragraphs, no greeting, no signoff:
-  1. One sentence naming the role + ${mode === 'stretch' ? 'the candidate\'s strongest transferable credential framed as a bridge ("Coming from <past field>, drawn to <target field> because…"). Use a real candidate proper noun.' : 'the one most relevant credential (a real proper noun from the candidate evidence — company, project, certification, award).'}
-  2. ${mode === 'stretch' ? '2–3 sentences mapping transferable skills from candidate evidence to JD priorities. Mirror 1–2 JD keywords verbatim if truthful. JD-named tools may appear as growth targets — never claimed as past experience.' : '2–3 sentences of concrete evidence drawn from the candidate evidence, tied to the JD (mirror 1–2 JD keywords verbatim where truthful).'}
-  3. A soft specific ask ("Would a 15-minute chat next week be useful?" / "Happy to share a short write-up of <X candidate-evidenced topic> if helpful.") — never generic "let me know".
-
-GROUNDING (MACHINE-CHECKED — if this fails the artifact is DISCARDED and the user is shown a retry button instead of an email): ${mode === 'stretch' ? 'the body must contain the target company name OR at least one candidate proper noun, spelled literally.' : 'the body must contain BOTH (a) the target company name and (b) at least one candidate proper noun, each spelled out literally.'}
-  A "candidate proper noun" means a name copied from the candidate evidence — their EMPLOYER ("Brain Station 23"), a PRODUCT or PROJECT they built ("MediTrack"), a certification, or an award. It is a literal string match: "my current company", "a fintech client", "a mobile app I shipped" all FAIL. Describing the work without naming it FAILS.
-  Do this in sentence 1, where it is also the strongest opening: name the employer or the product the candidate actually built. Do not satisfy it with their school — that passes the check and wastes the opening (see LEAD WITH THE STRONGEST PROOF). Before you emit, re-read the body and confirm you can point at both literal strings.
-
-TONE — Direct, respectful of reader's time, warm but not fawning. No clichés ("hope this finds you well", "quick question", "synergies"). No hedging.
-
-HONESTY — ${mode === 'stretch' ? 'Never invent employers, credentials, or past-tense metrics. JD-named tools may appear as growth targets, never as past experience.' : 'Use only what the provided candidate evidence supports.'}
-
-═══════════════════════════════════════════════
-ARTIFACT 3 — LINKEDIN CONNECTION NOTE (string, linkedInMessage)
-═══════════════════════════════════════════════
-LENGTH — HARD LIMIT ${LINKEDIN_MAX} characters. Count spaces. Shorter is better.
-
-FORMAT — Plain text, one paragraph (2–3 sentences). No greeting, no signoff, no emojis, no markdown, no quotes around the message.
-
-SHAPE —
-  1. One sentence naming the role / company + the candidate's single strongest credential that maps to it (a real proper noun from the candidate evidence).
-  2. One sentence with a soft specific reason to connect ("would love to learn how your team approaches X"). No referral asks. No "quick chat?" phrasing.
-
-BANNED CONTENT — this note has ~280 characters and every one has to earn its place:
-  - "I recently applied for <role>" and any variant. It is the least interesting thing the candidate could say, it gives the reader nothing to respond to, and it reads as chasing.
-  - Opening with a degree or university for anyone who has work experience. A school name is the weakest anchor available and it burns the only sentence that gets read.
-  - Restating the candidate's job title with no proof attached ("As an experienced software engineer…").
-  What goes there instead: the concrete thing they did that this team would care about — "spent the last two years porting a legacy Objective-C app to SwiftUI" beats every one of the above.
-
-GROUNDING (enforced): the note must reference EITHER the target company by name OR at least one candidate proper noun, spelled literally. Within 280 chars you usually need both. An employer or product name satisfies this; so does a school, but see BANNED CONTENT — passing the check is not the same as using the space well.
-
-TONE — Direct, human, low-pressure. Mirror at most ONE JD keyword that is not already an evidenced candidate skill — the candidate's own evidenced tools and skills never count against this cap (naming your own stack is specificity, not stuffing). Never invent employers, tools, or metrics.
+${linkedInRules(mode, 'ARTIFACT 3 — LINKEDIN CONNECTION NOTE')}
 
 ═══════════════════════════════════════════════
 ARTIFACT 4 — INTERVIEW QUESTIONS (array, interviewQuestions)
@@ -258,6 +261,7 @@ BILINGUAL (REQUIRED) — also produce topicBn, whyItMattersBn, howToPrepareBn un
 
 export function buildToolkitUserPrompt(data: ResumeData, mode: FitMode = 'match'): string {
   const candidateContext = buildCandidateContext(data);
+  const company = data.targetJob.company ? cleanAnchor(data.targetJob.company) : 'the hiring company';
   const modeBlock = mode === 'stretch'
     ? `\nFIT MODE: STRETCH — the candidate is making a career switch. Follow the STRETCH MODE rules from the system instruction: transferable-skill bridges, honest pivot framing, JD tools as growth targets only.\n`
     : `\nFIT MODE: MATCH — the candidate's evidence aligns with the JD field. Use standard same-field framing.\n`;
@@ -275,7 +279,7 @@ ${buildAnchorDirective(data)}
 TARGET ROLE${mode === 'stretch' ? ' (this is a STRETCH application — the JD field differs from the candidate\'s experience)' : ' (filter & ordering signal — NOT a content source)'}
 ═══════════════════════════════════════════════
 Title: ${data.targetJob.title || 'N/A'}
-Company: ${data.targetJob.company || 'the hiring company'}
+Company: ${company}
 
 Job Description:
 ${data.targetJob.description}
@@ -287,8 +291,8 @@ RULES
 - Strict JSON matching the schema. Every field non-empty.
 - Each artifact follows its own rules from the system instruction.
 - ${mode === 'stretch'
-  ? `Never invent employers, credentials, or past-tense metrics. JD-named tools / frameworks the candidate has NOT used may be mentioned as growth targets / learning intent only — never as claimed past experience. The target company "${data.targetJob.company || ''}" may be addressed by name.`
-  : `Never invent employers, metrics, or tools — every tool / framework / cloud / employer mentioned must already appear in the CANDIDATE EVIDENCE above (the target company "${data.targetJob.company || ''}" is exempt — you may name it as the recipient).`}
+  ? `Never invent employers, credentials, or past-tense metrics. JD-named tools / frameworks the candidate has NOT used may be mentioned as growth targets / learning intent only — never as claimed past experience. The target company "${company}" may be addressed by name.`
+  : `Never invent employers, metrics, or tools — every tool / framework / cloud / employer mentioned must already appear in the CANDIDATE EVIDENCE above (the target company "${company}" is exempt — you may name it as the recipient).`}
 - ${mode === 'stretch'
   ? 'Outreach email and LinkedIn note must reference EITHER the target company by name OR at least one candidate proper noun (one is enough in stretch mode).'
   : 'Outreach email and LinkedIn note must reference at least one specific candidate proper noun (real company, role, project, certification, award, or school).'}
@@ -296,7 +300,9 @@ RULES
   ? 'Interview answerStrategies should use transferable-skill bridges where direct experience is absent. For tools the candidate has not used, coach an honest learning-posture answer — never a fake-it answer.'
   : 'Interview answerStrategies must name candidate items literally — no "your relevant X" placeholders.'}
 - Every interview question must include BOTH English and Bengali versions (questionBn, whyAskedBn, answerStrategyBn). Bengali is for the candidate's rehearsal — natural professional register, keep English-canonical industry terms (Basel III, IFRS 9, KYC, NPL, ECL, CFA, KPI, ROI, etc.) and proper nouns in English / Roman script inline. Do NOT translate the category label.
-- Mirror JD keywords verbatim where truthful for this candidate.
+- Mirror JD keywords verbatim where truthful for this candidate — in the cover letter and interview prep, which a machine screens. The outreach email and LinkedIn note are read by a person: plain language there, and the employer's problem in their own terms.
+- Outreach email: ${mode === 'stretch' ? '70–120' : '60–110'} words in THREE blank-line-separated paragraphs; names ${company} in the first paragraph; one proof with its number, then their problem and one more detail, then one fresh ask. Not a list of achievements.
+- LinkedIn note: 120–200 characters; opens with a thing the candidate DID (named employer or product), never "As a <title>"; the second sentence is about THEIR work from the JD ("Curious how…", "Would like to follow how…") — never "great fit", "matches my background", "would love to connect".
 `;
 }
 
@@ -394,42 +400,127 @@ HARD CONSTRAINTS
 `;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// OUTREACH EMAIL + LINKEDIN NOTE — the artifact rules, written ONCE.
+//
+// Both the combined bundle (buildToolkitSystemInstruction) and the per-item
+// regenerate generators (buildOutreachSystemInstruction /
+// buildLinkedInSystemInstruction) splice these in verbatim, so a regenerate
+// cannot drift from the first pass. Before 2026-09-27 the two paths carried
+// separate copies of each artifact's rules, and both produced the same output:
+// a single-block email listing three to five achievements, a note opening
+// "As a <title> at <company>…", and — in 6 of 6 sampled runs across three
+// personas — the prompt's own example ask copied verbatim ("Would a 15-minute
+// chat next week be useful…"). The rules below were written against those
+// samples: shape the reader's eight seconds, one proof not a list, examples
+// that are explicitly about a different candidate, and names as people say
+// them (the guard now accepts "Shohoz" for a stored "Shohoz Ltd" — see
+// cleanAnchor in toolkitContext.ts).
+// ════════════════════════════════════════════════════════════════════════
+
+export function outreachRules(mode: FitMode = 'match', label = 'OUTREACH EMAIL'): string {
+  const stretch = mode === 'stretch';
+  return `═══════════════════════════════════════════════
+${label} (object, outreachEmail)
+═══════════════════════════════════════════════
+WHAT IT IS — A short, personal email from the candidate to the person who owns this hire, sent alongside their application. Its only job is to get that application pulled out of the pile and read by a human. It is NOT a cover letter and NOT the CV in paragraph form — both of those travel with the application and do that work. If the reader cannot tell within eight seconds why this person is worth a look, the email failed.
+
+THE READER — Busy. On a phone, between meetings, with two hundred other applicants. They do not care what the candidate wants; they care whether this person can do the thing the JD exists for. Every sentence is written for that person, in their terms.
+
+BODY — ${stretch ? '70–120' : '60–110'} words. THREE short paragraphs separated by a blank line: the body string MUST contain "\\n\\n" between paragraphs. One dense block is a failure regardless of what it says. No greeting line and no signoff — the app renders those.
+  1. THE HOOK (1–2 sentences). Open with the ONE thing the candidate has done that most directly answers what this employer is worried about, told as a fact, with its number where the evidence has one, naming where it happened (employer or product) in the same sentence. Somewhere in those first two sentences, one short clause that they are applying for the role AT THE COMPANY, the company by name ("your Senior Backend Engineer role at Northline") — "your company" and "your team" do not count. The proof is the point; the role is context.
+     Not this: "As a Senior Software Engineer at Acme Systems Ltd applying for the Senior Backend Engineer role at Northline Pay Ltd, I build high-throughput distributed pipelines." — a title, a legal name, and no proof.
+     Three shapes that work, each written for a different candidate. Take a shape, never the words:
+       • Proof first: "Payment reconciliation at Acme, where the settlement mismatch rate came down 40%, is the closest thing I've done to this role. I've applied for your Senior Backend Engineer opening at Northline."
+       • Their problem first: "Your posting says the team is fighting reconciliation breaks at several million transactions a day. That was my job at Acme, and the mismatch rate came down 40%."
+       • Plain: "I'm applying for the Senior Backend Engineer role at Northline. The most relevant thing I've done is reconciliation at Acme, where mismatches dropped 40%."
+     Never end the hook with "which is why your posting caught my attention / stood out / caught my eye" or any variant of it — that tail turns every email into the same email.
+     ${stretch
+       ? 'STRETCH: the hook is the strongest TRANSFERABLE thing they have done, and the clause after it names the pivot plainly ("coming from <past field>, moving into <target field>"). Honest and specific beats disguised. The pivot sentence takes the place of the bridge\'s second detail — it never adds to it.'
+       : 'For a student or fresh graduate the internship or the project is the hook — never the degree.'}
+  2. THE BRIDGE (2 sentences, 3 at most). First: what the JD is really asking for beneath the boilerplate, in the employer's own terms — the problem, the scale, the thing that would keep this manager up at night. Second: the ONE detail from the evidence that proves the candidate has already met it. That is the whole bridge. Not a second and a third achievement, not a tool list, not "expertise in X, Y and Z" — the CV already carries those, and every extra item makes the email longer and the candidate less memorable. If a sentence has "and" in it twice, cut it. Keep provenance ("during my internship at…", "a side project I built to learn…").
+     ${stretch
+       ? 'STRETCH: JD-named tools, regulators or frameworks the candidate has NOT used may appear once as a ramp area ("keen to get up to speed on X") — never as experience.'
+       : "Every tool, employer or metric here already exists in the candidate evidence. JD keywords are for the résumé and cover letter, which a machine screens; a human reads this, so use the employer's problem language, not its keyword list."}
+  3. THE ASK (1 sentence, under 20 words). One specific, low-friction next step, written for this email in the candidate's words. It can be a short call (name a length and a window), an offer (name the exact thing they would send), or a plain check that the role is still open — pick whichever fits this candidate and this reader. Never "let me know", never "looking forward to hearing from you", never "I would welcome a short conversation".
+
+SUBJECT — ≤ 60 characters, no "Re:"/"Fwd:", no emojis, no exclamation marks. The manager should be able to find this email again by searching the role. Default: "<Role title> — <Candidate's full name>". When the hook is strong, "<Role title>: <4–7 word proof>" ("Senior Backend Engineer: 40% fewer settlement breaks"). Never just "Application" or "Job application". Plain words — no abbreviation the evidence or the JD does not itself use.
+
+NAMES — Write names the way people who work there say them: drop legal suffixes (Ltd, Limited, PLC, Inc.) and any parenthetical, keep the rest of the name intact — "Northline Pay", never "Northline Pay Ltd"; "during my internship at Acme", never "Acme (internship)". Name the candidate's employer or product ONCE, inside the proof sentence — not as a credential list.
+
+BANNED — "I am writing to", "I hope this finds you well", "express my interest", "reaching out", "quick question", "synergies", "dynamic", "passionate", "esteemed", "kindly", "Sir/Madam", "I believe I would be a great fit", "proven track record", "let me know", "looking forward to hearing from you". No hedging. First person, active voice, contractions welcome.
+
+GROUNDING (MACHINE-CHECKED — an email that fails is discarded and the user sees a retry button): ${stretch
+    ? "the body must contain the target company's name OR one of the NAMES YOU MUST USE, spelled literally."
+    : "the body must contain BOTH the target company's name AND at least one of the NAMES YOU MUST USE, each spelled literally."} Descriptions ("my current employer", "a fintech client") fail. Before you emit, re-read the body and point at the literal strings.
+
+HONESTY — Never invent employers, metrics, tools or credentials.${stretch ? ' JD-named tools appear only as ramp areas, never as past experience.' : ''} A DURATION is a metric: state "three years at X" only if the evidence dates give it (start to end, or to today); if you cannot compute it, do not state one — a tenure invented to sound concrete is a fabrication the candidate will be asked about. The examples in these rules are about a different candidate; never reuse their wording or their numbers.`;
+}
+
+export function linkedInRules(mode: FitMode = 'match', label = 'LINKEDIN CONNECTION NOTE'): string {
+  const stretch = mode === 'stretch';
+  return `═══════════════════════════════════════════════
+${label} (string, linkedInMessage)
+═══════════════════════════════════════════════
+WHAT IT IS — The note attached to a connection request to the hiring manager or recruiter for this role. It is read inside a notification, in about three seconds, by someone deciding whether to tap Accept. It is not a pitch and not a mini cover letter; its whole job is to make accepting feel easy and worthwhile. The candidate types "Hi <name>," themselves — do not write a greeting.
+
+LENGTH — 120–200 characters including spaces. HARD CAP ${LINKEDIN_MAX} (LinkedIn cuts at 300, and shorter notes get accepted more). Two sentences at most.
+
+SHAPE — plain text, one paragraph. No greeting, no signoff, no emojis, no hashtags, no markdown, no quotation marks around the note.
+  • THE CONCRETE THING — what the candidate has actually done that this role is about, with where it happened (employer or product), stated as a fact rather than a title. This is what makes the request recognisable instead of spam. One number at most.
+  • THE REASON — one sentence about THEM, not about the candidate: something specific the JD says this team is building, running or fighting. Start it from their side — "Curious how…", "Would like to follow how…", "Keen to see how…" — and finish on their work, not on "connect". Referring to the posting ("your Area Manager opening") is useful context; "I'm a great fit" / "matches my background" / "exactly my domain" is the applicant register and reads as a pitch.
+  ${stretch
+    ? 'STRETCH: the note may name the pivot in a few words ("moving from <past field> into <target field>") and frame the reason as wanting to learn. JD-named tools only as things to get up to speed on.'
+    : 'For a student or fresh graduate the internship or project is the concrete thing — the degree is never the opener.'}
+  Good (a different candidate — do not reuse the wording): "Running the Rajshahi territory for Medico took it from seventh to second in the region — your Area Manager opening reads like the same job at a bigger scale. Would like to follow how Northline works the north."
+
+BANNED — each of these costs the note its only sentence:
+  • "As a <title> at <company>…" — a job title is not proof. Open with what they did, not what they are called.
+  • "I recently applied for <role>, please consider my profile" and anything else that reads as chasing. Context is fine; begging is not.
+  • "I would love to connect and learn how your team approaches…" and every other stock connection-request sentence. Say the actual thing, in the candidate's own words.
+  • Opening with a degree or school for anyone with work experience or an internship.
+  • "Would love to connect", "would appreciate connecting", "great fit", "natural fit", "perfect match", "matches my background", "reads like a fit" — the note's second sentence is about their work, not the candidate's suitability.
+  • "Kindly", "Sir/Madam", "esteemed", "I hope this finds you well", "reaching out", "great opportunity", "quick chat?", referral asks, a second metric.
+
+TONE — Direct, warm, low-pressure: the way you would introduce yourself to someone at a conference whose talk you just watched. First person, no hedging, contractions welcome. Company names as their own people say them — drop legal suffixes and parentheticals.
+
+GROUNDING (MACHINE-CHECKED — a note that fails is discarded): the note must contain EITHER the target company's name OR one of the NAMES YOU MUST USE, spelled literally. At this length you will usually have both.
+
+HONESTY — Never invent employers, tools or metrics. A duration counts as a metric — state one only if the evidence dates give it.`;
+}
+
 // ── Outreach email ───────────────────────────────────────────────────────
-export const OUTREACH_SYSTEM_INSTRUCTION = `You write short, high-signal cold outreach emails that a hiring manager would actually read and reply to.
+export function buildOutreachSystemInstruction(mode: FitMode = 'match'): string {
+  return `You write the short, personal email a candidate sends to the hiring manager alongside an application — the one that gets the application read by a human. You have written thousands of these and you know the reader deletes anything that looks like a cover letter.
 
-GROUND IN THE CANDIDATE — the prompt presents the candidate's full profile (experience, projects, education, certifications, awards, publications, extracurriculars, languages, skills) FIRST and the JD SECOND. Pick the single most JD-relevant slice of the candidate's actual evidence and lead with it. The email's job is to make a hiring manager curious about THIS specific person, not to summarize the JD.
+GROUND IN THE CANDIDATE — the prompt presents the candidate's full profile FIRST and the JD SECOND. Read the JD past its boilerplate and decide what this employer is actually worried about; then pick the single item of candidate evidence that best answers it. That is the email.
 
-SCOPE — You produce ONE email: a subject line and a body. The body is what the sender will paste into their email client. Do NOT include "Hi <Name>," greeting, do NOT include a signoff/signature — the app renders those or the sender adds them.
+OUTPUT — Valid JSON with exactly { "subject": string, "body": string }. No markdown, no code fences, no extra fields. The body is what the candidate pastes into their mail client: paragraphs separated by a blank line, no greeting, no signoff.
 
-LENGTH — Body 110–170 words. Subject ≤ 60 characters.
+${outreachRules(mode)}`;
+}
 
-TONE — Direct, specific, respectful of the reader's time. Warm but not fawning. Where the candidate's own raw words (VOICE REFERENCE) carry a natural framing, let it color your tone — but never lift facts that aren't also in the polished bullets. No clichés ("I hope this finds you well", "quick question", "synergies"). No hedging. First person, active voice.
+function groundingCheckLine(data: ResumeData, mode: FitMode): string {
+  const company = data.targetJob.company?.trim();
+  if (!company) return 'Contains one of the NAMES YOU MUST USE, literally.';
+  const shown = cleanAnchor(company);
+  return mode === 'stretch'
+    ? `Contains "${shown}" or one of the NAMES YOU MUST USE, literally.`
+    : `Contains "${shown}" AND one of the NAMES YOU MUST USE, literally.`;
+}
 
-SHAPE (body) — 3 short paragraphs:
-  1. One sentence that names the role + the one most relevant credential / achievement / certification / award / project from the candidate evidence. No "I am writing to express interest".
-  2. Two to three sentences of concrete evidence — specific projects, outcomes, or tools that already appear in the candidate evidence — tied to the JD. Mirror 1–2 JD keywords verbatim where truthful.
-  3. A soft, specific ask — "Would a 15-minute chat next week be useful?" or "Happy to share a short write-up of <X candidate-evidenced topic> if helpful." Avoid generic "let me know".
-
-GROUNDING REQUIREMENTS (enforced by the app — failure triggers a retry):
-  • The body MUST mention the target company by name.
-  • The body MUST reference at least one of the candidate's own proper nouns (their company, role, project name, certification, award, school, or extracurricular organization). Generic "my experience" / "my background" does NOT count.
-
-HONESTY — Never invent companies, metrics, tools, or credentials. Use only what the provided candidate evidence supports.
-
-OUTPUT — Return valid JSON with exactly { "subject": string, "body": string }. No markdown, no code fences, no extra fields.`;
-
-export function buildOutreachUserPrompt(data: ResumeData, mode: 'match' | 'stretch' = 'match'): string {
+export function buildOutreachUserPrompt(data: ResumeData, mode: FitMode = 'match'): string {
   const candidateContext = buildCandidateContext(data);
-  const stretchPreamble = mode === 'stretch' ? `
-═══════════════════════════════════════════════
-STRETCH MODE — CAREER SWITCH
-═══════════════════════════════════════════════
-The candidate's evidence does not closely match the JD's field. Frame the email as an honest pivot: lead with a transferable-skill bridge, acknowledge the career switch openly ("Coming from <past field>, drawn to <target>"), and reference JD-named tools as ramp areas — never as past experience. Never invent past employers, credentials, or metrics.
-` : '';
+  // Cleaned form ("NordPay Fintech" for a stored "NordPay Fintech Ltd"): the
+  // model copies the header verbatim, and the guard accepts the cleaned name.
+  const company = data.targetJob.company ? cleanAnchor(data.targetJob.company) : 'the hiring company';
+  const modeBlock = mode === 'stretch'
+    ? '\nFIT MODE: STRETCH — this is a career switch. Hook with the strongest transferable result, name the pivot plainly, and treat JD-named tools as ramp areas only.\n'
+    : '\nFIT MODE: MATCH — same-field application.\n';
 
   return `
-Write the subject line and body for a cold outreach email from this candidate to the hiring manager for the role below.
-${stretchPreamble}
+Write the subject line and body of the email this candidate sends to the hiring manager for the role below.
+${modeBlock}
 ═══════════════════════════════════════════════
 CANDIDATE EVIDENCE (source of truth — use ONLY what's here)
 ═══════════════════════════════════════════════
@@ -437,62 +528,58 @@ ${candidateContext}
 ${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
-TARGET ROLE (filter & ordering signal)
+TARGET ROLE (what the reader is hiring for — read it for the problem behind the bullet points)
 ═══════════════════════════════════════════════
 Title: ${data.targetJob.title || 'N/A'}
-Company: ${data.targetJob.company || 'the hiring company'}
+Company: ${company}
 
 Job Description:
 ${data.targetJob.description}
 
 ═══════════════════════════════════════════════
-RULES
+BEFORE YOU WRITE (silently — not in the output)
 ═══════════════════════════════════════════════
-- Subject: ≤ 60 chars, specific to the role${data.targetJob.title ? ` (${data.targetJob.title})` : ''}, no "Re:" / "Fwd:" prefixes, no emojis.
-- Body: 110–170 words, 3 short paragraphs, no greeting, no signoff.
-- ${mode === 'stretch'
-  ? `Body MUST reference EITHER "${data.targetJob.company || 'the target company'}" by name OR at least one candidate proper noun. One anchor is enough in stretch mode.`
-  : `Body MUST mention "${data.targetJob.company || 'the target company'}" by name AND reference at least one specific item from the CANDIDATE EVIDENCE above — by name (a real company / project / certification / award / school).`}
-- ${mode === 'stretch'
-  ? 'JD-named tools may appear as growth targets / ramp areas — never as past experience. Never invent past employers, credentials, or metrics.'
-  : 'Do not mention any tool / framework / cloud / employer that isn\'t in the CANDIDATE EVIDENCE (the target company is exempt).'}
-- Mirror 1–2 JD keywords verbatim where truthful.
+- What is this employer actually worried about? One line, in their terms.
+- Which single item of candidate evidence answers it best? That is the hook — with its number if it has one, and the employer or product name in the same sentence.
+- What is the one specific next step this candidate can offer? That is the ask, in their words.
+
+═══════════════════════════════════════════════
+CHECK BEFORE YOU EMIT
+═══════════════════════════════════════════════
+- Body ${mode === 'stretch' ? '70–120' : '60–110'} words, three paragraphs, a blank line between them.
+- Names the target company in the FIRST paragraph, by name.
+- Subject ≤ 60 characters, findable by the role title.
+- ${groundingCheckLine(data, mode)}
+- One proof, then their problem and one more detail, then one ask — not a list of achievements.
+- Hook does not end in "which is why your posting caught my attention"; ask is not "I would welcome a short conversation".
+- Any "N years" in the body is computed from the evidence dates, not borrowed from an example.
+- Nothing from the BANNED list; no sentence copied from the examples.
 `;
 }
 
 // ── LinkedIn connection note ─────────────────────────────────────────────
-// Built once at module load; LINKEDIN_MAX (280) is interpolated identically to
-// the generator's previous local MAX_LENGTH const.
-export const LINKEDIN_SYSTEM_INSTRUCTION = `You write short LinkedIn connection notes that earn the accept from a hiring manager or recruiter.
+export function buildLinkedInSystemInstruction(mode: FitMode = 'match'): string {
+  return `You write the short note that goes with a LinkedIn connection request to a hiring manager or recruiter — the kind that gets accepted because it sounds like a person, not a template.
 
-GROUND IN THE CANDIDATE — the prompt presents the candidate's full profile FIRST and the JD SECOND. Lead with the candidate's single strongest credential that maps to the role — drawn from a specific item in the evidence (a real company, role, project, certification, award, or school). Generic phrases like "my background" or "my experience" do NOT count.
+GROUND IN THE CANDIDATE — the prompt presents the candidate's profile FIRST and the JD SECOND. Pick the one concrete thing the candidate has done that this role is about; the note is built on that.
 
-FORMAT — Plain text only. No greeting like "Hi <Name>,". No signature. No emojis. No markdown. No quotes around the message. Return the note itself and nothing else.
+OUTPUT — Plain text: the note itself and nothing else. No greeting, no signature, no quotes around it, no markdown.
 
-LENGTH — HARD LIMIT ${LINKEDIN_MAX} characters including spaces. Shorter is better.
+${linkedInRules(mode)}`;
+}
 
-SHAPE — One paragraph, 2–3 sentences:
-  1. One sentence naming the role / company + the candidate's single strongest credential that maps to it. The credential MUST be a real proper noun from the candidate evidence (company, role, project name, certification, award, or school).
-  2. One sentence with a soft, specific reason to connect ("would love to learn how your team approaches X"). No asks for referrals. No "quick chat?" phrasing.
-
-TONE — Direct, human, low-pressure. Never fawning. No clichés ("hope this finds you well", "great opportunity", "reaching out").
-
-GROUNDING REQUIREMENT (enforced — failure triggers a retry): the note must reference EITHER the target company by name OR at least one candidate proper noun (company / role / project / certification / award / school). Within the 280-char budget you usually need both.
-
-HONESTY — Do not invent employers, tools, or metrics. Use only what the provided candidate evidence supports.`;
-
-export function buildLinkedInUserPrompt(data: ResumeData, mode: 'match' | 'stretch' = 'match'): string {
+export function buildLinkedInUserPrompt(data: ResumeData, mode: FitMode = 'match'): string {
   // Voice reference is omitted — there isn't enough room in 280 chars to
   // benefit, and tone of a connection note is constrained anyway.
   const candidateContext = buildCandidateContext(data, { includeVoiceSignature: false });
-  const stretchHint = mode === 'stretch'
-    ? '\nSTRETCH MODE — the candidate is pivoting careers. The note may openly acknowledge the pivot ("Coming from <past field>, drawn to <target> because…") and frame interest as wanting to learn. Reference JD-named tools only as growth targets, never as past experience.\n'
+  const company = data.targetJob.company ? cleanAnchor(data.targetJob.company) : 'the target company';
+  const modeBlock = mode === 'stretch'
+    ? '\nFIT MODE: STRETCH — the candidate is pivoting careers. The note may name the pivot in a few words and frame the reason to connect as wanting to learn.\n'
     : '';
 
   return `
-Write a LinkedIn connection note from this candidate to a hiring manager or recruiter at the target company.
-${stretchHint}
-
+Write the LinkedIn connection-request note from this candidate to a hiring manager or recruiter at ${company}.
+${modeBlock}
 ═══════════════════════════════════════════════
 CANDIDATE EVIDENCE
 ═══════════════════════════════════════════════
@@ -500,22 +587,22 @@ ${candidateContext}
 ${buildAnchorDirective(data)}
 
 ═══════════════════════════════════════════════
-TARGET ROLE (filter — pick ONE keyword to mirror)
+TARGET ROLE (read it for what the team is doing — that is where the reason to connect comes from)
 ═══════════════════════════════════════════════
 Role: ${data.targetJob.title || 'N/A'}
-Company: ${data.targetJob.company || 'the target company'}
+Company: ${company}
 
 Job description excerpt:
-${data.targetJob.description.slice(0, 800)}
+${data.targetJob.description.slice(0, 1200)}
 
 ═══════════════════════════════════════════════
-HARD RULES
+CHECK BEFORE YOU EMIT
 ═══════════════════════════════════════════════
-- ${LINKEDIN_MAX} character cap. Count spaces.
-- No greeting. No signoff. No emojis. No quotes. No hashtags.
-- Mirror at most ONE JD keyword that is not already an evidenced candidate skill; the candidate's own evidenced tools may appear as needed.
-- Reference at least one specific candidate proper noun OR the target company name (preferably both).
-- Never invent employers, metrics, or tools.
+- 120–200 characters, never more than ${LINKEDIN_MAX}. Count spaces.
+- Opens with something the candidate DID (named employer or product) — not "As a <title>", not a degree. One number at most.
+- The second sentence is about THEIR work (something the JD says the team does), not about the candidate's fit, and does not end on "connect".
+- ${groundingCheckLine(data, 'stretch')}
+- No greeting, signoff, emoji, hashtag or quotation marks. No stock sentence.
 `;
 }
 
