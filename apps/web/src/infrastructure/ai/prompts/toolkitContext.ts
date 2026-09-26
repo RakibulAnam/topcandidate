@@ -402,6 +402,32 @@ function isLatinRepresentable(anchor: string): boolean {
   return latinCount / letters.length >= 0.5;
 }
 
+// Trailing legal suffixes and parenthetical qualifiers that nobody keeps in
+// prose. A profile stores "Shohoz Ltd" and "Bengal Analytics (internship)";
+// a sentence says "at Shohoz" and "during my internship at Bengal Analytics".
+// Before 2026-09-27 the specificity guard demanded the stored string verbatim,
+// so the prompt told the model to copy it verbatim, and the emails read
+// "Bengal Analytics (internship)" and "NordPay Fintech Ltd" in every sentence.
+//
+// Deliberately NOT stripped: "Group", "Bank", "Foods", "Pharma" — those are
+// part of how the name is said ("DBL Group"), and cutting them can leave a
+// three-letter stub that substring-matches inside unrelated words. Multi-word
+// forms come first in the alternation so "Pvt. Ltd." is consumed whole.
+const LEGAL_SUFFIX_RE = /(?:[\s,]+(?:private\s+limited|pvt\.?\s*ltd\.?|co\.?,?\s*ltd\.?|pvt\.?|ltd\.?|limited|inc\.?|llc|l\.l\.c\.|plc|corp\.?|corporation|gmbh|a\/s|as|ab|bv|b\.v\.|sa|s\.a\.|llp))+\s*$/i;
+const TRAILING_PAREN_RE = /\s*\([^()]*\)\s*$/;
+
+/**
+ * The form of a stored name that reads naturally in a sentence. Returns the
+ * input unchanged when stripping would leave fewer than four characters — a
+ * stub like "ABC" would let the substring guard match by accident, so the
+ * guard stays strict for those.
+ */
+export function cleanAnchor(raw: string): string {
+  const trimmed = raw.trim();
+  const cleaned = trimmed.replace(TRAILING_PAREN_RE, '').replace(LEGAL_SUFFIX_RE, '').trim();
+  return cleaned.length >= 4 ? cleaned : trimmed;
+}
+
 export function buildCandidateAnchors(data: ResumeData): string[] {
   const anchors: string[] = [];
   for (const e of data.experience ?? []) {
@@ -441,7 +467,17 @@ export function buildCandidateAnchors(data: ResumeData): string[] {
   for (const e of data.experience ?? []) harvest(e.normalized?.bullets);
   for (const p of data.projects ?? []) harvest(p.normalized?.bullets);
   for (const x of data.extracurriculars ?? []) harvest(x.normalized?.bullets);
-  return anchors;
+  // Accept the way people actually write these names ("Shohoz" for "Shohoz
+  // Ltd") as well as the stored form. Cleaned first: buildAnchorDirective
+  // lists the cleaned forms, and these are what the prompt tells the model to
+  // copy. Extra accepted strings only make the guard more permissive.
+  const out: string[] = [];
+  for (const a of anchors) {
+    const c = cleanAnchor(a);
+    out.push(c);
+    if (c !== a) out.push(a);
+  }
+  return out;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -957,7 +993,14 @@ export function assertOutreachSpecificity(
   // specific output.
   const companyLc = (company ?? '').toLowerCase();
   const companyHead = companyLc.split(/\s+/)[0] ?? '';
-  const hasCompany = !!company && (lc.includes(companyLc) || (companyHead.length >= 4 && lc.includes(companyHead)));
+  // "DBL Group" for a stored "DBL Group Ltd." — the head token "dbl" is too
+  // short to accept on its own, but the suffix-stripped name is exact.
+  const companyClean = company ? cleanAnchor(company).toLowerCase() : '';
+  const hasCompany = !!company && (
+    lc.includes(companyLc)
+    || (companyClean.length >= 4 && lc.includes(companyClean))
+    || (companyHead.length >= 4 && lc.includes(companyHead))
+  );
   const hasAnchor = anchors.some(a => isLatinRepresentable(a) && lc.includes(a.toLowerCase()));
 
   if (mode === 'both') {

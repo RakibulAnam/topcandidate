@@ -54,7 +54,8 @@ import {
   buildToolkitUserPrompt,
   buildOutreachUserPrompt,
   trimToLinkedInLimit,
-  OUTREACH_SYSTEM_INSTRUCTION,
+  stripEmailChrome,
+  buildOutreachSystemInstruction,
   OUTREACH_SCHEMA,
   TOOLKIT_SCHEMA,
 } from './prompts/toolkitPrompts.js';
@@ -237,7 +238,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     // ── Outreach email ──────────────────────────────────────────────────────
     try {
       const subject = (parsed.outreachEmail?.subject ?? '').trim();
-      const body = (parsed.outreachEmail?.body ?? '').trim();
+      const body = stripEmailChrome(parsed.outreachEmail?.body ?? '', data.personalInfo?.fullName);
       if (!subject || !body) throw new Error('Outreach email is empty');
       const fabricated = detectFabricatedTokens(`${subject}\n${body}`, pitchEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
@@ -367,8 +368,8 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     const result = await this.client.generate(
       {
         models: [TOOLKIT_MODELS[0]],
-        systemInstruction: OUTREACH_SYSTEM_INSTRUCTION,
-        contents: buildOutreachUserPrompt(data, mode === 'stretch' ? 'stretch' : 'match'),
+        systemInstruction: buildOutreachSystemInstruction(mode),
+        contents: buildOutreachUserPrompt(data, mode),
         responseJsonSchema: OUTREACH_SCHEMA,
         temperature: mode === 'stretch' ? 0.55 : 0.45,
         maxOutputTokens: 900,
@@ -381,7 +382,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       body?: string;
     };
     const subject = (parsed.subject ?? '').trim();
-    const body = (parsed.body ?? '').trim();
+    const body = stripEmailChrome(parsed.body ?? '', data.personalInfo?.fullName);
     if (!subject || !body) throw new Error('Outreach email is empty');
     const fabricated = detectFabricatedTokens(`${subject}\n${body}`, pitchEvidence);
     if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);

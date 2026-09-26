@@ -32,7 +32,7 @@ import { ResumeData } from '../../domain/entities/Resume.js';
 import { ILinkedInMessageGenerator } from '../../domain/usecases/GenerateLinkedInMessageUseCase.js';
 import type { UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS } from './GeminiClient.js';
-import { LINKEDIN_SYSTEM_INSTRUCTION, buildLinkedInUserPrompt, trimToLinkedInLimit } from './prompts/toolkitPrompts.js';
+import { buildLinkedInSystemInstruction, buildLinkedInUserPrompt, trimToLinkedInLimit } from './prompts/toolkitPrompts.js';
 import { assertNoFabricatedTools, assertOutreachSpecificity, classifyFitMode } from './prompts/toolkitContext.js';
 
 const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
@@ -51,7 +51,7 @@ export class GeminiLinkedInMessageGenerator implements ILinkedInMessageGenerator
       const result = await this.client.generate(
         {
           models: MODELS,
-          systemInstruction: LINKEDIN_SYSTEM_INSTRUCTION,
+          systemInstruction: buildLinkedInSystemInstruction(fit.mode),
           contents: buildLinkedInUserPrompt(data, fit.mode),
           temperature: fit.mode === 'stretch' ? 0.55 : 0.45,
           maxOutputTokens: 300,
