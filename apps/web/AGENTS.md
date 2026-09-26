@@ -696,7 +696,7 @@ Per-generator deadlines: optimizer 50s (`/api/optimize`), toolkit 52s (`/api/too
 
 ### Supabase
 
-- Auth: email/password + Google OAuth (Supabase provider; PKCE redirect). Same `auth.users` row model for both — no "two kinds of users" branching. `useAuth().provider` exposes `'email'`/`'google'`.
+- Auth: email/password + Google OAuth (Supabase provider; PKCE redirect). Same `auth.users` row model for both — no "two kinds of users" branching. `useAuth().provider` exposes `'email'`/`'google'`. **`ContinueWithGoogleButton` clears its spinner on `pageshow` with `persisted`:** a successful `signInWithGoogle()` navigates the tab to Google, and Back from the account chooser restores the page from the bfcache with React state intact — without that listener the button stays disabled and spinning. Don't widen it to `visibilitychange`/`focus`; those fire on a tab switch mid-redirect and would allow a second OAuth start.
 - Row-level security is on for every table
 - Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 - Client: `src/infrastructure/supabase/client.ts` (has a dev fallback so the app does not crash on missing env — it will fail at network time instead)
