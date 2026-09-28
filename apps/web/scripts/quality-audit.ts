@@ -42,6 +42,10 @@ const ACTION_VERBS = /^(built|led|drove|cut|reduced|increased|grew|owned|designe
 const FIRST_PERSON = /\b(I|my|me|we|our)\b/;
 const CLICHES = /\b(team player|hard.?working|detail.?oriented|go.?getter|think outside the box|synerg|leverage my|passionate about|results.?driven|self.?starter)\b/i;
 const HAS_METRIC = /\d/;
+// The two sentences the pre-2026-09-27 prompts handed the model as examples and
+// got back verbatim in 6 of 6 sampled runs. Their presence means the model is
+// copying the rules instead of writing the email.
+const STOCK_ASK = /15-minute chat next week|love to connect and learn how your team approaches/i;
 
 const bnRatio = (s: string) => {
   const bn = (s.match(/[ঀ-৿]/g) ?? []).length;
@@ -196,11 +200,17 @@ async function artifacts(key: string) {
     totalPass += r2.pass; totalChecks += r2.total;
 
     const oe = bundle.outreachEmail ?? {};
+    const oeBody: string = oe.body ?? '';
     const r3 = report('OUTREACH EMAIL', [
       chk(!!oe.subject && !!oe.body, 'produced'),
       chk(words(oe.subject ?? '') <= 12, 'subject <=12 words', `${words(oe.subject ?? '')}w`),
-      chk(words(oe.body ?? '') <= 200, 'body <=200 words (cold email discipline)', `${words(oe.body ?? '')}w`),
-      chk((oe.body ?? '').toLowerCase().includes(p.data.targetJob.company.split(' ')[0].toLowerCase()), 'names the company'),
+      // Contract since 2026-09-27: 60–110 words in three paragraphs. The old
+      // 200-word ceiling passed the one-block CV-dump this rewrite retired.
+      chk(words(oeBody) >= 50 && words(oeBody) <= 130, 'body 50–130 words (one proof, one ask)', `${words(oeBody)}w`),
+      chk(oeBody.split(/\n\s*\n/).length >= 3, 'three paragraphs (blank-line separated)', `${oeBody.split(/\n\s*\n/).length} paragraphs`),
+      chk(!/^(as an? |having |i am writing)/i.test(oeBody.trim()), 'does not open on a title or a cliché', `opens: "${oeBody.trim().slice(0, 40)}"`),
+      chk(!STOCK_ASK.test(oeBody), 'ask is not the stock sentence'),
+      chk(oeBody.toLowerCase().includes(p.data.targetJob.company.split(' ')[0].toLowerCase()), 'names the company'),
     ], `SUBJECT: ${oe.subject}\n\n${oe.body}`);
     totalPass += r3.pass; totalChecks += r3.total;
 
@@ -209,6 +219,8 @@ async function artifacts(key: string) {
       chk(!!li, 'produced'),
       chk(li.length <= 280, 'within LinkedIn 280-char limit', `${li.length} chars`),
       chk(li.length >= 120, 'not trivially short', `${li.length} chars`),
+      chk(!/^as an? /i.test(li.trim()), 'does not open "As a <title>"', `opens: "${li.trim().slice(0, 40)}"`),
+      chk(!STOCK_ASK.test(li), 'not the stock connection sentence'),
       chk(!/\s\S{0,2}$/.test(li) || /[.!?]$/.test(li), 'not cut mid-word', `ends: "${li.slice(-24)}"`),
     ], li);
     totalPass += r4.pass; totalChecks += r4.total;

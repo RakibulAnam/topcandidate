@@ -38,9 +38,10 @@ import { IOutreachEmailGenerator } from '../../domain/usecases/GenerateOutreachE
 import { resetUsageAttempt, type UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
-  OUTREACH_SYSTEM_INSTRUCTION,
+  buildOutreachSystemInstruction,
   buildOutreachUserPrompt,
   OUTREACH_SCHEMA,
+  stripEmailChrome,
 } from './prompts/toolkitPrompts.js';
 import { assertNoFabricatedTools, assertOutreachSpecificity, classifyFitMode } from './prompts/toolkitContext.js';
 
@@ -71,7 +72,7 @@ export class GeminiOutreachEmailGenerator implements IOutreachEmailGenerator {
         const result = await this.client.generate(
           {
             models: chain,
-            systemInstruction: OUTREACH_SYSTEM_INSTRUCTION,
+            systemInstruction: buildOutreachSystemInstruction(fit.mode),
             contents: buildOutreachUserPrompt(data, fit.mode),
             responseJsonSchema: OUTREACH_SCHEMA,
             temperature: fit.mode === 'stretch' ? 0.55 : 0.45,
@@ -97,7 +98,8 @@ export class GeminiOutreachEmailGenerator implements IOutreachEmailGenerator {
           throw new Error('Outreach email response missing required fields');
         }
         const subject = parsed.subject.trim();
-        const body = parsed.body.trim();
+        const body = stripEmailChrome(parsed.body, data.personalInfo?.fullName);
+        if (!body) throw new Error('Outreach email is empty after stripping greeting/signoff');
 
         assertNoFabricatedTools(`${subject}\n${body}`, data, { allowJD: fit.mode === 'stretch' });
         assertOutreachSpecificity(`${subject}\n${body}`, data, fit.mode === 'stretch' ? 'either' : 'both');
