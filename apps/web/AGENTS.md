@@ -76,7 +76,7 @@ Part of a polyglot monorepo at `topcandidate/` (web + Flutter mobile companion).
 
 | Area | File entry point | Status |
 | --- | --- | --- |
-| Landing page | `src/presentation/LandingScreen.tsx` | shipped — BD-localized editorial redesign: centered hero with a rendered ATS resume mock, five-item toolkit list, value/pricing section (free first resume, ৳200/5 via bKash), 3-step how-it-works, BD testimonials, FAQ accordion. No announcement bar, no mock-interview section. No gradients, Orange/Ink palette |
+| Landing page | `src/presentation/LandingScreen.tsx` (prerendered at build — see §12 "SEO & prerender") | shipped — BD-localized editorial redesign: centered hero with a rendered ATS resume mock, five-item toolkit list, value/pricing section (free first resume, ৳200/5 via bKash), 3-step how-it-works, BD testimonials, FAQ accordion. No announcement bar, no mock-interview section. No gradients, Orange/Ink palette |
 | Auth (email + password, **Google OAuth**) | `src/presentation/LoginScreen.tsx`, `src/presentation/auth/ContinueWithGoogleButton.tsx`, `src/infrastructure/auth/AuthContext.tsx` | shipped (Supabase Auth; Google via `signInWithGoogle` PKCE redirect — requires the Supabase Google provider configured) |
 | Profile setup (master profile) | `src/presentation/ProfileSetupScreen.tsx`, `components/profile/TutorialVideo.tsx` | shipped — one-time profile capture used to seed future resumes. **Setup walkthrough video** (YouTube `giK4Qg3m9VQ`, ~16 min, same video for EN + BN): inline on the "Important!" primer, plus a thumbnail card (`TutorialVideoCard`) on every wizard step — top of the desktop rail, and inline above the form below `lg` — that opens it in a dialog. Click-to-load facade (YouTube poster → `youtube-nocookie` iframe only on click, `rel=0`) so the first screen doesn't pull ~1 MB of player JS; each play fires `tutorial_video_played` `{ placement: 'intro' \| 'wizard' }`. |
 | Profile edit | `src/presentation/ProfileScreen.tsx` | shipped — view/edit saved master profile sections |
@@ -432,7 +432,12 @@ OptimizedResumeData {                    // what GeminiResumeOptimizer returns
 ## 7. Key files (annotated)
 
 ```
-index.html                              Brand fonts (Google Fonts link) + <title>. Tailwind v4 + brand tokens (@theme) now live in src/index.css
+index.html                              Brand fonts + the `seo:start`/`seo:end` block (dev defaults; replaced at build) + the boot script that hides the prerendered snapshot (see "SEO & prerender" below). Tailwind v4 + brand tokens (@theme) live in src/index.css
+src/prerender.tsx                       BUILD-ONLY SSR entry: renders LandingScreen per locale + generates head tags / JSON-LD (Organization, WebSite, WebApplication, FAQPage) from the `seo` + `landing` dictionaries
+scripts/prerender.mjs                   Post-build: writes dist/index.html (en, `/`) + dist/bn.html (bn, `/bn`) with the snapshot in #tc-prerender, and dist/sitemap.xml
+src/presentation/seo.ts                 SITE_URL + useDocumentMeta(screen): runtime title / description / canonical / robots per screen (only LANDING + LEGAL_TERMS indexable)
+public/robots.txt, public/llms.txt      Crawler rules (AI bots explicitly allowed) + plain-text product summary for LLMs. Keep llms.txt's prices/features in step with the landing copy
+public/og-image.png, icon-192/512.png, site.webmanifest   1200×630 share card + PWA icons (cream tile = the app-icon exception, §10)
 src/index.css                           Tailwind v4 entry (@import "tailwindcss") + @theme brand tokens + global/mobile rules
 metadata.json                           App name + description (used by platform)
 package.json                            Name: "top-candidate"
@@ -827,7 +832,8 @@ Skill packages live at `.agent/skills/` and are also mirrored to `~/.claude/skil
 npm install          # first time
 npm run dev          # Vite dev server
 npm run typecheck:api # tsc -p tsconfig.api.json — type-check the api/ serverless functions only
-npm run build        # = typecheck:api + vite build (Vite transpiles the client but does NOT type-check it)
+npm run build        # = typecheck:api + vite build + prerender (Vite transpiles the client but does NOT type-check it)
+npm run prerender    # SSR-build src/prerender.tsx → dist-ssr/, then scripts/prerender.mjs (needs an existing dist/)
 npm run preview      # serve the dist/ build
 ```
 
@@ -871,6 +877,16 @@ CRON_SECRET                # 32-byte hex; Bearer auth on /api/cron/expire-pendin
 - Local dev: `vercel dev` is the canonical way to exercise `/api/*` routes; `npm run dev` only serves the Vite client (unauthenticated calls to `/api/*` return 404 in plain Vite).
 
 ---
+
+### SEO & prerender
+
+The SPA's HTML used to be an empty `#root`, invisible to crawlers that don't run JS — which includes every AI crawler. Now `npm run build` ends with a prerender step ([ADR-0003](../../docs/decisions/0003-build-time-prerender-for-seo.md)): the landing page is server-rendered with `react-dom/server` into `dist/index.html` (English, `/`) and `dist/bn.html` (Bangla, `/bn`, served by a `vercel.json` rewrite), together with per-locale `<title>`, description, canonical, hreflang (`en` / `bn` / `x-default`), OG/Twitter tags and JSON-LD. **It is a snapshot, not hydration** — `index.tsx` still calls `createRoot`, which replaces it. Rules that keep it working:
+
+- **The head is generated from the dictionaries** (`seo.*` + `landing.faq0–5`); edit copy there, never in `dist/` or the `seo:start` block (that block is dev-only defaults). The JSON-LD has **no `Review`/`AggregateRating`** — the landing testimonials are not verified reviews, and marking them up as such violates Google's structured-data policy.
+- **The boot script in `index.html` hides `#tc-prerender` before first paint** for a signed-in browser (any `sb-*-auth-token` key), any path other than the snapshot's own, or a visitor whose detected locale differs from the snapshot's. It mirrors `LocaleContext.detectInitialLocale` — change one, change both.
+- **`/bn` is LANDING at a second URL.** `LocaleContext` forces `bn` there; `useBrowserNav` maps it to LANDING and keeps it in the address bar. It is never navigated *to*.
+- **`LandingScreen` must stay SSR-safe**: no `window`/`document`/`localStorage` at render time (effects are fine). The build fails if it isn't.
+- **Indexing policy**: only `/`, `/bn`, `/legal/terms` are indexable (and in the sitemap). App routes get `X-Robots-Tag: noindex` from `vercel.json` (header, not robots.txt `Disallow`, so crawlers can actually see it) plus a runtime `noindex` meta from `useDocumentMeta`. The `roh-ats-resume-builder.vercel.app` host is `noindex` site-wide; it is NOT redirected, because Supabase OAuth/PKCE and the mobile webhook may still use it. The apex `topcandidatebd.com` 308s to `www` in Vercel domain settings.
 
 ## 13. Known debt / explicit non-goals
 

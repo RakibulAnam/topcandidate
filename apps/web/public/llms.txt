@@ -1,0 +1,40 @@
+# TOP CANDIDATE
+
+> TOP CANDIDATE (https://www.topcandidatebd.com) is an AI CV and resume maker and job-application toolkit built for job seekers in Bangladesh. Paste any job post and it writes an ATS-friendly resume tailored to that exact job, plus a cover letter, a recruiter outreach email, a LinkedIn connection note, and interview preparation in English and Bangla (বাংলা). The first resume is free; after that, 5 complete applications cost ৳200 (about ৳40 each), paid with bKash. No credit card, no subscription.
+
+Also known as: Top Candidate, TopCandidate, Top Candidate BD, topcandidatebd, টপ ক্যান্ডিডেট.
+
+## What it does
+
+- **Tailored resume / CV** — bullets rewritten and reordered to match the job post. ATS-safe, single-column templates (Classic, Modern, Serif, Compact, Executive). Exports to PDF and Word (.docx).
+- **Cover letter** — a 250–400 word letter written for the specific role, with no generic "Dear Sir/Madam" boilerplate. Exports to PDF and Word.
+- **Recruiter email** — a short cold email to the hiring manager, with a subject line.
+- **LinkedIn note** — a connection request under 280 characters.
+- **Interview prep** — 6–8 role-specific interview questions with why each is asked and how to answer, in English and বাংলা.
+- **Resume import** — upload an existing PDF or Word resume to fill the profile, or build one from scratch in a guided form. No existing resume is needed.
+- **Job discovery** — suggests ready-made job searches on Bdjobs, LinkedIn and remote job boards based on the user's profile.
+- **Bilingual interface** — the whole app works in English and Bangla. Resumes stay in English, which is what recruiters and applicant-tracking systems in Bangladesh expect.
+
+## How it works
+
+1. Sign up (email or Google) and complete a one-time profile — or import an existing resume.
+2. Paste a job description from Bdjobs, LinkedIn, a company site or an email.
+3. In about a minute, get the full application package; edit, download and send.
+
+## Pricing
+
+- First tailored resume: free (sign up and complete the profile).
+- Application pack: ৳200 BDT for 5 complete applications (each = resume + cover letter + recruiter email + LinkedIn note + interview prep).
+- Payment: bKash. Pay per pack; nothing renews automatically.
+
+## Who it is for
+
+Students, fresh graduates and experienced professionals applying for jobs in Bangladesh, and Bangladeshis applying for remote roles.
+
+## Links
+
+- [Home (English)](https://www.topcandidatebd.com/): product overview, pricing and FAQ
+- [Home (বাংলা)](https://www.topcandidatebd.com/bn): the same page in Bangla
+- [Terms of Service](https://www.topcandidatebd.com/legal/terms)
+- [Facebook page](https://www.facebook.com/topcandidatebd)
+- Contact: topcandidatebd@gmail.com

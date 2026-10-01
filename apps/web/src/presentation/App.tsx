@@ -22,6 +22,7 @@ import { track } from '../infrastructure/analytics/track';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
 import { TermsOfService } from './legal/TermsOfService';
+import { useDocumentMeta } from './seo';
 import { supabase, initialAuthParams } from '../infrastructure/supabase/client';
 
 // Admin SPA is operator-only — customers never visit /admin. Lazy-load so
@@ -85,6 +86,7 @@ const AppContent = () => {
 
   const { navState, navigate } = useBrowserNav({ screen: 'LANDING' });
   const screen = navState.screen;
+  useDocumentMeta(screen);
 
   // One page_view per screen change (and one on first paint, which is the
   // session's entry page). This is what makes exit pages and bounce rate

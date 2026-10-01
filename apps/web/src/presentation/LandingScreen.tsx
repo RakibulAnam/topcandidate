@@ -92,6 +92,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
     ];
 
     const faqs = [
+        { q: t('landing.faq0Q'), a: t('landing.faq0A') },
         { q: t('landing.faq1Q'), a: t('landing.faq1A') },
         { q: t('landing.faq2Q'), a: t('landing.faq2A') },
         { q: t('landing.faq3Q'), a: t('landing.faq3A') },

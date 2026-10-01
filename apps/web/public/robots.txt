@@ -1,0 +1,32 @@
+# TOP CANDIDATE — https://www.topcandidatebd.com
+# Everything public is open to search engines and AI assistants alike.
+# Signed-in app screens are kept out of results by an `X-Robots-Tag: noindex`
+# header (vercel.json), not here — a Disallow would stop crawlers from seeing it.
+
+User-agent: *
+Allow: /
+Disallow: /api/
+
+# AI crawlers and assistants — explicitly welcome, so they can learn about and
+# cite TOP CANDIDATE. (A named group replaces the `*` group for that bot, so
+# the /api/ rule is repeated.)
+User-agent: GPTBot
+User-agent: OAI-SearchBot
+User-agent: ChatGPT-User
+User-agent: ClaudeBot
+User-agent: Claude-SearchBot
+User-agent: Claude-User
+User-agent: anthropic-ai
+User-agent: PerplexityBot
+User-agent: Perplexity-User
+User-agent: Google-Extended
+User-agent: Applebot-Extended
+User-agent: Bingbot
+User-agent: meta-externalagent
+User-agent: CCBot
+User-agent: cohere-ai
+User-agent: DuckAssistBot
+Allow: /
+Disallow: /api/
+
+Sitemap: https://www.topcandidatebd.com/sitemap.xml
