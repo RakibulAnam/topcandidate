@@ -12,6 +12,8 @@
     { "source": "/api/my-purchase-status", "destination": "/api/purchase-ops/status" },
     { "source": "/api/dispute-purchase", "destination": "/api/purchase-ops/dispute" },
     { "source": "/api/cron/expire-pending", "destination": "/api/purchase-ops/expire-pending" },
+    { "source": "/bn", "destination": "/bn.html" },
+    { "source": "/legal/terms", "destination": "/legal-terms.html" },
     { "source": "/((?!api/|@|src/|node_modules/|assets/|.*\\.).*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -39,6 +41,19 @@
           "value": "geolocation=(), microphone=(), camera=(), payment=()"
         }
       ]
+    },
+    {
+      "source": "/(dashboard|applications|purchases|profile|profile-setup|new|builder|login|auth|admin)(/.*)?",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "roh-ats-resume-builder.vercel.app" }],
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex" }]
     }
   ]
 }

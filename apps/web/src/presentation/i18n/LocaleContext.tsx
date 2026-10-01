@@ -20,8 +20,14 @@ const STORAGE_KEY = 'topcandidate.locale';
 
 const DICTIONARIES: Record<Locale, Dictionary> = { en, bn };
 
+// `/bn` is the indexable Bangla landing page (prerendered to dist/bn.html at
+// build time, see scripts/prerender.mjs). Arriving there is an explicit
+// language choice, so it wins over a stored preference.
+export const BN_LANDING_PATH = '/bn';
+
 const detectInitialLocale = (): Locale => {
   if (typeof window === 'undefined') return 'en';
+  if (window.location.pathname === BN_LANDING_PATH) return 'bn';
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === 'en' || stored === 'bn') return stored;
@@ -85,8 +91,10 @@ if (typeof document !== 'undefined') {
   applyHtmlLocaleAttr(detectInitialLocale());
 }
 
-export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [locale, setLocaleState] = useState<Locale>(detectInitialLocale);
+export const LocaleProvider: React.FC<{ children: React.ReactNode; initialLocale?: Locale }> = ({ children, initialLocale }) => {
+  // `initialLocale` is only passed by the build-time prerender (src/prerender.tsx),
+  // which has no window to detect from.
+  const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectInitialLocale());
 
   useEffect(() => {
     applyHtmlLocaleAttr(locale);
@@ -99,6 +107,14 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
+    // On the landing page the URL names the language (`/` en, `/bn` bn), so
+    // keep it in step with the toggle: otherwise switching to English on
+    // `/bn` and reloading would force Bangla again (see detectInitialLocale).
+    const path = window.location.pathname;
+    const target = next === 'bn' ? BN_LANDING_PATH : '/';
+    if ((path === '/' || path === BN_LANDING_PATH) && path !== target) {
+      window.history.replaceState(window.history.state, '', target + window.location.search);
+    }
   }, []);
 
   const t = useCallback(

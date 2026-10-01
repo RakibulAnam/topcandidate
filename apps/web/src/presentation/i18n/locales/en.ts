@@ -1179,6 +1179,17 @@ export const en = {
     fPosition: 'Position',
     fSkills: 'Skills',
   },
+  // Search / social metadata — <title>, meta description, OG tags and the
+  // per-screen document.title. Written into the static HTML at build time by
+  // scripts/prerender.mjs and kept in sync at runtime by useDocumentMeta.
+  seo: {
+    title: 'TOP CANDIDATE — AI CV & Resume Maker for Bangladesh',
+    description: 'Make an ATS-friendly CV / resume tailored to any job post in Bangladesh — plus a cover letter, recruiter email, LinkedIn note and বাংলা interview prep. First resume free. Pay with bKash.',
+    ogImageAlt: 'TOP CANDIDATE — tailored resume, cover letter and interview prep for jobs in Bangladesh',
+    termsTitle: 'Terms of Service — TOP CANDIDATE',
+    termsDescription: 'The terms for using TOP CANDIDATE, the AI resume and job-application toolkit for Bangladesh — accounts, bKash payments and credits, refunds, and how your data is used.',
+    appTitle: 'TOP CANDIDATE',
+  },
   landing: {
     // ── Nav ──────────────────────────────────────────────────────────────
     navToolkit: 'The toolkit',
@@ -1291,6 +1302,8 @@ export const en = {
     // ── FAQ ──────────────────────────────────────────────────────────────
     faqEyebrow: 'Questions, answered',
     faqTitle: 'Before you start',
+    faq0Q: 'What is TOP CANDIDATE?',
+    faq0A: 'TOP CANDIDATE is an AI CV and resume maker built for job seekers in Bangladesh. Paste any job post — from BDJobs, LinkedIn or an email — and it writes an ATS-friendly resume tailored to that job, plus a cover letter, a recruiter email, a LinkedIn note and interview prep in English and বাংলা.',
     faq1Q: 'Do I need a credit card?',
     faq1A: 'No. You pay per pack with bKash — the same way you pay for everything else. No card, no subscription, no auto-renewal.',
     faq2Q: 'Is my information private?',

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { BN_LANDING_PATH } from '../i18n/LocaleContext';
 
 export type NavScreen =
   | 'LANDING'
@@ -37,7 +38,16 @@ const SCREEN_PATHS: Record<NavScreen, string> = {
   LEGAL_TERMS: '/legal/terms',
 };
 
+// The Bangla landing page is LANDING at a second, indexable URL. It is never
+// navigated TO (SCREEN_PATHS stays one path per screen); it is only recognised
+// on arrival so the address bar keeps `/bn`.
+const pathFor = (screen: NavScreen): string =>
+  screen === 'LANDING' && window.location.pathname === BN_LANDING_PATH
+    ? BN_LANDING_PATH
+    : SCREEN_PATHS[screen];
+
 const pathToScreen = (path: string): NavScreen | null => {
+  if (path === BN_LANDING_PATH) return 'LANDING';
   const entry = Object.entries(SCREEN_PATHS).find(([, p]) => p === path);
   return (entry?.[0] as NavScreen) ?? null;
 };
@@ -59,7 +69,7 @@ export function useBrowserNav(fallback: NavState) {
   useEffect(() => {
     if (seeded.current) return;
     seeded.current = true;
-    window.history.replaceState(state, '', SCREEN_PATHS[state.screen]);
+    window.history.replaceState(state, '', pathFor(state.screen));
   }, [state]);
 
   useEffect(() => {

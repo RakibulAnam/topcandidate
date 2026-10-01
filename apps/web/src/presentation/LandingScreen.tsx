@@ -92,6 +92,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
     ];
 
     const faqs = [
+        { q: t('landing.faq0Q'), a: t('landing.faq0A') },
         { q: t('landing.faq1Q'), a: t('landing.faq1A') },
         { q: t('landing.faq2Q'), a: t('landing.faq2A') },
         { q: t('landing.faq3Q'), a: t('landing.faq3A') },
@@ -474,7 +475,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                                             {open ? <Minus size={16} /> : <Plus size={16} />}
                                         </span>
                                     </button>
-                                    <div style={{ maxHeight: open ? 240 : 0 }} className="overflow-hidden transition-all duration-300 ease-out">
+                                    <div style={{ maxHeight: open ? 360 : 0 }} className="overflow-hidden transition-all duration-300 ease-out">
                                         <p className="text-[15px] text-brand-500 leading-relaxed pb-5 pr-12">{item.a}</p>
                                     </div>
                                 </div>
@@ -523,9 +524,14 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                         <a href="#reviews" className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center">{t('landing.navReviews')}</a>
                         <a href={contactMailto(t('help.emailSubject'))} className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center">{t('help.eyebrow')}</a>
                         {onOpenTerms && (
-                            <button type="button" onClick={onOpenTerms} className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center">
+                            // A real href so crawlers can follow it; the click stays in-app.
+                            <a
+                                href="/legal/terms"
+                                onClick={(e) => { e.preventDefault(); onOpenTerms(); }}
+                                className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center"
+                            >
                                 {t('login.tosLink')}
-                            </button>
+                            </a>
                         )}
                     </div>
                     <p className="text-[12.5px] text-brand-400">{t('landing.footerCopyright', { year: new Date().getFullYear() })}</p>

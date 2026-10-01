@@ -9,7 +9,8 @@
     "typecheck:api": "tsc -p tsconfig.api.json",
     "ai:selftest": "tsx scripts/ai-probe.ts selftest",
     "ai:bench": "tsx scripts/ai-probe.ts bench",
-    "build": "npm run typecheck:api && vite build",
+    "build": "npm run typecheck:api && vite build && npm run prerender",
+    "prerender": "vite build --ssr src/prerender.tsx --outDir dist-ssr --emptyOutDir && node scripts/prerender.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
