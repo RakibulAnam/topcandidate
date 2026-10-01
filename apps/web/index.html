@@ -17,35 +17,38 @@
   <meta name="geo.placename" content="Bangladesh" />
   <link rel="manifest" href="/site.webmanifest" />
 
-  <!-- The built page ships a static snapshot of the landing page inside
-       #tc-prerender (for crawlers + first paint; see src/prerender.tsx). Hide
-       it before first paint whenever the app is about to render something
-       else — a signed-in user (Supabase keeps the session under
-       sb-<ref>-auth-token), any other path the SPA rewrite served this file
-       for, or a visitor whose language differs from the snapshot's — so they
-       never see a flash of the wrong screen. Mirrors LocaleContext's
-       detection. -->
+  <!-- Each built public page ships a static snapshot of itself inside
+       #tc-prerender (for crawlers + first paint; see src/prerender.tsx), and
+       <html data-prerender> names which page it is. Hide the snapshot before
+       first paint whenever the app is about to render something else, so
+       nobody sees a flash of the wrong screen:
+         - any path other than the snapshot's own (the SPA rewrite serves the
+           landing file for every app route);
+         - landing only: a signed-in browser (Supabase keeps the session under
+           sb-<ref>-auth-token), which goes to the dashboard;
+         - English landing only: a visitor whose language resolves to bn.
+           Mirrors LocaleContext's detectInitialLocale — change both. -->
   <style>.tc-boot #tc-prerender{display:none}</style>
   <script>
     (function () {
       var d = document.documentElement;
       var snap = d.getAttribute('data-prerender');
       if (!snap) return;
-      var hide = false;
+      var paths = { 'landing-en': ['/', '/index.html'], 'landing-bn': ['/bn', '/bn/', '/bn.html'], 'terms': ['/legal/terms', '/legal-terms.html'] }[snap] || [];
+      var hide = paths.indexOf(location.pathname) < 0;
       try {
-        var p = location.pathname;
-        var paths = snap === 'bn' ? ['/bn', '/bn/', '/bn.html'] : ['/', '/index.html'];
-        if (paths.indexOf(p) < 0) hide = true;
-        for (var i = 0; !hide && i < localStorage.length; i++) {
-          if (/^sb-.+-auth-token$/.test(localStorage.key(i) || '')) hide = true;
+        if (!hide && snap !== 'terms') {
+          for (var i = 0; !hide && i < localStorage.length; i++) {
+            if (/^sb-.+-auth-token$/.test(localStorage.key(i) || '')) hide = true;
+          }
         }
-        if (!hide && snap === 'en') {
+        if (!hide && snap === 'landing-en') {
           var stored = localStorage.getItem('topcandidate.locale');
           var want = stored === 'en' || stored === 'bn' ? stored
             : ((navigator.language || '').toLowerCase().indexOf('bn') === 0 ? 'bn' : 'en');
           if (want !== 'en') hide = true;
         }
-      } catch (e) { /* storage blocked — show the snapshot */ }
+      } catch (e) { /* storage blocked — keep the snapshot */ }
       if (hide) d.className += ' tc-boot';
     })();
   </script>

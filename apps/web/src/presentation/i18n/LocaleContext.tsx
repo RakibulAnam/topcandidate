@@ -107,6 +107,14 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode; initialLocale
 
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
+    // On the landing page the URL names the language (`/` en, `/bn` bn), so
+    // keep it in step with the toggle: otherwise switching to English on
+    // `/bn` and reloading would force Bangla again (see detectInitialLocale).
+    const path = window.location.pathname;
+    const target = next === 'bn' ? BN_LANDING_PATH : '/';
+    if ((path === '/' || path === BN_LANDING_PATH) && path !== target) {
+      window.history.replaceState(window.history.state, '', target + window.location.search);
+    }
   }, []);
 
   const t = useCallback(

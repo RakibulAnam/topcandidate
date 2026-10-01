@@ -1187,6 +1187,7 @@ export const en = {
     description: 'Make an ATS-friendly CV / resume tailored to any job post in Bangladesh — plus a cover letter, recruiter email, LinkedIn note and বাংলা interview prep. First resume free. Pay with bKash.',
     ogImageAlt: 'TOP CANDIDATE — tailored resume, cover letter and interview prep for jobs in Bangladesh',
     termsTitle: 'Terms of Service — TOP CANDIDATE',
+    termsDescription: 'The terms for using TOP CANDIDATE, the AI resume and job-application toolkit for Bangladesh — accounts, bKash payments and credits, refunds, and how your data is used.',
     appTitle: 'TOP CANDIDATE',
   },
   landing: {

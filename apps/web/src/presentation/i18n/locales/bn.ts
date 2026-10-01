@@ -1162,6 +1162,7 @@ export const bn: Dictionary = {
     description: 'যেকোনো জব পোস্ট পেস্ট করুন — পেয়ে যান সেই চাকরির জন্য তৈরি ATS-উপযোগী সিভি / রিজিউমে, কভার লেটার, রিক্রুটার ইমেইল, LinkedIn নোট আর বাংলায় ইন্টারভিউ প্রস্তুতি। প্রথম রিজিউমে ফ্রি, পেমেন্ট bKash-এ।',
     ogImageAlt: 'TOP CANDIDATE — বাংলাদেশের চাকরির জন্য তৈরি রিজিউমে, কভার লেটার ও ইন্টারভিউ প্রস্তুতি',
     termsTitle: 'সেবার শর্তাবলি — TOP CANDIDATE',
+    termsDescription: 'TOP CANDIDATE ব্যবহারের শর্তাবলি — অ্যাকাউন্ট, bKash পেমেন্ট ও ক্রেডিট, রিফান্ড, আর আপনার তথ্য কীভাবে ব্যবহার হয়।',
     appTitle: 'TOP CANDIDATE',
   },
   landing: {
