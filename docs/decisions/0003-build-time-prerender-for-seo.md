@@ -11,8 +11,8 @@ The web app is a client-rendered Vite SPA. Every URL served the same `index.html
 
 At build time, server-render the public pages and write them into static HTML. No server runtime is added.
 
-1. `src/prerender.tsx` is a build-only SSR entry. Its `PAGES` list holds the public pages: the landing page in English and Bangla, and the Terms page. Each entry renders with `react-dom/server` and generates its own head tags (title, description, canonical, OG/Twitter; hreflang and JSON-LD on the landing pages) from the i18n dictionaries.
-2. `scripts/prerender.mjs` runs after `vite build`. It writes `dist/index.html` (`/`), `dist/bn.html` (`/bn`), `dist/legal-terms.html` (`/legal/terms`) and `dist/sitemap.xml`. The last two pages are served through `vercel.json` rewrites.
+1. `src/prerender.tsx` is a build-only SSR entry. Its `PAGES` list holds the public pages: the landing page and four feature pages, each in English and Bangla (`/…` and `/bn/…`), and the Terms page. Each entry renders with `react-dom/server` and generates its own head tags (title, description, canonical, OG/Twitter; hreflang and JSON-LD on the landing pages) from the i18n dictionaries.
+2. `scripts/prerender.mjs` runs after `vite build`. It writes each page to a flat file (`index.html`, `bn.html`, `cover-letter.html`, `bn-cover-letter.html`, …, `legal-terms.html`) plus `dist/sitemap.xml`. Every page except `/` is served through a `vercel.json` rewrite.
 3. **Snapshot, not hydration.** The client still calls `createRoot`, which replaces the markup. A boot script in `index.html` hides the snapshot before first paint for visitors who will see something else: signed-in users, other paths, or the other language. This prevents a flash of the wrong screen.
 
 ## Why not the alternatives
@@ -25,4 +25,4 @@ At build time, server-render the public pages and write them into static HTML. N
 ## Consequences
 
 - `LandingScreen` and everything it imports must be SSR-safe at render time. A violation fails the build rather than shipping.
-- Only the pages in `PAGES` are crawlable without JS. Any other route is served the English landing's HTML, with canonical `/`. A new public page (guides, templates) needs a `PAGES` entry, a rewrite, and a path in the boot script, or Google folds it into the homepage.
+- Only the pages in `PAGES` are crawlable without JS. Any other route is served the English landing's HTML, with canonical `/`. A new public page (guides, templates) needs a `PAGES` entry and a rewrite, or Google folds it into the homepage.

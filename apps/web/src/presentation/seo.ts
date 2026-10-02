@@ -1,22 +1,23 @@
 // Search metadata at runtime.
 //
-// The static <head> (title, description, canonical, hreflang, OG, JSON-LD) is
-// written at build time by scripts/prerender.mjs for the two indexable
-// landing URLs. Every other path is served the same index.html by the SPA
-// rewrite, so once the app is running this hook re-points the per-page tags
-// at the current screen: only the landing pages and the Terms page are
-// indexable; everything behind sign-in is `noindex` (vercel.json also sends an
-// `X-Robots-Tag: noindex` header for those paths, which covers crawlers that
-// don't run JavaScript).
+// The static <head> (title, description, canonical, hreflang, OG, JSON-LD) of
+// every public page is written at build time by scripts/prerender.mjs (pages
+// listed in src/prerender.tsx PAGES). Once the app is running, this hook
+// re-points the per-page tags at the current screen as the user navigates:
+// the landing pages, feature pages and Terms are indexable; everything behind
+// sign-in is `noindex` (vercel.json also sends an `X-Robots-Tag: noindex`
+// header for those paths, which covers crawlers that don't run JavaScript).
 
 import { useEffect } from 'react';
 import type { NavScreen } from './hooks/useBrowserNav';
-import { useLocale } from './i18n/LocaleContext';
+import { useLocale, type TKey } from './i18n/LocaleContext';
+import type { FeatureSlug } from './i18n/localizedPaths';
+import { FEATURE_KEYS } from './marketing/FeaturePage';
 
 /** The production origin. The apex domain 308s here (Vercel domain settings); the *.vercel.app host is noindex (vercel.json). */
 export const SITE_URL = 'https://www.topcandidatebd.com';
 
-const INDEXABLE: NavScreen[] = ['LANDING', 'LEGAL_TERMS'];
+const INDEXABLE: NavScreen[] = ['LANDING', 'LEGAL_TERMS', 'FEATURE'];
 
 const upsert = (selector: string, create: () => HTMLElement, attr: string, value: string) => {
   let el = document.head.querySelector<HTMLElement>(selector);
@@ -33,17 +34,23 @@ const meta = (name: string) => () => {
   return el;
 };
 
-export function useDocumentMeta(screen: NavScreen) {
+export function useDocumentMeta(screen: NavScreen, feature?: FeatureSlug) {
   const { locale, t } = useLocale();
 
   useEffect(() => {
     const indexable = INDEXABLE.includes(screen);
+    const featureKey = screen === 'FEATURE' && feature ? FEATURE_KEYS[feature] : null;
     document.title =
       screen === 'LANDING' ? t('seo.title')
-        : screen === 'LEGAL_TERMS' ? t('seo.termsTitle')
-          : t('seo.appTitle');
+        : featureKey ? t(`features.${featureKey}.seoTitle` as TKey)
+          : screen === 'LEGAL_TERMS' ? t('seo.termsTitle')
+            : t('seo.appTitle');
+    const description =
+      featureKey ? t(`features.${featureKey}.seoDescription` as TKey)
+        : screen === 'LEGAL_TERMS' ? t('seo.termsDescription')
+          : t('seo.description');
 
-    upsert('meta[name="description"]', meta('description'), 'content', t('seo.description'));
+    upsert('meta[name="description"]', meta('description'), 'content', description);
     upsert('meta[name="robots"]', meta('robots'), 'content', indexable ? 'index, follow, max-image-preview:large' : 'noindex, nofollow');
     upsert(
       'link[rel="canonical"]',
@@ -55,5 +62,5 @@ export function useDocumentMeta(screen: NavScreen) {
       'href',
       `${SITE_URL}${indexable ? window.location.pathname : '/'}`,
     );
-  }, [screen, locale, t]);
+  }, [screen, feature, locale, t]);
 }

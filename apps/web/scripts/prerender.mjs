@@ -8,11 +8,12 @@
 //   - injects the server-rendered page into #root, wrapped in #tc-prerender
 //     so index.html's boot script can hide it for visitors who will see a
 //     different screen
-//   - stamps <html lang> + data-prerender (the page key)
+//   - stamps <html lang> + data-prerender (kind) / -path / -bilingual, which
+//     the boot script reads
 // The landing (en) overwrites dist/index.html itself, which the SPA rewrite
 // also serves for every app path. It also writes dist/sitemap.xml.
 
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
@@ -31,10 +32,15 @@ if (!SEO_BLOCK.test(template) || !template.includes(ROOT_MARK)) {
 
 for (const page of PAGES) {
   const html = template
-    .replace('<html lang="en">', `<html lang="${page.locale}" data-locale="${page.locale}" data-prerender="${page.key}">`)
+    .replace(
+      '<html lang="en">',
+      `<html lang="${page.locale}" data-locale="${page.locale}" data-prerender="${page.kind}" data-prerender-path="${page.path}"${page.bilingual ? ' data-prerender-bilingual' : ''}>`,
+    )
     .replace(SEO_BLOCK, () => page.head())
     .replace(ROOT_MARK, () => `<div id="tc-prerender">${page.body()}</div>`);
-  writeFileSync(path.join(dist, page.file), html);
+  const out = path.join(dist, page.file);
+  mkdirSync(path.dirname(out), { recursive: true });
+  writeFileSync(out, html);
   console.log(`prerender: ${page.path} → dist/${page.file} (${(html.length / 1024).toFixed(0)} kB)`);
 }
 

@@ -57,8 +57,10 @@
   --color-charcoal-900: #0D0C09;
 
   /* Fonts — `font-sans`, `font-display`, `font-serif` utilities. */
-  --font-sans: 'Instrument Sans', 'Hind Siliguri', ui-sans-serif, system-ui, sans-serif;
-  --font-display: 'Source Serif 4', 'Tiro Bangla', Georgia, serif;
+  /* The "… Fallback" faces (defined below) hold the brand fonts' space
+     while Google Fonts loads, so the swap doesn't reflow the page. */
+  --font-sans: 'Instrument Sans', 'Instrument Sans Fallback', 'Hind Siliguri', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Source Serif 4', 'Source Serif 4 Fallback', 'Tiro Bangla', Georgia, serif;
   --font-serif: 'Merriweather', Georgia, serif;
 
   /* ── Dashboard dark CTA card (scoped) — inset surfaces on the #0F1B2D hero
@@ -72,6 +74,68 @@
 @keyframes glintMove {
   0% { background-position: 200% 50%; }
   100% { background-position: -200% 50%; }
+}
+
+/* ── Metric-matched font fallbacks ─────────────────────────────────────────
+ * The brand fonts load from Google Fonts with font-display: swap, so the first
+ * paint uses a local font. Unadjusted, Georgia Bold is ~26% wider than Source
+ * Serif 4 semibold: the hero headline wrapped onto an extra line and, when the
+ * real font arrived, everything below it jumped ~38px (CLS 0.13 on its own —
+ * Google's "good" threshold is 0.1). These faces scale the local font to the
+ * brand font's width (size-adjust = brand width ÷ local width, measured in
+ * Chrome on 2026-10-02 over a mixed-case sample) and copy its vertical metrics
+ * (ascent 1.04 / descent 0.34 for Source Serif 4; 0.97 / 0.25 for Instrument
+ * Sans), so the swap is a restyle, not a reflow. Re-measure if a weight or
+ * family changes. Devices without the local font (Android has no Georgia or
+ * Arial) skip the face and fall through the stack as before.
+ */
+@font-face {
+  font-family: 'Source Serif 4 Fallback';
+  src: local('Georgia');
+  font-weight: 100 549;
+  font-style: normal;
+  size-adjust: 90.6%;
+  ascent-override: 114.8%;
+  descent-override: 37.5%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Source Serif 4 Fallback';
+  src: local('Georgia Bold'), local('Georgia-Bold');
+  font-weight: 550 900;
+  font-style: normal;
+  size-adjust: 79.5%;
+  ascent-override: 130.8%;
+  descent-override: 42.8%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Source Serif 4 Fallback';
+  src: local('Georgia Bold Italic'), local('Georgia-BoldItalic');
+  font-weight: 100 900;
+  font-style: italic;
+  size-adjust: 75.2%;
+  ascent-override: 138.3%;
+  descent-override: 45.2%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Instrument Sans Fallback';
+  src: local('Arial'), local('ArialMT');
+  font-weight: 100 549;
+  size-adjust: 102%;
+  ascent-override: 95.1%;
+  descent-override: 24.5%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Instrument Sans Fallback';
+  src: local('Arial Bold'), local('Arial-BoldMT');
+  font-weight: 550 900;
+  size-adjust: 98%;
+  ascent-override: 99%;
+  descent-override: 25.5%;
+  line-gap-override: 0%;
 }
 
 /* ── Base typography ─────────────────────────────────────────────────────── */

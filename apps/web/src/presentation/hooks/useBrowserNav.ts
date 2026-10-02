@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BN_LANDING_PATH } from '../i18n/LocaleContext';
+import { isFeatureSlug, toEnPath, toLocalePath, type FeatureSlug } from '../i18n/localizedPaths';
 
 export type NavScreen =
   | 'LANDING'
@@ -12,7 +12,8 @@ export type NavScreen =
   | 'SUMMARY'
   | 'BUILDER'
   | 'RESET_PASSWORD'
-  | 'LEGAL_TERMS';
+  | 'LEGAL_TERMS'
+  | 'FEATURE';
 
 export interface NavState {
   screen: NavScreen;
@@ -22,6 +23,8 @@ export interface NavState {
    *  since the browser persists history.state — can restore the preview
    *  instead of dropping the user on the builder's idle panel. */
   resumeId?: string;
+  /** FEATURE only: which public feature page (`/resume-maker`, …). */
+  feature?: FeatureSlug;
 }
 
 const SCREEN_PATHS: Record<NavScreen, string> = {
@@ -36,20 +39,26 @@ const SCREEN_PATHS: Record<NavScreen, string> = {
   BUILDER: '/builder',
   RESET_PASSWORD: '/auth/reset-password',
   LEGAL_TERMS: '/legal/terms',
+  FEATURE: '/', // never used directly — FEATURE paths come from `feature` (see pathOf)
 };
 
-// The Bangla landing page is LANDING at a second, indexable URL. It is never
-// navigated TO (SCREEN_PATHS stays one path per screen); it is only recognised
-// on arrival so the address bar keeps `/bn`.
-const pathFor = (screen: NavScreen): string =>
-  screen === 'LANDING' && window.location.pathname === BN_LANDING_PATH
-    ? BN_LANDING_PATH
-    : SCREEN_PATHS[screen];
+// The URL for a nav state. Public pages (landing + feature pages) have a
+// Bangla twin under `/bn` (i18n/localizedPaths), and the URL follows the
+// language actually on screen: LocaleContext stamps <html lang> before React
+// mounts and on every toggle, so it is the live locale. App screens have one
+// path regardless of language.
+const pathOf = (state: NavState): string => {
+  const enPath = state.screen === 'FEATURE' && state.feature ? `/${state.feature}` : SCREEN_PATHS[state.screen];
+  const locale = typeof document !== 'undefined' && document.documentElement.lang === 'bn' ? 'bn' : 'en';
+  return toLocalePath(enPath, locale);
+};
 
-const pathToScreen = (path: string): NavScreen | null => {
-  if (path === BN_LANDING_PATH) return 'LANDING';
-  const entry = Object.entries(SCREEN_PATHS).find(([, p]) => p === path);
-  return (entry?.[0] as NavScreen) ?? null;
+const pathToState = (path: string): NavState | null => {
+  const enPath = toEnPath(path);
+  const slug = enPath.slice(1);
+  if (isFeatureSlug(slug)) return { screen: 'FEATURE', feature: slug };
+  const entry = Object.entries(SCREEN_PATHS).find(([screen, p]) => screen !== 'FEATURE' && p === enPath);
+  return entry ? { screen: entry[0] as NavScreen } : null;
 };
 
 const readInitialStateFromUrl = (fallback: NavState): NavState => {
@@ -58,8 +67,7 @@ const readInitialStateFromUrl = (fallback: NavState): NavState => {
   if (existing && typeof existing === 'object' && 'screen' in existing) {
     return existing as NavState;
   }
-  const guessed = pathToScreen(window.location.pathname);
-  return guessed ? { screen: guessed } : fallback;
+  return pathToState(window.location.pathname) ?? fallback;
 };
 
 export function useBrowserNav(fallback: NavState) {
@@ -69,7 +77,7 @@ export function useBrowserNav(fallback: NavState) {
   useEffect(() => {
     if (seeded.current) return;
     seeded.current = true;
-    window.history.replaceState(state, '', pathFor(state.screen));
+    window.history.replaceState(state, '', pathOf(state));
   }, [state]);
 
   useEffect(() => {
@@ -77,8 +85,7 @@ export function useBrowserNav(fallback: NavState) {
       if (e.state && typeof e.state === 'object' && 'screen' in e.state) {
         setState(e.state as NavState);
       } else {
-        const guessed = pathToScreen(window.location.pathname);
-        setState(guessed ? { screen: guessed } : fallback);
+        setState(pathToState(window.location.pathname) ?? fallback);
       }
     };
     window.addEventListener('popstate', onPop);
@@ -86,7 +93,7 @@ export function useBrowserNav(fallback: NavState) {
   }, [fallback]);
 
   const navigate = (next: NavState, opts: { replace?: boolean } = {}) => {
-    const path = SCREEN_PATHS[next.screen];
+    const path = pathOf(next);
     if (opts.replace) {
       window.history.replaceState(next, '', path);
     } else {

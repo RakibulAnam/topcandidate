@@ -23,6 +23,7 @@ import { LocaleProvider, useT } from './i18n/LocaleContext';
 import { SetNewPasswordScreen } from './SetNewPasswordScreen';
 import { TermsOfService } from './legal/TermsOfService';
 import { useDocumentMeta } from './seo';
+import { FeaturePage } from './marketing/FeaturePage';
 import { supabase, initialAuthParams } from '../infrastructure/supabase/client';
 
 // Admin SPA is operator-only — customers never visit /admin. Lazy-load so
@@ -86,7 +87,7 @@ const AppContent = () => {
 
   const { navState, navigate } = useBrowserNav({ screen: 'LANDING' });
   const screen = navState.screen;
-  useDocumentMeta(screen);
+  useDocumentMeta(screen, navState.feature);
 
   // One page_view per screen change (and one on first paint, which is the
   // session's entry page). This is what makes exit pages and bounce rate
@@ -302,6 +303,20 @@ const AppContent = () => {
     );
   }
 
+  // Public feature pages — viewable signed-in or out (deliberately in neither
+  // UNAUTHED_SCREENS nor AUTHED_SCREENS, so the auth guard never bounces them).
+  if (screen === 'FEATURE' && navState.feature) {
+    return (
+      <FeaturePage
+        slug={navState.feature}
+        onGetStarted={() => navigate({ screen: user ? 'DASHBOARD' : 'LOGIN' })}
+        onOpenHome={() => navigate({ screen: user ? 'DASHBOARD' : 'LANDING' })}
+        onOpenFeature={(feature) => navigate({ screen: 'FEATURE', feature })}
+        onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })}
+      />
+    );
+  }
+
   // Public legal page — viewable signed-in or out.
   if (screen === 'LEGAL_TERMS') {
     return <TermsOfService onBack={() => window.history.length > 1 ? window.history.back() : navigate({ screen: user ? 'DASHBOARD' : 'LANDING' }, { replace: true })} />;
@@ -337,6 +352,7 @@ const AppContent = () => {
       <LandingScreen
         onGetStarted={() => navigate({ screen: 'LOGIN' })}
         onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })}
+        onOpenFeature={(feature) => navigate({ screen: 'FEATURE', feature })}
       />
     );
   }

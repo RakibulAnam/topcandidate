@@ -1,7 +1,7 @@
 {
-  "name": "TOP CANDIDATE — AI CV & Resume Maker for Bangladesh",
+  "name": "TOP CANDIDATE — Job Application Toolkit",
   "short_name": "TOP CANDIDATE",
-  "description": "Tailored resume, cover letter, recruiter email, LinkedIn note and বাংলা interview prep for any job post in Bangladesh.",
+  "description": "A complete application kit for every job in Bangladesh: tailored resume, cover letter, recruiter email, LinkedIn note and interview prep in English & বাংলা.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -9,6 +9,7 @@
   "background_color": "#FAFAF7",
   "theme_color": "#FAFAF7",
   "icons": [
+    { "src": "/favicon-96x96.png", "sizes": "96x96", "type": "image/png" },
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
