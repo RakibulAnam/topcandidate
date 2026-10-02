@@ -13,6 +13,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { en, type Dictionary } from './locales/en';
 import { bn } from './locales/bn';
+import { BILINGUAL_PATHS, isBnPath, toEnPath, toLocalePath } from './localizedPaths';
 
 export type Locale = 'en' | 'bn';
 
@@ -20,14 +21,13 @@ const STORAGE_KEY = 'topcandidate.locale';
 
 const DICTIONARIES: Record<Locale, Dictionary> = { en, bn };
 
-// `/bn` is the indexable Bangla landing page (prerendered to dist/bn.html at
-// build time, see scripts/prerender.mjs). Arriving there is an explicit
-// language choice, so it wins over a stored preference.
-export const BN_LANDING_PATH = '/bn';
-
+// `/bn` and `/bn/…` are the indexable Bangla public pages (prerendered at
+// build time, see scripts/prerender.mjs and ./localizedPaths). Arriving on one
+// is an explicit language choice, so it wins over a stored preference.
+// index.html's boot script mirrors this detection — change both together.
 const detectInitialLocale = (): Locale => {
   if (typeof window === 'undefined') return 'en';
-  if (window.location.pathname === BN_LANDING_PATH) return 'bn';
+  if (isBnPath(window.location.pathname)) return 'bn';
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     if (stored === 'en' || stored === 'bn') return stored;
@@ -107,13 +107,17 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode; initialLocale
 
   const setLocale = useCallback((next: Locale) => {
     setLocaleState(next);
-    // On the landing page the URL names the language (`/` en, `/bn` bn), so
-    // keep it in step with the toggle: otherwise switching to English on
-    // `/bn` and reloading would force Bangla again (see detectInitialLocale).
+    // On a public page the URL names the language (`/cover-letter` en,
+    // `/bn/cover-letter` bn), so keep it in step with the toggle: otherwise
+    // switching to English on a `/bn` URL and reloading would force Bangla
+    // back (see detectInitialLocale).
     const path = window.location.pathname;
-    const target = next === 'bn' ? BN_LANDING_PATH : '/';
-    if ((path === '/' || path === BN_LANDING_PATH) && path !== target) {
-      window.history.replaceState(window.history.state, '', target + window.location.search);
+    const enPath = toEnPath(path);
+    if (BILINGUAL_PATHS.includes(enPath)) {
+      const target = toLocalePath(enPath, next);
+      if (target !== path) {
+        window.history.replaceState(window.history.state, '', target + window.location.search);
+      }
     }
   }, []);
 

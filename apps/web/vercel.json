@@ -14,6 +14,14 @@
     { "source": "/api/cron/expire-pending", "destination": "/api/purchase-ops/expire-pending" },
     { "source": "/bn", "destination": "/bn.html" },
     { "source": "/legal/terms", "destination": "/legal-terms.html" },
+    { "source": "/resume-maker", "destination": "/resume-maker.html" },
+    { "source": "/cover-letter", "destination": "/cover-letter.html" },
+    { "source": "/interview-preparation", "destination": "/interview-preparation.html" },
+    { "source": "/job-application-email", "destination": "/job-application-email.html" },
+    { "source": "/bn/resume-maker", "destination": "/bn-resume-maker.html" },
+    { "source": "/bn/cover-letter", "destination": "/bn-cover-letter.html" },
+    { "source": "/bn/interview-preparation", "destination": "/bn-interview-preparation.html" },
+    { "source": "/bn/job-application-email", "destination": "/bn-job-application-email.html" },
     { "source": "/((?!api/|@|src/|node_modules/|assets/|.*\\.).*)", "destination": "/index.html" }
   ],
   "headers": [

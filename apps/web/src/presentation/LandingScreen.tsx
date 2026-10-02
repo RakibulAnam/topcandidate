@@ -1,29 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, Plus, Minus, Menu, X, Sparkles, Quote } from 'lucide-react';
-import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { contactMailto } from './support';
 import { track } from '../infrastructure/analytics/track';
-import { LogoMark } from './components/ui/LogoMark';
+import { Wordmark } from './components/ui/Wordmark';
+import { FEATURE_SLUGS, toLocalePath, type FeatureSlug } from './i18n/localizedPaths';
+import { useLocale } from './i18n/LocaleContext';
 
 interface Props {
     onGetStarted: () => void;
     onOpenTerms?: () => void;
+    /** Opens a public feature page in-app; the link's href is the crawlable URL. */
+    onOpenFeature?: (slug: FeatureSlug) => void;
 }
 
-const Wordmark = ({ size = 'md' }: { size?: 'sm' | 'md' }) => {
-    const wordSize = size === 'sm' ? 'text-base' : 'text-lg';
-    return (
-        <div className="flex items-center gap-1.5 select-none">
-            <LogoMark className={size === 'sm' ? 'h-5 mr-0.5' : 'h-6 mr-1'} />
-            <span className={`font-display font-semibold tracking-tight text-brand-700 ${wordSize}`}>TOP</span>
-            <span className={`font-display font-semibold tracking-tight text-accent-500 ${wordSize}`}>CANDIDATE</span>
-        </div>
-    );
-};
-
 const Eyebrow = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
-    <p className={`text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold ${className}`}>
+    <p className={`text-[11px] uppercase tracking-[0.22em] text-accent-700 font-semibold ${className}`}>
         {children}
     </p>
 );
@@ -35,8 +27,25 @@ const BkashMark = () => (
     </span>
 );
 
-export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
-    const t = useT();
+export const LandingScreen = ({ onGetStarted, onOpenTerms, onOpenFeature }: Props) => {
+    const { t, locale } = useLocale();
+
+    // A real <a href> (crawlable, and opens in a new tab on middle-click) that
+    // navigates in-app on a plain click.
+    const featureLink = (slug: FeatureSlug) => ({
+        href: toLocalePath(`/${slug}`, locale),
+        onClick: (e: React.MouseEvent) => {
+            if (!onOpenFeature || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onOpenFeature(slug);
+        },
+    });
+    const featureLabels: Record<FeatureSlug, string> = {
+        'resume-maker': t('features.common.linkResume'),
+        'cover-letter': t('features.common.linkCover'),
+        'interview-preparation': t('features.common.linkInterview'),
+        'job-application-email': t('features.common.linkEmail'),
+    };
     const [mobileOpen, setMobileOpen] = useState(false);
     const [faqOpen, setFaqOpen] = useState(0);
 
@@ -58,11 +67,11 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
     ];
 
     const toolkit = [
-        { n: '01', title: t('landing.tool1Title'), body: t('landing.tool1Body') },
-        { n: '02', title: t('landing.tool2Title'), body: t('landing.tool2Body') },
-        { n: '03', title: t('landing.tool3Title'), body: t('landing.tool3Body') },
-        { n: '04', title: t('landing.tool4Title'), body: t('landing.tool4Body') },
-        { n: '05', title: t('landing.tool5Title'), body: t('landing.tool5Body'), bn: true },
+        { n: '01', title: t('landing.tool1Title'), body: t('landing.tool1Body'), slug: 'resume-maker' as FeatureSlug },
+        { n: '02', title: t('landing.tool2Title'), body: t('landing.tool2Body'), slug: 'cover-letter' as FeatureSlug },
+        { n: '03', title: t('landing.tool3Title'), body: t('landing.tool3Body'), slug: 'job-application-email' as FeatureSlug },
+        { n: '04', title: t('landing.tool4Title'), body: t('landing.tool4Body'), slug: 'job-application-email' as FeatureSlug },
+        { n: '05', title: t('landing.tool5Title'), body: t('landing.tool5Body'), slug: 'interview-preparation' as FeatureSlug, bn: true },
     ];
 
     const compareRows = [
@@ -171,6 +180,8 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                 )}
             </nav>
 
+            <main>
+
             {/* Hero — centered */}
             <section id="top" className="bg-paper">
                 <div className="max-w-6xl mx-auto px-5 sm:px-8 pt-14 sm:pt-20 lg:pt-24 pb-20 lg:pb-24">
@@ -178,7 +189,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                         <Eyebrow className="mb-5">{t('landing.heroEyebrow')}</Eyebrow>
                         <h1 className="font-display text-[clamp(2rem,6.5vw,4.5rem)] font-semibold leading-[1.08] sm:leading-[1.04] text-brand-700 mb-6 text-balance">
                             {t('landing.heroTitlePrefix')}{' '}
-                            <span className="italic text-accent-500">{t('landing.heroTitleAccent')}</span>{t('landing.heroTitleSuffix')}
+                            <span className="italic text-accent-600">{t('landing.heroTitleAccent')}</span>{t('landing.heroTitleSuffix')}
                         </h1>
                         <p className="text-[17px] sm:text-xl text-brand-500 leading-relaxed max-w-2xl mx-auto mb-8 text-pretty">
                             {t('landing.heroSubtitle')}
@@ -227,7 +238,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                                                 <p className="font-display text-[22px] font-semibold text-brand-700 leading-none">{t('landing.mockName')}</p>
                                                 <p className="text-[11px] text-brand-400 mt-1.5 tracking-wide">{t('landing.mockRole')}</p>
                                             </div>
-                                            <span className="self-start text-[9px] font-mono uppercase tracking-[0.18em] text-accent-600 border border-accent-200 bg-accent-50 rounded-full px-2 py-1 whitespace-nowrap shrink-0">
+                                            <span className="self-start text-[9px] font-mono uppercase tracking-[0.18em] text-accent-700 border border-accent-200 bg-accent-50 rounded-full px-2 py-1 whitespace-nowrap shrink-0">
                                                 {t('landing.mockBadge')}
                                             </span>
                                         </div>
@@ -291,7 +302,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                     <div className="max-w-3xl mb-14">
                         <Eyebrow className="mb-4">{t('landing.toolkitEyebrow')}</Eyebrow>
                         <h2 className="font-display text-4xl sm:text-5xl font-semibold text-brand-700 leading-[1.05] mb-5">
-                            {t('landing.toolkitTitlePrefix')} <span className="italic text-accent-500">{t('landing.toolkitTitleAccent')}</span> {t('landing.toolkitTitleSuffix')}
+                            {t('landing.toolkitTitlePrefix')} <span className="italic text-accent-600">{t('landing.toolkitTitleAccent')}</span> {t('landing.toolkitTitleSuffix')}
                         </h2>
                         <p className="text-lg text-brand-500 leading-relaxed">{t('landing.toolkitBody')}</p>
                     </div>
@@ -306,11 +317,13 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                                     on md the wrapper dissolves (`contents`) so number + title
                                     return to their own grid columns. */}
                                 <div className="flex items-baseline gap-3 md:contents">
-                                    <span className="font-display text-xl md:text-3xl font-semibold text-accent-500 shrink-0 md:col-span-2">{item.n}</span>
+                                    <span className="font-display text-xl md:text-3xl font-semibold text-accent-700 md:text-accent-600 shrink-0 md:col-span-2">{item.n}</span>
                                     <h3 className="md:col-span-4 font-display text-xl md:text-2xl font-semibold text-brand-700 flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                                        {item.title}
+                                        <a {...featureLink(item.slug)} className="underline decoration-charcoal-300 decoration-1 underline-offset-4 hover:decoration-accent-500 transition-colors">
+                                            {item.title}
+                                        </a>
                                         {item.bn && (
-                                            <span className="text-[11px] font-medium text-accent-600 bg-accent-50 border border-accent-100 rounded-full px-2 py-0.5">
+                                            <span className="text-[11px] font-medium text-accent-700 bg-accent-50 border border-accent-100 rounded-full px-2 py-0.5">
                                                 {t('landing.toolBnBadge')}
                                             </span>
                                         )}
@@ -336,7 +349,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                     <div className="max-w-3xl mb-14">
                         <Eyebrow className="mb-4">{t('landing.pricingEyebrow')}</Eyebrow>
                         <h2 className="font-display text-4xl sm:text-5xl font-semibold text-brand-700 leading-[1.05] mb-5">
-                            {t('landing.pricingTitlePrefix')} <span className="italic text-accent-500">{t('landing.pricingTitleAccent')}</span>{t('landing.pricingTitleSuffix')}
+                            {t('landing.pricingTitlePrefix')} <span className="italic text-accent-600">{t('landing.pricingTitleAccent')}</span>{t('landing.pricingTitleSuffix')}
                         </h2>
                         <p className="text-lg text-brand-500 leading-relaxed">{t('landing.pricingBody')}</p>
                     </div>
@@ -351,7 +364,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                                             <p className={`font-display text-[17px] font-semibold leading-snug ${row.muted ? 'text-brand-700' : 'text-charcoal-50'}`}>{row.label}</p>
                                             <p className={`text-[13.5px] mt-1 ${row.muted ? 'text-brand-400' : 'text-charcoal-300'}`}>{row.note}</p>
                                         </div>
-                                        <p className={`font-display text-xl sm:text-[28px] font-semibold whitespace-nowrap shrink-0 ${row.muted ? 'text-brand-300 line-through decoration-1' : 'text-accent-300'}`}>{row.price}</p>
+                                        <p className={`font-display text-xl sm:text-[28px] font-semibold whitespace-nowrap shrink-0 ${row.muted ? 'text-brand-400 line-through decoration-1' : 'text-accent-300'}`}>{row.price}</p>
                                     </div>
                                 ))}
                             </div>
@@ -414,7 +427,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                     <div className="grid md:grid-cols-3 gap-px bg-charcoal-200 border border-charcoal-200 rounded-3xl overflow-hidden">
                         {steps.map((s) => (
                             <div key={s.n} className="bg-charcoal-50 p-8 lg:p-9 h-full">
-                                <p className="font-display text-5xl font-semibold text-accent-500 mb-6">{s.n}</p>
+                                <p className="font-display text-5xl font-semibold text-accent-600 mb-6">{s.n}</p>
                                 <h3 className="font-display text-xl font-semibold text-brand-700 mb-3">{s.title}</h3>
                                 <p className="text-[15px] text-brand-500 leading-relaxed">{s.body}</p>
                             </div>
@@ -511,12 +524,19 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
             </section>
 
             {/* Footer */}
+            </main>
+
             <footer className="border-t border-charcoal-200 bg-charcoal-50 py-12">
                 <div className="max-w-6xl mx-auto px-5 sm:px-8 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
                     <div>
                         <Wordmark />
                         <p className="text-[13px] text-brand-500 mt-2 max-w-xs leading-relaxed">{t('landing.footerTagline')}</p>
                     </div>
+                    <nav aria-label={t('landing.navToolkit')} className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-brand-500 -my-1.5">
+                        {FEATURE_SLUGS.map((slug) => (
+                            <a key={slug} {...featureLink(slug)} className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center">{featureLabels[slug]}</a>
+                        ))}
+                    </nav>
                     <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-brand-500 -my-1.5">
                         <a href="#toolkit" className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center">{t('landing.navToolkit')}</a>
                         <a href="#pricing" className="hover:text-brand-700 transition-colors py-1.5 inline-flex items-center">{t('landing.navPricing')}</a>
@@ -534,7 +554,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms }: Props) => {
                             </a>
                         )}
                     </div>
-                    <p className="text-[12.5px] text-brand-400">{t('landing.footerCopyright', { year: new Date().getFullYear() })}</p>
+                    <p className="text-[12.5px] text-brand-400 whitespace-nowrap">{t('landing.footerCopyright', { year: new Date().getFullYear() })}</p>
                 </div>
             </footer>
         </div>
