@@ -30,6 +30,14 @@ Worked example: `projects/test/edit.json` (local) and `templates/*.json`.
 }
 ```
 
+## Motion-only videos (no footage)
+
+`"mode": "motion", "duration": 26.4` — no `source`/`segments`/captions; the timeline is overlays
+(full-frame scenes via `bg: "stone" | "stone2" | "ink"`) + `sfx` + `music` + `outro` on a stone stage.
+Use timeline times (`3.2`) for `at`. For launch videos, explainers, pure motion graphics. Create the
+project with `npm run new -- <name>` and skip ingest. Each scene's background fades in over the
+previous one; align scene starts to the music's bar length for rhythm.
+
 ## Time references (`at`, `until`, `music.start/end`)
 
 | Form | Meaning |

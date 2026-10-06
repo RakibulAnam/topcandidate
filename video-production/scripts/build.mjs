@@ -22,9 +22,13 @@ const warnings = [];
 const warn = (m) => (warnings.push(m), console.warn(`  ! ${m}`));
 
 const fmt = { ...FORMAT, ...(E.format || {}) };
+// Motion-only mode ("mode": "motion", "duration": N): no footage — the timeline is overlays/scenes,
+// music and sfx on a stone stage. Used for launch videos, explainers, pure motion graphics.
+const MOTION = E.mode === "motion" || E.source === null;
 const source = E.source || "working/source.mp4";
-if (!existsSync(join(P, source))) die(`Source not found: ${source} — run npm run ingest -- ${basename(P)}`);
-const srcDur = Number(ffprobe(join(P, source)).format.duration);
+if (!MOTION && !existsSync(join(P, source))) die(`Source not found: ${source} — run npm run ingest -- ${basename(P)} (or set "mode": "motion" for a no-footage video)`);
+if (MOTION && !(Number(E.duration) > 0)) die(`Motion mode needs "duration" (seconds) in edit.json`);
+const srcDur = MOTION ? 0 : Number(ffprobe(join(P, source)).format.duration);
 
 // ---------------------------------------------------------------- media linking
 function link(abs, rel) {
@@ -50,10 +54,11 @@ const mediaDur = (abs) => (durCache[abs] ??= Number(ffprobe(abs).format.duration
 
 // ---------------------------------------------------------------- segments → timeline map
 let segs = (Array.isArray(E.segments) ? E.segments : []).map((s, k) => ({ id: s.id || `s${k + 1}`, ...s, in: Number(s.in), out: Math.min(Number(s.out), srcDur) })).filter((s) => s.out - s.in > 0.04);
-if (!segs.length) segs = [{ id: "s1", in: 0, out: srcDur }];
+if (MOTION) segs = [];
+else if (!segs.length) segs = [{ id: "s1", in: 0, out: srcDur }];
 let tcur = 0;
 for (const s of segs) (s.start = round(tcur, 3), (s.dur = round(s.out - s.in, 3)), (tcur += s.dur));
-const editDur = round(tcur, 3);
+const editDur = MOTION ? round(Number(E.duration), 3) : round(tcur, 3);
 
 const srcToTl = (t) => {
   const s = segs.find((x) => t >= x.in - 1e-3 && t < x.out + 1e-3);
@@ -61,7 +66,7 @@ const srcToTl = (t) => {
 };
 
 // Transcript (source time) → timeline words.
-const transcript = readJSON(join(P, "captions/transcript.json"), []);
+const transcript = MOTION ? [] : readJSON(join(P, "captions/transcript.json"), []);
 const tlWords = [];
 for (const w of transcript) {
   const mid = (w.start + w.end) / 2;
@@ -114,7 +119,7 @@ function resolveDur(ov, t0) {
 }
 
 // ---------------------------------------------------------------- video layer
-const vSrc = link(join(P, source), "media/source.mp4");
+const vSrc = MOTION ? null : link(join(P, source), "media/source.mp4");
 const rf = { focusX: 0.5, focusY: 0.4, zoom: 1, ...(E.reframe || {}) };
 const cam = { autoPunch: true, punchScale: 1.08, ...(E.camera || {}) };
 const objPos = `${(rf.focusX * 100).toFixed(1)}% ${(rf.focusY * 100).toFixed(1)}%`;
@@ -288,7 +293,7 @@ ${css}
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-width="${fmt.width}" data-height="${fmt.height}" data-duration="${total}">
+    <div id="root"${MOTION ? ' class="motion"' : ""} data-composition-id="main" data-start="0" data-width="${fmt.width}" data-height="${fmt.height}" data-duration="${total}">
     <div id="cam-wrap"><div id="cam"><div id="camfx">
 ${videoHTML}    </div></div></div>
 ${ovHTML}${capHTML}    <div id="flash"></div>

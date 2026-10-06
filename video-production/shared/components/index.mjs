@@ -33,10 +33,10 @@ const bgIn = (id, bg, t0) => (!bg || bg === "none" ? "" : `tl.fromTo("#${id}-bg"
 
 export const components = {
   // ---------------------------------------------------------------- kinetic headline
-  // { lines: ["Apnar CV *kharap na*."], eyebrow?, style: boxed|plain|serif, align: center|left, y: 300, bg: none|dim|stone|ink, inkLines?: [1] }
+  // { lines: ["Apnar CV *kharap na*."], eyebrow?, style: boxed|plain|serif, align: center|left, y: 300, bg: none|dim|stone|ink, inkLines?: [1], size?: px }
   title(p, c) {
     const style = n(p.style, "boxed"), align = n(p.align, "center"), y = n(p.y, 300), bg = n(p.bg, "none");
-    const lines = (p.lines || [p.text || ""]).map((l, i) => `<div class="t-line"><span class="t-txt ${(p.inkLines || []).includes(i) ? "ink" : ""} ${isBn(l) ? "bn" : ""}" id="${c.id}-l${i}">${c.rich(l)}</span></div>`).join("");
+    const lines = (p.lines || [p.text || ""]).map((l, i) => `<div class="t-line"><span class="t-txt ${(p.inkLines || []).includes(i) ? "ink" : ""} ${isBn(l) ? "bn" : ""}" id="${c.id}-l${i}"${p.size ? ` style="font-size:${p.size}px"` : ""}>${c.rich(l)}</span></div>`).join("");
     const html = `${bgLayer(c.id, bg)}<div class="title-wrap title-${style} ${align} ${bg === "ink" ? "on-dark" : ""}" style="top:${y}px">${p.eyebrow ? `<div class="eyebrow" id="${c.id}-eb">${c.esc(p.eyebrow)}</div>` : ""}${lines}</div>`;
     const stagger = n(p.stagger, 0.12);
     const js = [

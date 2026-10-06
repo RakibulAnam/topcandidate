@@ -61,6 +61,7 @@ Revisions = edit `edit.json` and rebuild. Never hand-edit `composition/index.htm
 | "Use the TopCandidate UI here" | `screenshot` (shared/ui, from `npm run capture-ui`), `toolkit`, `steps`, `price`, `resume` |
 | "Stronger CTA" | `outro.props.headline/button`, longer `outro.dur`, spoken CTA overlap (`outro.overlap`) |
 | "Version without music" | `npm run render -- <name> --no-music` → `final-no-music.mp4` |
+| "Launch / showcase / motion-only video" (no footage) | `npm run new -- <name>`, skip ingest, write `edit.json` with `"mode": "motion"` + `"duration"` (EDIT_SPEC → Motion-only); scenes = overlays with full `bg` |
 | "Clean version for Instagram" | `--no-captions` (burned-in off; upload `final.srt` instead) — confirm which they mean |
 
 ## Hard rules

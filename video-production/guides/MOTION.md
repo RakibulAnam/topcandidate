@@ -7,7 +7,7 @@ Text props accept `*accent*` (orange) and `**highlight**` (orange box). Position
 
 | type | props (defaults) | use |
 |---|---|---|
-| `title` | `lines[]`, `eyebrow`, `style: boxed\|plain\|serif`, `align`, `y:300`, `bg`, `inkLines:[i]`, `stagger` | kinetic headline / hook text; lines rise from a mask |
+| `title` | `lines[]`, `eyebrow`, `style: boxed\|plain\|serif`, `align`, `y:300`, `bg`, `inkLines:[i]`, `stagger`, `size` (px) | kinetic headline / hook text; lines rise from a mask |
 | `sticker` | `text`, `tone: ink\|orange\|stone`, `icon: x\|check\|arrow\|!`, `x:540` (center), `y:520`, `rotate:-4` | pop label ("0 interview call", "✓ Tailored") |
 | `arrow` | `from:[x,y]`, `to:[x,y]`, `bend:.25`, `color`, `width` | hand-drawn pointer (draws on) |
 | `circle` | `x,y` (center), `w,h`, `color` | scribble around something |
