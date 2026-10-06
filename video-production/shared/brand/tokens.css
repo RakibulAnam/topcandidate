@@ -1,0 +1,18 @@
+/* TopCandidate video brand tokens — mirrors apps/web/src/index.css @theme.
+   Video rules (from apps/web/AGENTS.md brand rules, adapted for the frame):
+   no gradients · no blue/indigo/purple · orange is a highlight (~10% of pixels), never a background wash
+   · ink + stone carry the frame · Source Serif 4 for display, Instrument Sans for UI/captions,
+   Hind Siliguri / Tiro Bangla for Bangla script. Font files are inlined by build.mjs. */
+:root {
+  --ink: #0F1B2D; --ink-800: #09121F; --ink-600: #22324B; --ink-400: #5A6A85; --ink-200: #AEB8C8; --ink-100: #D6DCE5;
+  --orange: #E8743B; --orange-400: #EC8752; --orange-600: #C95D27; --orange-700: #9C461D; --orange-100: #FADCCB; --orange-50: #FDF1EB;
+  --stone: #FAFAF7; --stone-100: #F2F1EB; --stone-200: #E5E2D8; --stone-300: #CFCBBC; --stone-500: #6B6759; --stone-700: #363328;
+  --cta-surface: #17243A; --cta-border: #2A3850; --cream: #F4F1EA;
+  --font-ui: "Instrument Sans", "Hind Siliguri", system-ui, sans-serif;
+  --font-display: "Source Serif 4", "Tiro Bangla", Georgia, serif;
+  --font-bn: "Hind Siliguri", "Instrument Sans", system-ui, sans-serif;
+  --font-bn-display: "Tiro Bangla", "Source Serif 4", Georgia, serif;
+  --radius-card: 36px;
+  --shadow-card: 0 40px 80px -30px rgba(9, 18, 31, 0.55), 0 2px 0 rgba(9, 18, 31, 0.04);
+  --safe-top: 220px; --safe-bottom: 400px; --safe-left: 60px; --safe-right: 140px;
+}

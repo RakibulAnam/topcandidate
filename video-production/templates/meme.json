@@ -1,0 +1,117 @@
+{
+  "_about": "TEMPLATE E — meme/viral. Meme setup → Job-seeker situation → Twist → TopCandidate connection. Fast, captions upper-case, few cards, one big sticker punchline. Keep it human, not cringe.",
+  "_beats": [
+    {
+      "beat": "setup",
+      "len": "0–3s",
+      "do": "familiar format line ('POV: …', 'Me after 47 applications'); title plain style"
+    },
+    {
+      "beat": "situation",
+      "len": "3–10s",
+      "do": "notification/message card dramatization (clearly illustrative)"
+    },
+    {
+      "beat": "twist",
+      "len": "10–14s",
+      "do": "the reveal: sticker + punch + impact sfx"
+    },
+    {
+      "beat": "connection",
+      "len": "14–20s",
+      "do": "one-line product tie-in; logo sting or cta"
+    }
+  ],
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "source": "working/source.mp4",
+  "reframe": {
+    "focusX": 0.5,
+    "focusY": 0.38,
+    "zoom": 1
+  },
+  "camera": {
+    "autoPunch": true,
+    "punchScale": 1.08
+  },
+  "template": "meme",
+  "segments": "← from working/analysis.md suggested segments, edited",
+  "captions": {
+    "style": "punch",
+    "case": "upper",
+    "maxWords": 3,
+    "y": 1180,
+    "emphasis": []
+  },
+  "overlays": [
+    {
+      "type": "title",
+      "at": {
+        "t": 0
+      },
+      "dur": 2.5,
+      "props": {
+        "lines": [
+          "POV:",
+          "<situation>"
+        ],
+        "style": "plain",
+        "y": 300
+      },
+      "sfx": true
+    },
+    {
+      "type": "notification",
+      "at": {
+        "t": 3.5
+      },
+      "dur": 2.5,
+      "props": {
+        "app": "Email",
+        "title": "<illustrative>",
+        "body": "<illustrative>"
+      },
+      "sfx": true
+    },
+    {
+      "type": "sticker",
+      "at": {
+        "word": "<twist word>"
+      },
+      "dur": 1.8,
+      "props": {
+        "text": "<punchline>",
+        "tone": "orange",
+        "y": 520
+      },
+      "sfx": "impact-bass-2"
+    }
+  ],
+  "cameraMoves": [
+    {
+      "type": "punch",
+      "at": {
+        "word": "<twist word>"
+      },
+      "dur": 1,
+      "scale": 1.18
+    }
+  ],
+  "music": {
+    "file": "music/<track>",
+    "volume": 0.12,
+    "duck": 0.05
+  },
+  "outro": {
+    "type": "logo",
+    "dur": 2,
+    "props": {
+      "bg": "stone"
+    }
+  },
+  "sfx": []
+}

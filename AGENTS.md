@@ -9,6 +9,10 @@ A polyglot monorepo with two independent apps that share **only** an HTTPS webho
 - **`apps/web/`** — TypeScript / React 19 / Vite / Vercel Functions / Supabase. Customer-facing product.
 - **`apps/mobile/`** — Dart / Flutter, Android-only. Operator-side bKash payment-confirmation watcher.
 
+Plus one local-only tool workspace (not an app, never deployed, imports nothing from `apps/`):
+
+- **`video-production/`** — HyperFrames-based short-form video studio (raw footage → edited Reels). All media is gitignored. See [`video-production/CLAUDE.md`](video-production/CLAUDE.md) and [ADR-0004](docs/decisions/0004-local-video-production-workspace.md).
+
 No shared runtime code. No npm workspaces, no Turborepo. See [`docs/decisions/0001-adopt-polyglot-monorepo.md`](docs/decisions/0001-adopt-polyglot-monorepo.md) for why.
 
 ## Where to load context from (in order)

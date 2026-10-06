@@ -1,0 +1,33 @@
+{
+  "name": "topcandidate-video-production",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-only AI video editing studio for TopCandidate short-form content (HyperFrames-based). Not part of the web app.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "new": "node scripts/new-project.mjs",
+    "ingest": "node scripts/ingest.mjs",
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/render.mjs --check-only",
+    "preview": "node scripts/render.mjs --preview",
+    "studio": "node scripts/studio.mjs",
+    "render": "node scripts/render.mjs --final",
+    "snapshot": "node scripts/render.mjs --snapshot",
+    "capture-ui": "node scripts/capture-ui.mjs",
+    "test-footage": "node scripts/make-test-footage.mjs",
+    "test-music": "node scripts/make-test-music.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/hind-siliguri": "5.3.0",
+    "@fontsource/instrument-sans": "5.3.0",
+    "@fontsource/source-serif-4": "5.3.0",
+    "@fontsource/tiro-bangla": "5.3.0",
+    "gsap": "3.15.0",
+    "hyperframes": "0.8.137",
+    "puppeteer-core": "25.12.0"
+  }
+}

@@ -1,0 +1,58 @@
+# video-production/ — LOCAL-ONLY media workspace.
+# Rules here are scoped to this directory, so apps/web images are unaffected.
+# Principle: commit the editing system (scripts, components, templates, docs, config);
+# never commit footage, renders, generated media, or anything reproducible by `npm run setup`.
+
+node_modules/
+
+# --- Projects: everything local except the folder's README --------------------
+projects/*
+!projects/README.md
+
+# --- Shared assets: reproducible (npm run setup) or user-supplied media -------
+shared/fonts/
+shared/vendor/
+shared/logos/
+shared/sound-effects/
+shared/music/
+shared/ui/
+shared/broll/
+shared/stickers/
+shared/.setup-done
+shared/.model-probe*
+
+# --- Third-party agent skills (reinstalled by `npm run setup -- --skills`) -----
+# skills-lock.json IS committed so the installed versions are reproducible.
+.claude/skills/
+
+# --- Belt and braces: no media anywhere in this workspace ---------------------
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.webm
+*.avi
+*.mts
+*.wav
+*.mp3
+*.aac
+*.m4a
+*.flac
+*.ogg
+*.aiff
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.woff
+*.woff2
+*.srt
+*.vtt
+
+# HyperFrames caches / scratch
+.hyperframes/
+renders/
+snapshots/
+.media/
+*.log
