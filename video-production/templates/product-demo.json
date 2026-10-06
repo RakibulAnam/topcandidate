@@ -1,0 +1,119 @@
+{
+  "_about": "TEMPLATE B — product demo. Hook → Problem → Product interaction → Result → CTA. Product UI is on screen most of the time; speaker (if any) in between or narrating.",
+  "_beats": [
+    {
+      "beat": "hook",
+      "len": "0–3s",
+      "do": "the outcome first ('Ek minute-e puro application')"
+    },
+    {
+      "beat": "problem",
+      "len": "3–8s",
+      "do": "what it replaces (CV writer price, hours of rewriting) — price card"
+    },
+    {
+      "beat": "interaction",
+      "len": "8–22s",
+      "do": "steps card → screenshots scrolling → toolkit chips landing"
+    },
+    {
+      "beat": "result",
+      "len": "22–28s",
+      "do": "tailored resume card with chip; compare generic vs tailored"
+    },
+    {
+      "beat": "cta",
+      "len": "last 3s",
+      "do": "cta outro"
+    }
+  ],
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "source": "working/source.mp4",
+  "reframe": {
+    "focusX": 0.5,
+    "focusY": 0.38,
+    "zoom": 1
+  },
+  "camera": {
+    "autoPunch": true,
+    "punchScale": 1.08
+  },
+  "template": "product-demo",
+  "segments": "← from working/analysis.md suggested segments, edited",
+  "captions": {
+    "style": "clean",
+    "y": 1260,
+    "emphasis": []
+  },
+  "overlays": [
+    {
+      "type": "steps",
+      "at": {
+        "t": 3
+      },
+      "dur": 3.5,
+      "props": {
+        "y": 330,
+        "bg": "stone"
+      },
+      "sfx": true
+    },
+    {
+      "type": "screenshot",
+      "at": {
+        "t": 6.5
+      },
+      "dur": 4,
+      "props": {
+        "src": "ui/landing-en.png",
+        "frame": "phone",
+        "scroll": 900,
+        "y": 160,
+        "bg": "stone"
+      },
+      "sfx": true
+    },
+    {
+      "type": "toolkit",
+      "at": {
+        "t": 10.5
+      },
+      "dur": 4,
+      "props": {
+        "y": 260,
+        "bg": "stone"
+      },
+      "sfx": true
+    },
+    {
+      "type": "resume",
+      "at": {
+        "t": 14.5
+      },
+      "dur": 3.5,
+      "props": {
+        "state": "tailored",
+        "bullets": [
+          "<one real-sounding bullet>"
+        ]
+      },
+      "sfx": true
+    }
+  ],
+  "music": {
+    "file": "music/<track>",
+    "volume": 0.12,
+    "duck": 0.04
+  },
+  "outro": {
+    "type": "cta",
+    "dur": 3,
+    "props": {}
+  },
+  "sfx": []
+}

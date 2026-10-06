@@ -1,0 +1,107 @@
+{
+  "_about": "TEMPLATE A — talking head. Hook → Problem → Explanation → Solution → Product → CTA. Speaker carries it; graphics support 3–4 moments.",
+  "_beats": [
+    {
+      "beat": "hook",
+      "len": "0–3s",
+      "do": "strongest line first; one title/counter/sticker + one camera punch"
+    },
+    {
+      "beat": "problem",
+      "len": "3–10s",
+      "do": "name the pain; emphasis on the pain word"
+    },
+    {
+      "beat": "explanation",
+      "len": "10–20s",
+      "do": "one visual that shows the why (job-post / resume generic / compare)"
+    },
+    {
+      "beat": "solution",
+      "len": "20–27s",
+      "do": "state the fix plainly; toolkit or steps card"
+    },
+    {
+      "beat": "product",
+      "len": "27–32s",
+      "do": "screenshot (phone) of the real site"
+    },
+    {
+      "beat": "cta",
+      "len": "last 2.5–3s",
+      "do": "outro cta or spoken CTA + sticker"
+    }
+  ],
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "source": "working/source.mp4",
+  "reframe": {
+    "focusX": 0.5,
+    "focusY": 0.38,
+    "zoom": 1
+  },
+  "camera": {
+    "autoPunch": true,
+    "punchScale": 1.08
+  },
+  "template": "talking-head",
+  "segments": "← from working/analysis.md suggested segments, edited",
+  "captions": {
+    "style": "punch",
+    "y": 1180,
+    "emphasis": []
+  },
+  "overlays": [
+    {
+      "type": "title",
+      "at": {
+        "t": 0.1
+      },
+      "dur": 2.2,
+      "props": {
+        "lines": [
+          "<hook line, *accent* key word>"
+        ],
+        "style": "boxed",
+        "y": 300
+      },
+      "sfx": true
+    },
+    {
+      "type": "toolkit",
+      "at": {
+        "word": "<when the fix is named>"
+      },
+      "dur": 3.5,
+      "props": {
+        "y": 230
+      },
+      "sfx": true
+    },
+    {
+      "type": "screenshot",
+      "at": {
+        "word": "Top Candidate"
+      },
+      "dur": 3.0,
+      "props": {
+        "src": "ui/landing-en.png",
+        "frame": "phone",
+        "scroll": 640,
+        "y": 200
+      },
+      "sfx": true
+    }
+  ],
+  "music": null,
+  "outro": {
+    "type": "cta",
+    "dur": 2.8,
+    "props": {}
+  },
+  "sfx": []
+}

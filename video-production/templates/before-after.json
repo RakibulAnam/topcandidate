@@ -1,0 +1,109 @@
+{
+  "_about": "TEMPLATE D — before/after. Bad application → What's wrong → Improved application → Result. Visual-heavy; the compare card is the hero.",
+  "_beats": [
+    {
+      "beat": "bad",
+      "len": "0–5s",
+      "do": "show the bad thing first (generic resume / 'Dear Sir/Madam' cover letter) — circle/arrow on the flaw"
+    },
+    {
+      "beat": "wrong",
+      "len": "5–12s",
+      "do": "2–3 specific flaws; strike emphasis on each"
+    },
+    {
+      "beat": "improved",
+      "len": "12–20s",
+      "do": "tailored resume/cover letter; compare card left→right"
+    },
+    {
+      "beat": "result",
+      "len": "20–26s",
+      "do": "why it works (matches the job post) + cta"
+    }
+  ],
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "source": "working/source.mp4",
+  "reframe": {
+    "focusX": 0.5,
+    "focusY": 0.38,
+    "zoom": 1
+  },
+  "camera": {
+    "autoPunch": true,
+    "punchScale": 1.08
+  },
+  "template": "before-after",
+  "segments": "← from working/analysis.md suggested segments, edited",
+  "captions": {
+    "style": "punch",
+    "y": 1240,
+    "emphasis": []
+  },
+  "overlays": [
+    {
+      "type": "resume",
+      "at": {
+        "t": 0.2
+      },
+      "dur": 4,
+      "props": {
+        "state": "generic",
+        "stamp": "Generic",
+        "lines": 6
+      },
+      "sfx": true
+    },
+    {
+      "type": "circle",
+      "at": {
+        "t": 1.6
+      },
+      "dur": 2.2,
+      "props": {
+        "x": 540,
+        "y": 520,
+        "w": 640,
+        "h": 140
+      }
+    },
+    {
+      "type": "compare",
+      "at": {
+        "word": "<turn word>"
+      },
+      "dur": 5,
+      "props": {
+        "left": {
+          "label": "Before",
+          "items": [
+            "Same CV for every job",
+            "Dear Sir/Madam",
+            "Duties, not results"
+          ]
+        },
+        "right": {
+          "label": "After",
+          "items": [
+            "Matches the job post",
+            "Written to the hiring manager",
+            "Results first"
+          ]
+        }
+      },
+      "sfx": true
+    }
+  ],
+  "music": null,
+  "outro": {
+    "type": "cta",
+    "dur": 2.8,
+    "props": {}
+  },
+  "sfx": []
+}

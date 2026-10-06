@@ -1,0 +1,138 @@
+{
+  "_about": "TEMPLATE C — job-seeker pain. Provocative hook → Relatable problem → Why it happens → Solution → TopCandidate. The reference build is projects/test (local).",
+  "_beats": [
+    {
+      "beat": "hook",
+      "len": "0–3s",
+      "do": "provocative question/claim; counter or sticker with the painful number"
+    },
+    {
+      "beat": "relatable",
+      "len": "3–9s",
+      "do": "'apni shob job-e same CV…' — resume(generic)+stamp"
+    },
+    {
+      "beat": "why",
+      "len": "9–15s",
+      "do": "each job wants something different — job-post card; strike 'generic'"
+    },
+    {
+      "beat": "solution",
+      "len": "15–22s",
+      "do": "tailor every piece — toolkit card staggered to the spoken list"
+    },
+    {
+      "beat": "topcandidate",
+      "len": "22–30s",
+      "do": "screenshot then steps; 'Prothom resume free' + cta"
+    }
+  ],
+  "version": 1,
+  "format": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "source": "working/source.mp4",
+  "reframe": {
+    "focusX": 0.5,
+    "focusY": 0.38,
+    "zoom": 1
+  },
+  "camera": {
+    "autoPunch": true,
+    "punchScale": 1.08
+  },
+  "template": "job-seeker-pain",
+  "segments": "← from working/analysis.md suggested segments, edited",
+  "captions": {
+    "style": "punch",
+    "y": 1180,
+    "emphasis": [
+      "<pain number>",
+      {
+        "text": "<contrarian phrase>",
+        "style": "ink"
+      },
+      {
+        "text": "<wrong thing>",
+        "style": "strike"
+      }
+    ]
+  },
+  "overlays": [
+    {
+      "type": "counter",
+      "at": {
+        "word": "<number word>"
+      },
+      "dur": 2.2,
+      "props": {
+        "from": 1,
+        "to": 20,
+        "unit": "ta job",
+        "y": 330
+      },
+      "sfx": true
+    },
+    {
+      "type": "resume",
+      "at": {
+        "word": "same CV"
+      },
+      "dur": 3,
+      "props": {
+        "state": "generic",
+        "name": "Your CV",
+        "stamp": "Same CV",
+        "lines": 6
+      },
+      "sfx": true
+    },
+    {
+      "type": "job-post",
+      "at": {
+        "word": "<job>"
+      },
+      "dur": 2,
+      "props": {
+        "title": "<role>",
+        "company": "<generic company>",
+        "tags": []
+      },
+      "sfx": true
+    },
+    {
+      "type": "toolkit",
+      "at": {
+        "word": "resume"
+      },
+      "dur": 4,
+      "props": {
+        "stagger": 0.55
+      },
+      "sfx": true
+    }
+  ],
+  "cameraMoves": [
+    {
+      "type": "punch",
+      "at": {
+        "word": "<pain word>"
+      },
+      "dur": 1.2,
+      "scale": 1.14
+    }
+  ],
+  "music": {
+    "file": "music/<track>",
+    "volume": 0.11,
+    "duck": 0.04
+  },
+  "outro": {
+    "type": "cta",
+    "dur": 2.8,
+    "props": {}
+  },
+  "sfx": []
+}
