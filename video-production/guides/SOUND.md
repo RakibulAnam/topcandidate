@@ -5,8 +5,13 @@ Hierarchy: **1. voice · 2. meaningful SFX · 3. music.** Voice must always be i
 ## Voice
 
 Ingest makes the proxy voice track: 70 Hz high-pass + loudness-normalized to −16 LUFS
-(`--denoise` adds FFT denoise for noisy rooms — use only when the noise floor in analysis.md is
-above ≈ −45 dB, it can sound watery). The final render is normalized to **−14 LUFS, −1 dBTP**.
+(`--denoise` adds moderate FFT denoise, ≈8 dB off AC/room hiss with speech level unchanged; `--level` adds
+gentle 3:1 compression + tighter loudnorm LRA for takes whose phrases swing in volume. "Stabilize the
+audio" = `--denoise --level`. `--repair` = gentle voice repair for a muffled lav (85 Hz HPF, light denoise,
+−2.5 dB @250 Hz, +3 dB @3 kHz, mild de-ess, slow 2:1 comp). **Never add a gate/expander or heavy denoise to
+voice** — tried 2026-10-08: it chopped soft syllables and the owner heard it as "really bad".) `--rnnoise` (+`--repair`) swaps the FFT denoise for RNNoise
+(speech-trained, model `bd` at 85 % wet): room noise ≈25 dB under the voice instead of ≈13 dB, tone intact —
+use it when the owner asks for "noise cancellation". The final render is normalized to **−14 LUFS, −1 dBTP**.
 
 ## SFX (`shared/sound-effects/`, Pixabay license — commercial use OK)
 
@@ -16,6 +21,8 @@ ping · chime · notification · sparkle · error · riser · impact-bass-1/2 ·
 
 - Attach to an overlay with `"sfx": true` (component's suggestion) or a name; standalone in `sfx[]`;
   on an emphasis with `{ "text": "…", "sfx": "pop" }`; on a cut with segment `"sfx"`.
+- Every SFX is capped at 1.5 s with a fade-out (override with `"dur"`); long library files (riser 10 s,
+  glitch-2 3.5 s, whoosh-cinematic 5.5 s) read as static/noise if they ring on. glitch-2 is very hot — avoid.
 - Volume 0.25–0.45. Use for **hits that mean something**: a card landing, a stamp, a number, the CTA.
   Not on every caption. If you can't say why a sound is there, delete it.
 - Avoid stacking two SFX within ~0.3 s.

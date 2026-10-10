@@ -29,7 +29,7 @@ Text props accept `*accent*` (orange) and `**highlight**` (orange box). Position
 | `broll` | `src` (image or video), `zone: full\|upper\|pip`, `kenburns`, `mediaStart`, `volume` | cut-away |
 | `html` | `html`, `js` (T0/DUR), or `file` | escape hatch for one-offs |
 
-Camera (not overlays): `cameraMoves[]` — `punch` (snap zoom + ease back), `push` (slow zoom),
+Camera (not overlays): `cameraMoves[]` — `punch` (snap zoom + ease back), `push` (slow zoom), `slam` (starts zoomed at `scale`, snaps out to 1 — dramatic entries),
 `blur` (defocus the speaker behind a card; note: blur forces a slower render path), `shake`.
 Segment transitions: `"transition": "flash" | "whip"` on a segment.
 

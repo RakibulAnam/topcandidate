@@ -57,7 +57,9 @@ Overlay duration: `"dur": 2.5` or `"until": <time ref>`. Punctuation is ignored 
 
 - **`broll`** with a video `src` → muted cut-away (`zone: full|upper|pip`, `mediaStart`, `volume`, `kenburns`); with an image `src` → Ken Burns still.
 - **`html`** escape hatch: `{ "type": "html", "at": …, "dur": 2, "props": { "html": "<div id='x' …>…</div>", "js": "tl.fromTo('#x', {opacity:0}, {opacity:1, duration:.3}, T0);" } }`
-  (`props.file` may point to a fragment under the project). `T0`/`DUR` are injected. Follow
+  (`props.file` may point to a fragment under the project; `props.jsFile` likewise for the JS). `props.beats:
+  {"paste": {"word":"paste"}}` resolves time refs and injects them as `BEAT.paste` — use it to sync hits
+  inside a long custom overlay to words. `T0`/`DUR` are injected. Follow
   HyperFrames determinism rules (no `Math.random`, no clocks; initial states in `fromTo`).
 
 `src` lookup order: project dir → `assets/` → `input/` → `shared/` → `shared/ui|broll|music|logos|stickers`.

@@ -148,6 +148,7 @@ for (const m of E.cameraMoves || []) {
   if (m.type === "punch") js.push(`tl.fromTo("#camfx", { scale: 1 }, { scale: ${sc}, duration: 0.12, ease: "power3.out", immediateRender: false }, ${t});`, `tl.fromTo("#camfx", { scale: ${sc} }, { scale: 1, duration: 0.25, ease: "power2.inOut", immediateRender: false }, ${round(t + d - 0.25)});`);
   if (m.type === "push") js.push(`tl.fromTo("#camfx", { scale: 1 }, { scale: ${sc}, duration: ${d}, ease: "none", immediateRender: false }, ${t});`, `tl.set("#camfx", { scale: 1 }, ${round(t + d)});`);
   if (m.type === "blur") js.push(`tl.fromTo("#camfx", { filter: "blur(0px)" }, { filter: "blur(${m.amount ?? 18}px)", duration: 0.25, ease: "power2.out", immediateRender: false }, ${t});`, `tl.fromTo("#camfx", { filter: "blur(${m.amount ?? 18}px)" }, { filter: "blur(0px)", duration: 0.25, ease: "power2.in", immediateRender: false }, ${round(t + d - 0.25)});`);
+  if (m.type === "slam") js.push(`tl.fromTo("#camfx", { scale: ${sc} }, { scale: 1, duration: ${Number(m.dur ?? 0.45)}, ease: "expo.out", immediateRender: false }, ${t});`);
   if (m.type === "shake") [0, 1, 2, 3, 4, 5].forEach((i) => js.push(`tl.set("#camfx", { x: ${[14, -12, 9, -7, 4, 0][i]}, y: ${[-8, 10, -6, 5, -2, 0][i]} }, ${round(t + i * 0.04)});`));
 }
 
@@ -173,10 +174,14 @@ if (args.overlays !== false) {
       js.push(`tl.fromTo("#${id}-w", { opacity: 0 }, { opacity: 1, duration: 0.12, ease: "none" }, ${t0});`, `tl.to("#${id}-w", { opacity: 0, duration: 0.12, ease: "none" }, ${round(t0 + dur - 0.12)});`);
       if (props.kenburns) js.push(`tl.fromTo("#${id}-v", { scale: 1.02 }, { scale: 1.1, duration: ${dur}, ease: "none" }, ${t0});`);
     } else if (ov.type === "html") {
-      // Escape hatch: hand-written fragment. props.html (or props.file under composition/custom/), props.js uses T0/DUR.
+      // Escape hatch: hand-written fragment. props.html or props.file (project-relative); props.js or
+      // props.jsFile uses T0/DUR and BEAT — props.beats {name: time ref} resolved to timeline seconds,
+      // so internal hits stay synced to words ({word:"paste"}) across re-cuts.
       const frag = props.file ? readFileSync(join(P, props.file), "utf8") : props.html || "";
+      const code = props.jsFile ? readFileSync(join(P, props.jsFile), "utf8") : props.js;
+      const beats = Object.fromEntries(Object.entries(props.beats || {}).map(([name, ref]) => [name, resolveTime(ref)]));
       ovHTML += `    <div id="${id}" class="clip ov" data-start="${t0}" data-duration="${dur}" data-track-index="${10 + k}" style="z-index:${ov.z ?? 30}"><div class="ov-in">${frag}</div></div>\n`;
-      if (props.js) js.push(`((T0, DUR) => { ${props.js} })(${t0}, ${dur});`);
+      if (code) js.push(`((T0, DUR, BEAT) => { ${code} })(${t0}, ${dur}, ${JSON.stringify(beats)});`);
     } else {
       const comp = components[ov.type];
       if (!comp) return warn(`unknown overlay type "${ov.type}" — see guides/MOTION.md`);
@@ -214,15 +219,23 @@ if (capOpts.enabled && args.captions !== false && tlWords.length) {
 writeFileSync(join(P, "captions/captions.srt"), srt);
 
 // ---------------------------------------------------------------- sound design
-sfx.push(...(E.sfx || []).map((s) => ({ name: s.name, at: resolveTime(s.at), volume: s.volume })));
+sfx.push(...(E.sfx || []).map((s) => ({ name: s.name, at: resolveTime(s.at), volume: s.volume, dur: s.dur })));
 for (const s of segs) if (s.sfx) sfx.push({ name: s.sfx, at: s.start, volume: 0.4 });
 let audioHTML = "";
 if (args.sfx !== false) {
+  // Every SFX is capped (default 1.5 s, or its own `dur`) and faded out, so a long library file
+  // (riser 10 s, glitch 3.5 s, cinematic whoosh 5.5 s) can never ring on under the voice.
   sfx.filter((s) => s.name && s.at !== null && s.at !== undefined).forEach((s, k) => {
     const abs = findAsset(s.name.includes(".") ? s.name : `sound-effects/${s.name}.mp3`);
     if (!abs) return warn(`sfx not found: ${s.name}`);
-    const rel = link(abs, `media/sfx/${basename(abs)}`);
-    const d = Math.min(mediaDur(abs), Math.max(0.05, total - s.at));
+    const cap = Math.min(mediaDur(abs), Number(s.dur ?? 1.5));
+    let rel;
+    if (cap < mediaDur(abs) - 0.05) {
+      rel = `media/sfx/${basename(abs, extname(abs))}-${cap.toFixed(2)}.wav`;
+      const out = join(C, rel);
+      if (!existsSync(out)) { ensureDir(join(out, "..")); run("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", abs, "-t", String(cap), "-af", `afade=t=out:st=${(cap * 0.55).toFixed(3)}:d=${(cap * 0.45).toFixed(3)}`, "-ar", "48000", "-ac", "2", out]); }
+    } else rel = link(abs, `media/sfx/${basename(abs)}`);
+    const d = Math.min(cap, Math.max(0.05, total - s.at));
     audioHTML += `    <audio id="sfx-${k}" src="${rel}" data-start="${round(s.at)}" data-duration="${round(d)}" data-volume="${s.volume ?? 0.4}" data-track-index="${50 + k}"></audio>\n`;
   });
 }

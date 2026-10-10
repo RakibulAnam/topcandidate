@@ -67,7 +67,7 @@ if (args.final) {
   const j = JSON.parse(m.slice(m.lastIndexOf("{"), m.lastIndexOf("}") + 1));
   const outDir = ensureDir(join(P, "output"));
   const out = join(outDir, `final${suffix}.mp4`);
-  const af = `loudnorm=I=${I}:TP=${TP}:LRA=${LRA}:measured_I=${j.input_i}:measured_TP=${j.input_tp}:measured_LRA=${j.input_lra}:measured_thresh=${j.input_thresh}:offset=${j.target_offset}:linear=true`;
+  const af = `loudnorm=I=${I}:TP=${TP}:LRA=${LRA}:measured_I=${j.input_i}:measured_TP=${j.input_tp}:measured_LRA=${j.input_lra}:measured_thresh=${j.input_thresh}:offset=${j.target_offset}:linear=true,alimiter=limit=0.8:attack=2:release=60:level=false`; // linear loudnorm never limits — SFX transients went to 0 dBFS; 0.8 ≈ −1.9 dBFS leaves room for AAC overs
   run("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", tmp, "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "copy", "-af", af, "-ar", "48000", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", out]);
   rmSync(tmp);
 
