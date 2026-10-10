@@ -62,6 +62,10 @@ export function listFiles(dir, exts) {
     .sort();
 }
 
+// Flags that take a value (`--at 1,2` or `--at=1,2`). Every other flag is boolean, so a mode flag
+// injected by an npm script (`render.mjs --snapshot <project>`) never swallows the project name.
+const VALUE_FLAGS = new Set(["at", "lang", "fps", "model", "primary", "port", "from", "template", "brief", "url", "name", "width", "height", "bpm", "seconds"]);
+
 export function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -70,7 +74,7 @@ export function parseArgs(argv) {
     else if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=");
       if (v !== undefined) out[k] = v;
-      else if (argv[i + 1] && !argv[i + 1].startsWith("--")) out[k] = argv[++i];
+      else if (VALUE_FLAGS.has(k) && argv[i + 1] !== undefined && !argv[i + 1].startsWith("--")) out[k] = argv[++i];
       else out[k] = true;
     } else out._.push(a);
   }

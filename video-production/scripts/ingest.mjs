@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// npm run ingest -- <project> [--lang auto|bn|en] [--denoise] [--fps 30|60] [--primary file] [--force] [--no-transcribe]
+// npm run ingest -- <project> [--lang auto|bn|en] [--denoise] [--level] [--repair] [--rnnoise] [--fps 30|60] [--primary file] [--force] [--no-transcribe]
 //
 // RAW FOOTAGE IN → everything Claude needs to make editorial decisions:
 //   working/probe.json        technical facts (duration, res, fps, VFR, HDR, rotation, audio)
@@ -65,9 +65,25 @@ function proxy(src, dest, info, { voice }) {
   const vf = [];
   if (info.hdr) vf.push("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv");
   vf.push(`fps=${fps}`, `scale=${2 * Math.round((info.width * s) / 2)}:${2 * Math.round((info.height * s) / 2)}:flags=lanczos`, "format=yuv420p");
-  const af = ["highpass=f=70"];
-  if (voice && args.denoise) af.push("afftdn=nf=-25");
-  if (voice) af.push("loudnorm=I=-16:TP=-1.5:LRA=11");
+  // --repair: gentle voice repair for a lav buried in beard/shirt in an AC office (retuned 2026-10-08:
+  // the first, aggressive version — expander + nr20 denoise + 6 dB presence — chopped soft syllables
+  // and sounded processed). 85 Hz HPF · light denoise · −2.5 dB @250 Hz · +3 dB @3 kHz · mild de-ess ·
+  // 2:1 slow comp. No gate/expander: pumping on word tails is worse than a little room tone.
+  const REPAIR = ["highpass=f=85:poles=2", "afftdn=nr=8:nf=-46:tn=1", "equalizer=f=250:width_type=q:w=1:g=-2.5", "equalizer=f=3000:width_type=q:w=0.8:g=3", "deesser=i=0.2", "acompressor=threshold=-22dB:ratio=2:attack=15:release=250:makeup=1.5"];
+  // --rnnoise (with --repair): speech-trained RNNoise (model "bd", 85 % wet) instead of afftdn — ≈25 dB
+  // speech-to-room-noise vs ≈13 dB, tone unchanged. Model: ~/.cache/hyperframes/rnnoise/bd.rnnn
+  // (curl -fL -o … https://raw.githubusercontent.com/richardpl/arnndn-models/master/bd.rnnn).
+  const RNN = join(process.env.HOME, ".cache/hyperframes/rnnoise/bd.rnnn");
+  if (voice && args.rnnoise) {
+    if (!existsSync(RNN)) die(`--rnnoise needs ${RNN} — download it (see ingest.mjs comment)`);
+    REPAIR.splice(REPAIR.findIndex((f) => f.startsWith("afftdn")), 1, `arnndn=m=${RNN}:mix=0.85`);
+  }
+  const af = voice && (args.repair || args.rnnoise) ? [...REPAIR] : ["highpass=f=70"];
+  // --denoise: moderate FFT denoise (≈8 dB off AC/room hiss, speech level unchanged — tuned on a
+  // −51 dB-floor office take). --level: gentle compression so quiet and loud phrases sit together.
+  if (voice && args.denoise && !args.repair) af.push("afftdn=nr=15:nf=-38");
+  if (voice && args.level && !args.repair) af.push("acompressor=threshold=-24dB:ratio=3:attack=8:release=150:makeup=2");
+  if (voice) af.push(`loudnorm=I=-16:TP=-1.5:LRA=${args.repair ? 9 : args.level ? 7 : 11}`);
   const a = info.audio ? ["-af", af.join(","), "-ar", "48000", "-ac", "2", "-c:a", "aac", "-b:a", "192k"] : ["-an"];
   log(`building proxy ${basename(dest)} …`);
   run("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", src, "-vf", vf.join(","), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-g", String(fps), "-keyint_min", String(fps), "-sc_threshold", "0", ...a, "-movflags", "+faststart", dest]);

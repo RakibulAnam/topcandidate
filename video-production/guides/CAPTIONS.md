@@ -15,7 +15,7 @@ mapped through the cuts, chunked, and rendered per chunk (`scripts/lib/captions.
 
 | key | default | notes |
 |---|---|---|
-| `style` | `punch` | `punch` white + heavy ink stroke (default, internet-native) · `clean` ink on stone plate (calm, "less edited") · `minimal` small, shadow only |
+| `style` | `punch` | `punch` white + heavy ink stroke (default, internet-native) · `clean` ink on stone plate (calm, "less edited") · `minimal` small, shadow only · `tiktok` ink plate + orange pill that jumps to the word being spoken (viral style; emphasis `box` keeps the pill lit, `accent` = orange text, `strike` = line through) |
 | `y` | 1180 | top of the caption box in px. Move up if a lower-third/card sits there; keep < ~1450 |
 | `size` | 1 | multiplier (1.2 = "bigger") |
 | `maxWords` / `maxChars` | 4 / 20 | chunk size; 2–3 words = aggressive, 5–6 = calm |

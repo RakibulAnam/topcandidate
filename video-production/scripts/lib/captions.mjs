@@ -6,11 +6,11 @@ import { HARD_FILLERS } from "./config.mjs";
 
 const BN = /[ঀ-৿]/;
 const norm = (t) => t.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, "");
-const BASE_SIZE = { punch: 78, clean: 64, minimal: 54 };
+const BASE_SIZE = { punch: 78, clean: 64, minimal: 54, tiktok: 80 };
 
 export const CAPTION_DEFAULTS = {
   enabled: true,
-  style: "punch", // punch | clean | minimal
+  style: "punch", // punch | clean | minimal | tiktok (dark plate + active-word pill that jumps word to word)
   y: 1180, // top of caption box (px). Face usually sits 400–1000; platform UI covers > 1520.
   size: 1, // multiplier
   maxWords: 4,
@@ -92,6 +92,7 @@ export function renderCaptions(chunks, opts, B) {
   const strokeW = o.style === "punch" ? Math.round(11 * o.size) : 0;
   let html = "", js = "", srt = "";
   const at = (t) => t.toFixed(3);
+  if (o.style === "tiktok") return renderTiktok(chunks, o, B, size);
   chunks.forEach((ch, k) => {
     const id = `cap-${k}`;
     const bn = ch.words.some((w) => BN.test(w.text));
@@ -122,6 +123,41 @@ export function renderCaptions(chunks, opts, B) {
     }
     html += `<div id="${id}" class="clip cap cap-${o.style}" data-start="${at(ch.start)}" data-duration="${at(ch.end - ch.start)}" data-track-index="20"><div class="cap-box" style="top:${o.y}px"><div class="cap-in ${bn ? "bn" : ""}" id="${id}-in" style="font-size:${size}px;${strokeW ? `-webkit-text-stroke-width:${bn ? Math.round(strokeW * 0.65) : strokeW}px` : ""}">${inner.trim()}</div></div></div>\n`;
     js = `tl.fromTo("#${id}-in", { y: 18, opacity: 0, scale: 0.94 }, { y: 0, opacity: 1, scale: 1, duration: 0.14, ease: "power3.out" }, ${at(ch.start)});\n` + js;
+    srt += `${k + 1}\n${srtTime(ch.start)} --> ${srtTime(ch.end)}\n${ch.words.map((w) => w.text).join(" ")}\n\n`;
+  });
+  return { html, js, srt };
+}
+
+// style "tiktok": the chunk sits on an ink plate; the word being spoken gets an orange pill (ink
+// text) that jumps word to word. Emphasis: box = pill stays lit after the word · accent = orange
+// text · strike = orange line through after it's said · big = own chunk, larger.
+function renderTiktok(chunks, o, B, size) {
+  let html = "", js = "", srt = "";
+  const at = (t) => t.toFixed(3);
+  chunks.forEach((ch, k) => {
+    const id = `cap-${k}`;
+    const bn = ch.words.some((w) => BN.test(w.text));
+    const big = ch.words.some((w) => w.mark?.style === "big");
+    const inner = ch.words.map((w, i) => {
+      const st = w.mark?.style;
+      return `<span class="w tw ${st ? `tw-${st}` : ""}" id="${id}-w${i}"><span class="tw-pill" data-layout-allow-overlap data-layout-allow-overflow id="${id}-p${i}"></span>${st === "strike" ? `<span class="deco-strike" data-layout-allow-overlap data-layout-allow-overflow id="${id}-s${i}"></span>` : ""}${escapeHTML(tcase(w.text, o.case))}</span>`;
+    }).join(" ");
+    html += `<div id="${id}" class="clip cap cap-tiktok" data-start="${at(ch.start)}" data-duration="${at(ch.end - ch.start)}" data-track-index="20"><div class="cap-box" style="top:${o.y}px"><div class="cap-in ${bn ? "bn" : ""}" id="${id}-in" style="font-size:${Math.round(size * (big ? 1.25 : 1))}px">${inner}</div></div></div>\n`;
+    js += `tl.fromTo("#${id}-in", { y: 22, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.16, ease: "back.out(2)" }, ${at(ch.start)});\n`;
+    ch.words.forEach((w, i) => {
+      const st = w.mark?.style, t = Math.max(ch.start, w.start);
+      const next = ch.words[i + 1] ? Math.max(t + 0.08, ch.words[i + 1].start) : null;
+      const keep = st === "box" || st === "ink" || st === "big";
+      const fg = st === "accent" ? B.orange : "#FFFFFF";
+      js += `tl.fromTo("#${id}-p${i}", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.1, ease: "back.out(2.5)", immediateRender: false }, ${at(t)});\n`;
+      js += `tl.fromTo("#${id}-w${i}", { color: "${fg}", scale: 1 }, { color: "${B.ink}", scale: 1.1, duration: 0.07, ease: "power2.out", immediateRender: false }, ${at(t)});\n`;
+      js += `tl.fromTo("#${id}-w${i}", { scale: 1.1 }, { scale: 1, duration: 0.18, ease: "power2.out", immediateRender: false }, ${at(t + 0.07)});\n`;
+      if (next !== null && !keep) {
+        js += `tl.fromTo("#${id}-p${i}", { opacity: 1 }, { opacity: 0, duration: 0.06, ease: "none", immediateRender: false }, ${at(next)});\n`;
+        js += `tl.fromTo("#${id}-w${i}", { color: "${B.ink}" }, { color: "${fg}", duration: 0.06, ease: "none", immediateRender: false }, ${at(next)});\n`;
+      }
+      if (st === "strike") js += `tl.fromTo("#${id}-s${i}", { scaleX: 0 }, { scaleX: 1, duration: 0.2, ease: "power2.out" }, ${at(next ?? Math.min(w.end, ch.end - 0.2))});\n`;
+    });
     srt += `${k + 1}\n${srtTime(ch.start)} --> ${srtTime(ch.end)}\n${ch.words.map((w) => w.text).join(" ")}\n\n`;
   });
   return { html, js, srt };

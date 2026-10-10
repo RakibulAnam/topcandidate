@@ -24,7 +24,7 @@ Revisions = edit `edit.json` and rebuild. Never hand-edit `composition/index.htm
    `npm run new -- <name> --from <path>` (or create it and tell the user to drop footage in `input/`).
    Read `notes/BRIEF.md`, `notes/REVISIONS.md`, `project.json` to resume state.
 2. **Ingest**: `npm run ingest -- <name>` (`--lang bn` for Bangla-script captions; default `en`
-   gives romanized Banglish exactly as spoken; `--denoise` for noisy rooms). Re-run with
+   gives romanized Banglish exactly as spoken; `--denoise` for noisy rooms, `--level` to even out loudness, `--repair` for a muddy/muffled lav). Re-run with
    `--force` only if the raw file changed.
 3. **Analyze**: read `working/analysis.md`; look at `working/contact-sheet.jpg` (face position →
    `reframe.focusY`, caption `y`, overlay zones). Note audio issues (noise floor, clipping).
@@ -61,6 +61,7 @@ Revisions = edit `edit.json` and rebuild. Never hand-edit `composition/index.htm
 | "Use the TopCandidate UI here" | `screenshot` (shared/ui, from `npm run capture-ui`), `toolkit`, `steps`, `price`, `resume` |
 | "Stronger CTA" | `outro.props.headline/button`, longer `outro.dur`, spoken CTA overlap (`outro.overlap`) |
 | "Version without music" | `npm run render -- <name> --no-music` → `final-no-music.mp4` |
+| "Launch / showcase / motion-only video" (no footage) | `npm run new -- <name>`, skip ingest, write `edit.json` with `"mode": "motion"` + `"duration"` (EDIT_SPEC → Motion-only); scenes = overlays with full `bg` |
 | "Clean version for Instagram" | `--no-captions` (burned-in off; upload `final.srt` instead) — confirm which they mean |
 
 ## Hard rules
