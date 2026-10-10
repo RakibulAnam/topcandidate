@@ -46,8 +46,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase.from('analytics_events').select('anon_id, user_id').not('user_id', 'is', null).not('anon_id', 'is', null).limit(50000),
       supabase.from('account_ip_signals').select('ip_hash, user_id').limit(50000),
       // Free-tier spend by accounts that have never completed a purchase — the
-      // number that decides whether any of this is worth acting on.
-      supabase.from('ai_call_log').select('user_id, cost_usd').in('kind', ['optimize_general', 'normalize', 'extract_resume']).gte('created_at', iso30d).limit(50000),
+      // number that decides whether any of this is worth acting on. Since
+      // migration 032 the free tier is the welcome credit, which spends
+      // optimize + toolkit (+ toolkit_item retries); optimize_general is
+      // payer-only now but stays listed for pre-032 history.
+      supabase.from('ai_call_log').select('user_id, cost_usd').in('kind', ['optimize', 'toolkit', 'toolkit_item', 'optimize_general', 'normalize', 'extract_resume']).gte('created_at', iso30d).limit(50000),
       supabase.from('purchases').select('user_id').eq('status', 'completed').limit(50000),
     ]);
 

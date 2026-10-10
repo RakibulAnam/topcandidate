@@ -32,10 +32,11 @@ export const DEFAULT_DAILY_CAP = 20;
 
 export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_item' | 'extract_resume' | 'normalize';
 
-// Per-kind daily caps, enforced IN ADDITION to the overall cap. The free
-// general-resume path has no credit gate, so its only cost control is this
-// cap — 20/day of free optimizer calls per account is pure cost exposure
-// (~$0.16/day per account) with no funnel benefit past the first few.
+// Per-kind daily caps, enforced IN ADDITION to the overall cap. The
+// general-resume path charges no credit (since migration 032 it is unlocked by
+// the first purchase, not free), so this cap bounds regeneration cost — 20/day
+// of optimizer calls per account would be ~$0.16/day with no benefit past the
+// first few.
 export const KIND_DAILY_CAPS: Partial<Record<CallKind, number>> = {
   optimize_general: 5,
   normalize: 40,

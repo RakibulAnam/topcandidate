@@ -98,12 +98,13 @@ So there are **two apps and one database**, and the two apps never talk directly
 | **Create account** | Sign-up form (`LoginScreen`) | `supabase.auth.signUp`; email confirmation is **off**, so a session is issued immediately (`AuthContext.tsx`) | `auth.users` row → trigger `handle_new_user` creates a `profiles` row with `toolkit_credits = 0` |
 | **Log in** | Sign-in form | `signInWithPassword`; JWT stored client-side | — |
 | **Build profile** | Profile screens (experience, education, skills…) | Repositories write directly to Supabase tables under the user's JWT (RLS-scoped) | `experiences`, `educations`, `skills`, … |
+| **Welcome credit** | Header pill shows "1 free" | On profile completion the client calls `claim_welcome_credit()` (once per account, migration 032) — one free tailored application | `profiles.toolkit_credits += 1`, `profiles.welcome_credit_at` |
 | **Choose to buy** | `PurchaseModal` — shows operator's bKash number + price | One package only: **five-pack = 5 credits / ৳200** (hardcoded in `initiate_purchase`) | — |
 | **Pay** | User opens *their own* bKash app, Send Money ৳200 | The website is **not** involved in moving money | — |
 | **Submit TrxID** | Paste TrxID (+ optional phone), click submit | `POST /api/purchase` → `initiate_purchase` RPC (v3). **Match-on-submit:** if the bKash SMS already arrived, credits are granted *in this request* | `purchases` row (`status = 'pending'`, or `completed` immediately if the payment was already recorded in `inbound_payments`) |
 | **Wait** | Navbar "Verifying…" pill (3-step timeline) | Pill subscribes to its purchase row via **Supabase Realtime** (sub-second) + a 20s fallback poll of `GET /api/my-purchase-status`, no time cap | — |
 | **Validation** | (nothing visible) | Operator's phone gets the bKash SMS → watcher confirms it (see §5) | `purchases.status` flips |
-| **Credits assigned** | Pill shows "5 credits added" (often instantly on submit) | `confirm_purchase` / match-on-submit adds credits, audits the change; Realtime pushes the update | `profiles.toolkit_credits += 5`; `purchase_state_changes` row |
+| **Credits assigned** | Pill shows "5 credits added" (often instantly on submit) | `confirm_purchase` / match-on-submit adds credits, audits the change; Realtime pushes the update. The **first** completed purchase also unlocks the master resume (trigger `trg_unlock_master_resume`), which the dashboard then builds automatically | `profiles.toolkit_credits += 5`; `purchase_state_changes` row; `profiles.master_resume_unlocked_at` (first purchase only) |
 | **Use credits** | Generate a tailored package in the Builder | `POST /api/optimize` consumes 1 credit, runs AI (its Gemini model chain is walked client-side inside one 50s wall-clock budget; the parallel `/api/toolkit` gets 52s and measured **26.7s in Vercel**) | `toolkit_credits -= 1`; `ai_call_log` row; `generated_resumes` |
 
 ---
@@ -211,7 +212,7 @@ The DB is **Supabase Postgres**, protected by two layers: **Row-Level Security**
 
 | Table | Purpose | Who writes | Role in the flow |
 |---|---|---|---|
-| **`profiles`** | One per user; holds **`toolkit_credits`** (the balance), `flagged_at` | User edits profile fields; credits only via DB functions | Where credits live |
+| **`profiles`** | One per user; holds **`toolkit_credits`** (the balance), `flagged_at`, `welcome_credit_at` / `master_resume_unlocked_at` (migration 032) | User edits profile fields; credits only via DB functions | Where credits live |
 | `experiences`, `educations`, `skills`, … | Resume building blocks | User (RLS) | Source data for AI |
 | `applications`, `generated_resumes` | Saved AI outputs (resume + toolkit JSON) | User (RLS) | Output storage |
 | `ai_call_log` | One row per AI call | User (RLS) | Daily rate-limit + audit |

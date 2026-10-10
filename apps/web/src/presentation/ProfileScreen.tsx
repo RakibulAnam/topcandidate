@@ -22,6 +22,9 @@ import { LanguageSection } from './components/profile/LanguageSection';
 import { ReferenceSection } from './components/profile/ReferenceSection';
 import { PhoneInput, isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
+import { PurchaseModal } from './components/PurchaseModal';
+import { apiErrorMessage } from './i18n/apiErrorMessage.js';
+import { ResumeService } from '../application/services/ResumeService';
 
 type TabId =
     | 'Personal' | 'Experience' | 'Projects' | 'Education' | 'Skills'
@@ -86,6 +89,11 @@ export const ProfileScreen = () => {
     const [generalChecked, setGeneralChecked] = useState(false);
     const [generatingGeneral, setGeneratingGeneral] = useState(false);
     const [regeneratingGeneral, setRegeneratingGeneral] = useState(false);
+    // Master resume is the first pack's bonus (migration 032). Null = unknown;
+    // the banners below only render once this is known, so nobody sees a
+    // "Generate" button flip into "Get a pack".
+    const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
+    const [purchaseOpen, setPurchaseOpen] = useState(false);
 
     // Hash of the profile AS SAVED — set on load and after each successful save,
     // never from live edit state. Compared against the hash the general resume
@@ -169,6 +177,10 @@ export const ProfileScreen = () => {
         const check = async () => {
             if (!user) return;
             try {
+                profileRepository.getCreditStatus(user.id)
+                    .then((st) => setMasterUnlocked(st.masterUnlocked))
+                    // Unknown → treat as unlocked; the server still gates it.
+                    .catch(() => setMasterUnlocked(true));
                 const service = createResumeService();
                 const info = await service.getGeneralResumeInfo(user.id);
                 if (!info) { setGeneralResume(null); return; }
@@ -193,7 +205,12 @@ export const ProfileScreen = () => {
             toast.success(t('profile.generalResumeReady'));
         } catch (error) {
             console.error('General resume generation failed:', error);
-            const message = error instanceof Error ? error.message : t('profile.generalResumeFailed');
+            if (ResumeService.isMasterLocked(error)) {
+                setMasterUnlocked(false);
+                setPurchaseOpen(true);
+                return;
+            }
+            const message = apiErrorMessage(error, t) ?? (error instanceof Error ? error.message : t('profile.generalResumeFailed'));
             toast.error(message);
         } finally {
             setGeneratingGeneral(false);
@@ -210,11 +227,27 @@ export const ProfileScreen = () => {
             toast.success(t('profile.regenSuccess'));
         } catch (error) {
             console.error('General resume regeneration failed:', error);
-            const message = error instanceof Error ? error.message : t('profile.generalResumeFailed');
+            if (ResumeService.isMasterLocked(error)) {
+                setMasterUnlocked(false);
+                setPurchaseOpen(true);
+                return;
+            }
+            const message = apiErrorMessage(error, t) ?? (error instanceof Error ? error.message : t('profile.generalResumeFailed'));
             toast.error(message);
         } finally {
             setRegeneratingGeneral(false);
         }
+    };
+
+    // A pack just landed from this screen: do what they came here for — build
+    // the master resume, or bring the stale one up to date.
+    const handlePurchaseSuccess = async () => {
+        if (!user) return;
+        const st = await profileRepository.getCreditStatus(user.id).catch(() => null);
+        if (!st?.masterUnlocked) return;
+        setMasterUnlocked(true);
+        if (!generalResume) void handleGenerateGeneralResume();
+        else if (generalResumeStale) void handleRegenerateGeneralResume();
     };
 
     const handleSavePersonal = async (e: React.FormEvent) => {
@@ -298,7 +331,25 @@ export const ProfileScreen = () => {
             )}
 
             {/* General Resume — offer to generate (none yet) once there's content. */}
-            {generalChecked && !generalResume && (experiences.length > 0 || educations.length > 0) && (
+            {/* Locked (no pack yet): one quiet row — what it is, where it comes from. */}
+            {generalChecked && masterUnlocked === false && (generalResumeStale || (!generalResume && (experiences.length > 0 || educations.length > 0))) && (
+                <div className="mb-6 flex flex-col gap-3 rounded-xl border border-charcoal-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-charcoal-600">
+                        {generalResume
+                            ? t('profile.lockedRegenBody')
+                            : <><b className="font-semibold text-brand-700">{t('profile.lockedTitle')}</b> — {t('profile.lockedBody')}</>}
+                    </p>
+                    <button
+                        type="button"
+                        onClick={() => setPurchaseOpen(true)}
+                        className="w-full shrink-0 rounded-lg border border-charcoal-300 px-4 py-2 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto"
+                    >
+                        {t('profile.lockedCta')}
+                    </button>
+                </div>
+            )}
+
+            {generalChecked && masterUnlocked === true && !generalResume && (experiences.length > 0 || educations.length > 0) && (
                 <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
                         <div className="w-10 h-10 bg-brand-600 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">
@@ -333,7 +384,7 @@ export const ProfileScreen = () => {
             )}
 
             {/* General Resume — profile changed since it was generated: nudge to regenerate. */}
-            {generalChecked && generalResume && generalResumeStale && (
+            {generalChecked && masterUnlocked === true && generalResume && generalResumeStale && (
                 <div className="mb-6 bg-accent-50 border border-accent-200 rounded-xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div className="flex items-start gap-3">
                         <div className="w-10 h-10 bg-accent-500 rounded-lg flex items-center justify-center text-white flex-shrink-0 mt-0.5">
@@ -536,6 +587,14 @@ export const ProfileScreen = () => {
                 {activeTab === 'Languages' && <LanguageSection items={languages} onRefresh={loadProfileData} />}
                 {activeTab === 'References' && <ReferenceSection items={references} onRefresh={loadProfileData} />}
             </div>
+
+            <PurchaseModal
+                isOpen={purchaseOpen}
+                onClose={() => setPurchaseOpen(false)}
+                onSuccess={() => { void handlePurchaseSuccess(); }}
+                source="profile_master"
+                masterBonus={!generalResume}
+            />
         </div>
     );
 };

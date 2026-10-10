@@ -13,11 +13,15 @@ interface NavbarProps {
     /** Optional — when supplied, the navbar shows a clickable credits pill. */
     credits?: number | null;
     onBuyCredits?: () => void;
+    /** Re-open the purchase sheet from the verifying pill. Defaults to onBuyCredits. */
+    onResubmit?: () => void;
+    /** The balance is the free welcome credit — the pill reads "1 free". */
+    freeCredit?: boolean;
     /** Fired when a tracked purchase completes, so the host can refresh credits. */
     onCredited?: () => void;
 }
 
-export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredits, onCredited }: NavbarProps) => {
+export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredits, onResubmit, freeCredit, onCredited }: NavbarProps) => {
     const { signOut, user } = useAuth();
     const t = useT();
     const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -51,9 +55,9 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
 
                     {/* Right Section - Language toggle + User Menu */}
                     <div className="hidden md:flex items-center gap-3 relative">
-                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} channelSuffix="nav-desktop" />
+                        <VerifyingPurchasePill onResubmit={onResubmit ?? onBuyCredits} onCredited={onCredited} channelSuffix="nav-desktop" />
                         {credits !== undefined && onBuyCredits && (
-                            <CreditsBadge credits={credits} onBuy={onBuyCredits} />
+                            <CreditsBadge credits={credits} free={freeCredit} onBuy={onBuyCredits} />
                         )}
                         <LanguageToggle />
 
@@ -79,9 +83,9 @@ export const Navbar = ({ onDashboardClick, showExitBuilder, credits, onBuyCredit
                     {/* Mobile: credits pill stays visible; language moves into the
                         menu so the row never overflows. */}
                     <div className="flex items-center gap-1.5 md:hidden relative">
-                        <VerifyingPurchasePill onResubmit={onBuyCredits} onCredited={onCredited} channelSuffix="nav-mobile" />
+                        <VerifyingPurchasePill onResubmit={onResubmit ?? onBuyCredits} onCredited={onCredited} channelSuffix="nav-mobile" />
                         {credits !== undefined && onBuyCredits && (
-                            <CreditsBadge credits={credits} onBuy={onBuyCredits} />
+                            <CreditsBadge credits={credits} free={freeCredit} onBuy={onBuyCredits} />
                         )}
                         <button
                             type="button"

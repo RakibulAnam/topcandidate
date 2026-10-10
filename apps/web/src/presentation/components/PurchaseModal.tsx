@@ -93,11 +93,27 @@ import { setOpenPurchaseVerdict } from '../../infrastructure/api/openPurchaseSto
 import { track } from '../../infrastructure/analytics/track';
 import { CONTACT_EMAIL, CONTACT_FACEBOOK_URL, contactMailto } from '../support';
 
+/** Which surface opened the modal — sent with `purchase_modal_opened` so the
+ *  admin funnel can tell which nudges actually lead to a purchase. */
+export type PurchaseSource =
+  | 'header_badge'
+  | 'dashboard_credits'
+  | 'master_banner'
+  | 'profile_master'
+  | 'summary_gate'
+  | 'builder_gate'
+  | 'free_used_nudge'
+  | 'resubmit'
+  | 'other';
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   /** Called after a pending purchase is recorded (mock mode: after credits land). */
   onSuccess?: () => void;
+  source?: PurchaseSource;
+  /** Never bought a pack: list the master resume as the first pack's bonus. */
+  masterBonus?: boolean;
 }
 
 const PACKAGE_ID: PackageId = 'five-pack';
@@ -137,7 +153,7 @@ const BKASH_DEEP = '#B80E5D';
 
 type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'problem';
 
-export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
+export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, source = 'other', masterBonus = false }) => {
   const t = useT();
   const [phase, setPhase] = useState<Phase>('idle');
   const [transactionId, setTransactionId] = useState('');
@@ -209,7 +225,8 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
   // Funnel: one event per open (effect re-fires only when isOpen flips true).
   useEffect(() => {
     if (!isOpen) return;
-    track('purchase_modal_opened');
+    track('purchase_modal_opened', { source, masterBonus });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   // Body scroll lock — keeps the page behind the backdrop still.
@@ -592,6 +609,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) =
     t('purchaseModal.feature2'),
     t('purchaseModal.feature3'),
     t('purchaseModal.feature4'),
+    ...(masterBonus ? [t('purchaseModal.featureMasterBonus')] : []),
   ];
 
   // Success takeover — reused for the mobile full-sheet overlay and the

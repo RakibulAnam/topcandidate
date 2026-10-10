@@ -9,7 +9,7 @@ import { isValidPhone } from './components/ui/PhoneInput';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Layout/Navbar';
-import { PurchaseModal } from './components/PurchaseModal';
+import { PurchaseModal, type PurchaseSource } from './components/PurchaseModal';
 import { profileRepository } from '../infrastructure/config/dependencies';
 import { ApiCallError } from '../infrastructure/ai/proxy/ProxyClients';
 import { apiErrorMessage, isRetryPointless } from './i18n/apiErrorMessage.js';
@@ -81,6 +81,14 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // progress panel for a request that was never sent.
   const [creditsLoaded, setCreditsLoaded] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [purchaseSource, setPurchaseSource] = useState<PurchaseSource>('other');
+  // Has this account ever bought a pack? Drives the one-line "that was your
+  // free application" nudge on the preview and the modal's master-resume bonus.
+  const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
+  const openPurchase = (source: PurchaseSource) => {
+    setPurchaseSource(source);
+    setPurchaseModalOpen(true);
+  };
   // Set when the user hit the zero-credit gate — after the credits actually
   // land we resume the generation rather than making them ask again.
   //
@@ -135,6 +143,10 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   }, [resumeService, resumeData, activeResumeId]);
 
   const [isGeneralResume, setIsGeneralResume] = useState(false);
+  // isGeneralResume resolves async for an opened resume; until it does, the
+  // master resume must not be mistaken for a toolkit (the free-used nudge
+  // would flash on it). A fresh generation is always a tailored toolkit.
+  const [resumeKindKnown, setResumeKindKnown] = useState(!currentResumeId);
   const [regeneratingItem, setRegeneratingItem] = useState<ToolkitItem | null>(null);
   // True while the initial toolkit bundle (/api/toolkit) is in flight. The
   // resume preview is already visible at that point; toolkit tabs show
@@ -251,9 +263,11 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     if (!user) return;
     let cancelled = false;
     profileRepository
-      .getToolkitCredits(user.id)
-      .then(n => {
-        if (!cancelled) setCredits(n);
+      .getCreditStatus(user.id)
+      .then(status => {
+        if (cancelled) return;
+        setCredits(status.credits);
+        setMasterUnlocked(status.masterUnlocked);
       })
       .catch(err => console.warn('Could not load toolkit credits', err))
       .finally(() => {
@@ -267,11 +281,15 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   useEffect(() => {
     const checkResumeStatus = async () => {
       if (!user || !resumeService || !activeResumeId) return;
-      const resumes = await resumeService.getGeneratedResumes(user.id);
-      const current = resumes.find(r => r.id === activeResumeId);
+      try {
+        const resumes = await resumeService.getGeneratedResumes(user.id);
+        const current = resumes.find(r => r.id === activeResumeId);
 
-      const isGeneral = current?.title === ResumeService.GENERAL_RESUME_TITLE;
-      setIsGeneralResume(isGeneral);
+        const isGeneral = current?.title === ResumeService.GENERAL_RESUME_TITLE;
+        setIsGeneralResume(isGeneral);
+      } finally {
+        setResumeKindKnown(true);
+      }
     };
     checkResumeStatus();
   }, [user, resumeService, activeResumeId]);
@@ -355,7 +373,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     if (!opts?.skipCreditCheck && credits === 0) {
       console.info('[builder] credit pre-check refused (credits=0), opening purchase modal');
       resumeAfterPurchaseRef.current = true;
-      setPurchaseModalOpen(true);
+      openPurchase('builder_gate');
       return;
     }
 
@@ -518,7 +536,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       if (err instanceof ApiCallError && err.code === 'insufficient_credits') {
         setCredits(0);
         resumeAfterPurchaseRef.current = true;
-        setPurchaseModalOpen(true);
+        openPurchase('builder_gate');
       } else if (err instanceof Error && err.name === 'GibberishContentError') {
         // GibberishContentError carries a user-actionable message naming the
         // offending field — surface it verbatim so the user knows where to fix.
@@ -606,10 +624,11 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   const handlePurchaseSuccess = () => {
     if (!user) return;
     profileRepository
-      .getToolkitCredits(user.id)
-      .then(n => {
+      .getCreditStatus(user.id)
+      .then(({ credits: n, masterUnlocked: unlocked }) => {
         if (!mountedRef.current) return;
         setCredits(n);
+        setMasterUnlocked(unlocked);
         setCreditsLoaded(true);
         if (!resumeAfterPurchaseRef.current || n <= 0) return;
         resumeAfterPurchaseRef.current = false;
@@ -646,8 +665,35 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     await resumeService.exportCoverLetterToPDF(data);
   };
 
+  const purchaseModal = (
+    <PurchaseModal
+      isOpen={purchaseModalOpen}
+      onClose={handlePurchaseClose}
+      onSuccess={handlePurchaseSuccess}
+      source={purchaseSource}
+      masterBonus={masterUnlocked === false}
+    />
+  );
+
+  // Peak-end moment: the user has just seen what a full kit looks like. If
+  // that was the free welcome credit (never bought, balance now 0), say so in
+  // ONE muted line with the price — no modal, no banner.
+  const freeUsedNudge = resumeKindKnown && !isGeneralResume && masterUnlocked === false && credits === 0 ? (
+    <p className="text-[12.5px] leading-snug text-charcoal-500">
+      {t('builder.freeUsedNudge')}{' '}
+      <button
+        type="button"
+        onClick={() => openPurchase('free_used_nudge')}
+        className="font-semibold text-accent-600 underline-offset-2 hover:underline"
+      >
+        {t('builder.freeUsedNudgeCta')}
+      </button>
+    </p>
+  ) : null;
+
   if (step === AppStep.PREVIEW) {
     return (
+      <>
       <Preview
         data={resumeData}
         onUpdate={setResumeData}
@@ -661,7 +707,10 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onRegenerateItem={handleRegenerateItem}
         regeneratingItem={regeneratingItem}
         toolkitPending={toolkitPending}
+        footerNudge={freeUsedNudge}
       />
+      {purchaseModal}
+      </>
     );
   }
 
@@ -683,7 +732,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onDashboardClick={onExit}
         showExitBuilder={true}
         credits={credits}
-        onBuyCredits={() => setPurchaseModalOpen(true)}
+        freeCredit={masterUnlocked === false && credits === 1}
+        onBuyCredits={() => openPurchase('header_badge')}
+        onResubmit={() => openPurchase('resubmit')}
         onCredited={handlePurchaseSuccess}
       />
       <main className="flex flex-1 items-center justify-center px-6 py-16">
@@ -740,7 +791,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
               {credits === 0 ? (
                 <button
                   type="button"
-                  onClick={() => { resumeAfterPurchaseRef.current = true; setPurchaseModalOpen(true); }}
+                  onClick={() => { resumeAfterPurchaseRef.current = true; openPurchase('builder_gate'); }}
                   className="inline-flex items-center gap-2 rounded-full bg-accent-400 px-6 py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
                 >
                   {t('builder.idleBuyCta')}
@@ -783,11 +834,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         )}
       </main>
 
-      <PurchaseModal
-        isOpen={purchaseModalOpen}
-        onClose={handlePurchaseClose}
-        onSuccess={handlePurchaseSuccess}
-      />
+      {purchaseModal}
     </div>
   );
 };

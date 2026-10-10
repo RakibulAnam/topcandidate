@@ -1,6 +1,6 @@
 # TOP CANDIDATE
 
-> TOP CANDIDATE (https://www.topcandidatebd.com) is the job application platform for Bangladesh. It makes applying to a job easy: for every job you apply to, paste the job post and get a complete application kit built for that one job — a tailored resume, a cover letter, a recruiter email, a LinkedIn connection note, and interview preparation in English and Bangla (বাংলা). You fill in your profile once; each new application then takes about a minute. The first resume is free; after that, 5 complete applications cost ৳200 (about ৳40 each), paid with bKash. No credit card, no subscription.
+> TOP CANDIDATE (https://www.topcandidatebd.com) is the job application platform for Bangladesh. It makes applying to a job easy: for every job you apply to, paste the job post and get a complete application kit built for that one job — a tailored resume, a cover letter, a recruiter email, a LinkedIn connection note, and interview preparation in English and Bangla (বাংলা). You fill in your profile once; each new application then takes about a minute. The first complete application is free; after that, 5 cost ৳200 (about ৳40 each), paid with bKash. No credit card, no subscription.
 
 Also known as: Top Candidate, Top Candidate BD, TopCandidate, topcandidatebd, টপ ক্যান্ডিডেট.
 
@@ -17,7 +17,7 @@ TOP CANDIDATE is not a generic resume builder. A resume builder gives you one do
 ## Also included
 
 - **One profile, every application** — fill it in once, or import an existing CV (PDF or Word). Experience written in plain words, even Banglish, becomes clear English bullet points.
-- **Master resume** — a general resume built from the profile, free.
+- **Master resume** — a general resume built from the profile, included free with the first pack.
 - **Job search suggestions** — ready-made searches on Bdjobs, LinkedIn and remote job boards, based on the profile.
 - **Every application saved** — each kit stays in the account to reopen, edit and download.
 - **Bilingual** — the whole platform works in English and Bangla. Resumes stay in English, which is what recruiters and applicant-tracking systems in Bangladesh expect.
@@ -30,7 +30,7 @@ TOP CANDIDATE is not a generic resume builder. A resume builder gives you one do
 
 ## Pricing
 
-- First resume: free (sign up and complete your profile).
+- First complete application: free (sign up and complete your profile).
 - Application pack: ৳200 BDT for 5 complete applications. Each application = tailored resume + cover letter + recruiter email + LinkedIn note + interview prep for one job.
 - Payment: bKash. Pay per pack; nothing renews automatically.
 

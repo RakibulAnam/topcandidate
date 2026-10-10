@@ -7,7 +7,8 @@
 // survives navigation between the three.
 //
 // Children reach the shared state via `useDashboardShell()`.
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { Search, User, LogOut, Home, LayoutGrid, FileText, Receipt } from 'lucide-react';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { createResumeService, profileRepository } from '../../../infrastructure/config/dependencies';
@@ -18,17 +19,25 @@ import { useT } from '../../i18n/LocaleContext';
 import { LanguageToggle } from '../../i18n/LanguageToggle';
 import { CreditsBadge } from '../CreditsBadge';
 import { VerifyingPurchasePill } from '../Layout/VerifyingPurchasePill';
-import { PurchaseModal } from '../PurchaseModal';
+import { PurchaseModal, type PurchaseSource } from '../PurchaseModal';
 import { CommandPalette } from './CommandPalette';
 import { LogoMark } from '../ui/LogoMark';
 
 interface ShellCtx {
   credits: number | null;
   refreshCredits: () => Promise<void>;
-  openPurchase: () => void;
+  /** A pack has been bought → the master resume can be built. Null while loading. */
+  masterUnlocked: boolean | null;
+  /** The only credit left is the free welcome one (never bought a pack). */
+  onFreeCredit: boolean;
+  openPurchase: (source?: PurchaseSource) => void;
   openSearch: () => void;
   generalResume: ResumeListItem | null;
-  setGeneralResume: (r: ResumeListItem | null) => void;
+  /** True while a master-resume build is in flight (background or banner). */
+  buildingMaster: boolean;
+  /** Build the master resume. Single-flight: a second call while one is
+   *  running is a no-op, so two builds can never race into duplicate rows. */
+  buildMaster: () => Promise<string | null>;
   loadingShell: boolean;
 }
 
@@ -67,19 +76,66 @@ export const DashboardShell: React.FC<Props> = ({
   const [credits, setCredits] = useState<number | null>(null);
   const [generalResume, setGeneralResume] = useState<ResumeListItem | null>(null);
   const [loadingShell, setLoadingShell] = useState(true);
+  const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
+  const [purchaseSource, setPurchaseSource] = useState<PurchaseSource>('other');
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Mirror of state for the build paths below, which run from callbacks and
+  // must see the latest value rather than a stale closure.
+  const generalResumeRef = useRef<ResumeListItem | null>(null);
+  generalResumeRef.current = generalResume;
+  const [buildingMaster, setBuildingMaster] = useState(false);
+  const masterInFlight = useRef(false);
+  const autoBuiltMaster = useRef(false);
+
+  // The ONE place the master resume is built from the dashboard area. The
+  // in-flight ref (not state — state lags a render) makes it single-flight:
+  // generateGeneralResume's "already exists" check is read-then-write, so two
+  // concurrent calls would both pass it and save two rows.
+  const buildMaster = useCallback(async (): Promise<string | null> => {
+    if (!user || masterInFlight.current || generalResumeRef.current) return null;
+    masterInFlight.current = true;
+    setBuildingMaster(true);
+    try {
+      const id = await createResumeService().generateGeneralResume(user.id);
+      const now = new Date().toISOString();
+      setGeneralResume({ id, title: ResumeService.GENERAL_RESUME_TITLE, date: now, updatedAt: now });
+      return id;
+    } finally {
+      masterInFlight.current = false;
+      setBuildingMaster(false);
+    }
+  }, [user]);
+
+  // The master resume is the first pack's bonus. Once an account is unlocked
+  // and has none — a purchase just confirmed here, or confirmed while the user
+  // was in the builder / profile / another tab — build it in the background:
+  // they paid for it, they shouldn't have to go find a button. Once per mount;
+  // a failure leaves the banner's build button as the fallback.
+  const autoBuildMaster = useCallback(async () => {
+    if (autoBuiltMaster.current || generalResumeRef.current) return;
+    autoBuiltMaster.current = true;
+    try {
+      const id = await buildMaster();
+      if (id) toast.success(t('dashboard.masterReady'));
+    } catch (err) {
+      console.warn('Background master-resume build failed', err);
+    }
+  }, [buildMaster, t]);
 
   const refreshCredits = useCallback(async () => {
     if (!user) return;
     try {
-      const balance = await profileRepository.getToolkitCredits(user.id);
-      if (balance !== null) setCredits(balance);
+      const status = await profileRepository.getCreditStatus(user.id);
+      setCredits(status.credits);
+      setMasterUnlocked(status.masterUnlocked);
+      if (status.masterUnlocked) void autoBuildMaster();
     } catch (err) {
       console.warn('Could not refresh toolkit credits', err);
     }
-  }, [user]);
+  }, [user, autoBuildMaster]);
 
   // Fetch shared state once. generalResume is found the same way the old
   // dashboard did — by the reserved General Resume title.
@@ -89,12 +145,35 @@ export const DashboardShell: React.FC<Props> = ({
     setLoadingShell(true);
     const svc = createResumeService();
     Promise.all([
-      profileRepository.getToolkitCredits(user.id).catch(() => null),
+      profileRepository.getCreditStatus(user.id).catch(() => null),
       svc.getGeneratedResumes(user.id).catch(() => [] as ResumeListItem[]),
-    ]).then(([balance, all]) => {
+    ]).then(async ([status, all]) => {
       if (cancelled) return;
-      if (balance !== null) setCredits(balance);
-      setGeneralResume(all.find((r) => r.title === ResumeService.GENERAL_RESUME_TITLE) ?? null);
+      const existing = all.find((r) => r.title === ResumeService.GENERAL_RESUME_TITLE) ?? null;
+      setGeneralResume(existing);
+      // Set now, not on the next render: autoBuildMaster below reads it.
+      generalResumeRef.current = existing;
+      if (!status) return;
+      let balance = status.credits;
+      // Backstop for the one-time welcome credit: profile setup claims it on
+      // finish, but if that call failed (or the profile was completed before
+      // this shipped) the shell picks it up. The RPC is idempotent.
+      if (status.welcomePending) {
+        const granted = await profileRepository.claimWelcomeCredit().catch(() => null);
+        if (granted !== null) {
+          balance = granted;
+        } else {
+          // Nothing granted here — usually because a parallel claim (profile
+          // setup, another tab) got it first, so `status.credits` predates it.
+          // Re-read rather than show a balance one short.
+          const fresh = await profileRepository.getCreditStatus(user.id).catch(() => null);
+          if (fresh) balance = fresh.credits;
+        }
+      }
+      if (cancelled) return;
+      setCredits(balance);
+      setMasterUnlocked(status.masterUnlocked);
+      if (status.masterUnlocked && !existing) void autoBuildMaster();
     }).finally(() => { if (!cancelled) setLoadingShell(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -114,7 +193,11 @@ export const DashboardShell: React.FC<Props> = ({
     ?? user?.email?.split('@')[0]
     ?? t('dashboard.greetingFallbackName');
 
-  const openPurchase = useCallback(() => setPurchaseOpen(true), []);
+  const openPurchase = useCallback((source: PurchaseSource = 'other') => {
+    setPurchaseSource(source);
+    setPurchaseOpen(true);
+  }, []);
+  const onFreeCredit = masterUnlocked === false && credits === 1;
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
   const onMasterResume = () => {
@@ -161,11 +244,13 @@ export const DashboardShell: React.FC<Props> = ({
     // `attention` = the master resume does not exist yet. Users lose this
     // destination immediately after profile setup, which is exactly when it has
     // never been built — so mark it until it has been.
-    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false, attention: !loadingShell && !generalResume },
+    // Locked accounts (no pack yet) don't get the attention cue: it would point
+    // at something they can't build, which reads as nagging.
+    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false, attention: !loadingShell && !generalResume && masterUnlocked === true },
     { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
   ];
 
-  const ctx: ShellCtx = { credits, refreshCredits, openPurchase, openSearch, generalResume, setGeneralResume, loadingShell };
+  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, onFreeCredit, openPurchase, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -213,8 +298,8 @@ export const DashboardShell: React.FC<Props> = ({
               <span className="shrink-0 rounded-[5px] border border-charcoal-300 px-1.5 text-[11px]">⌘K</span>
             </button>
 
-            <VerifyingPurchasePill onResubmit={openPurchase} onCredited={() => { void refreshCredits(); }} />
-            <CreditsBadge credits={credits} onBuy={openPurchase} />
+            <VerifyingPurchasePill onResubmit={() => openPurchase('resubmit')} onCredited={() => { void refreshCredits(); }} />
+            <CreditsBadge credits={credits} free={onFreeCredit} onBuy={() => openPurchase('header_badge')} />
             <div className="hidden sm:block"><LanguageToggle /></div>
             <div className="sm:hidden"><LanguageToggle variant="mini" /></div>
 
@@ -314,6 +399,10 @@ export const DashboardShell: React.FC<Props> = ({
         isOpen={purchaseOpen}
         onClose={() => setPurchaseOpen(false)}
         onSuccess={() => { void refreshCredits(); }}
+        source={purchaseSource}
+        // A locked account that already has a master resume (pre-032) isn't
+        // getting one as a bonus — don't promise it.
+        masterBonus={masterUnlocked === false && !generalResume}
       />
     </Ctx.Provider>
   );

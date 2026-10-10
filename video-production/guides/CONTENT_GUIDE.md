@@ -44,9 +44,9 @@ Don't promise outcomes the product doesn't (jobs, interviews, salary).
 
 ## CTA library (real)
 
-"Start free" / "ফ্রিতে শুরু করুন" · "First resume free · ৳200 for 5 applications · Pay with bKash" ·
+"Start free" / "ফ্রিতে শুরু করুন" · "First application free · ৳200 for 5 applications · Pay with bKash" ·
 "Stop sending the same resume everywhere." · "Build my application" · topcandidatebd.com ·
-spoken: "Link bio-te", "Prothom resume free".
+spoken: "Link bio-te", "Prothom application free".
 
 ## Tone
 

@@ -3,6 +3,7 @@
 // Three visual states:
 //   - null  → render nothing (still loading; don't flash a stale 0)
 //   - > 0   → quiet "✨ N" pill in charcoal/ink, click opens PurchaseModal
+//             (`free`: the one credit is the welcome gift → "✨ 1 free")
 //   - = 0   → orange "✨ Buy generations" CTA, click opens PurchaseModal
 //
 // Stateless — receives credits + onBuy from the host screen, which is
@@ -15,10 +16,12 @@ import { useT } from '../i18n/LocaleContext';
 
 interface Props {
   credits: number | null;
+  /** The balance is the free welcome credit (never bought a pack). */
+  free?: boolean;
   onBuy: () => void;
 }
 
-export const CreditsBadge: React.FC<Props> = ({ credits, onBuy }) => {
+export const CreditsBadge: React.FC<Props> = ({ credits, free = false, onBuy }) => {
   const t = useT();
 
   if (credits === null) return null;
@@ -38,7 +41,9 @@ export const CreditsBadge: React.FC<Props> = ({ credits, onBuy }) => {
     );
   }
 
-  const tooltip = credits === 1
+  const tooltip = free
+    ? t('navbar.creditsFreeTooltip')
+    : credits === 1
     ? t('navbar.creditsTooltipOne')
     : t('navbar.creditsTooltip', { count: credits });
 
@@ -51,7 +56,7 @@ export const CreditsBadge: React.FC<Props> = ({ credits, onBuy }) => {
       className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-11 sm:min-h-0 rounded-full bg-charcoal-50 border border-charcoal-200 text-brand-700 text-xs font-semibold hover:border-accent-400 hover:bg-accent-50 transition-colors"
     >
       <Sparkles size={13} className="text-accent-500" />
-      <span className="tabular-nums">{credits}</span>
+      <span className="tabular-nums">{free ? t('navbar.creditsFreeShort') : credits}</span>
     </button>
   );
 };

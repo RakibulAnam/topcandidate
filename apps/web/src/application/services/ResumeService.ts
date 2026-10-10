@@ -494,11 +494,21 @@ export class ResumeService {
   // structured-output validation rejects a large, JD-less profile), fall back
   // to the per-item polished assembly so generation NEVER hard-fails and NEVER
   // shows raw text.
+  /** True for the master-resume lock, whether the server (402) or the
+   *  client-side pre-check raised it. */
+  static isMasterLocked(err: unknown): boolean {
+    return (err as { code?: string } | null)?.code === 'master_locked';
+  }
+
   private async optimizeOrAssembleGeneral(data: ResumeData, prevSummary = ''): Promise<ResumeData> {
     try {
       const optimized = await this.generalOptimizeUseCase.execute(data);
       return this.mergeOptimizedData(data, optimized);
     } catch (err) {
+      // No pack bought yet (402 from /api/optimize-general). This is a gate,
+      // not a failure — assembling a fallback here would hand out the master
+      // resume for free, so surface it to the caller instead.
+      if (ResumeService.isMasterLocked(err)) throw err;
       console.warn('[general-resume] optimizer failed — assembling from per-item polished content:', err);
       track('general_resume_fallback_used');
       return this.assembleGeneralFallback(data, prevSummary);
@@ -548,7 +558,36 @@ export class ResumeService {
     return { id: generalResume.id };
   }
 
-  async generateGeneralResume(userId: string): Promise<string> {
+  // In-flight master-resume builds, per user, shared by EVERY ResumeService
+  // instance (screens create their own via createResumeService()). The
+  // "already exists" check below is read-then-write, so two concurrent builds
+  // — e.g. the profile page's post-purchase build and the dashboard shell's
+  // background build after navigating back — would both pass it and save two
+  // rows. A second caller joins the first build instead.
+  private static generalInFlight = new Map<string, Promise<string>>();
+
+  // Client-side half of the master-resume lock (migration 032). The server
+  // returns 402 master_locked, but optimizeOrAssembleGeneral falls back to
+  // assembly on any OTHER failure (offline, timeout, 503), which would hand a
+  // locked account a master resume anyway. A readable "locked" status refuses
+  // up front; an unreadable one defers to the server.
+  private async assertMasterUnlocked(userId: string): Promise<void> {
+    const status = await this.profileRepository?.getCreditStatus(userId).catch(() => null);
+    if (status && !status.masterUnlocked) {
+      throw Object.assign(new Error('The master resume is included with your first pack.'), { code: 'master_locked' });
+    }
+  }
+
+  generateGeneralResume(userId: string): Promise<string> {
+    const pending = ResumeService.generalInFlight.get(userId);
+    if (pending) return pending;
+    const run = this.generateGeneralResumeOnce(userId)
+      .finally(() => ResumeService.generalInFlight.delete(userId));
+    ResumeService.generalInFlight.set(userId, run);
+    return run;
+  }
+
+  private async generateGeneralResumeOnce(userId: string): Promise<string> {
     if (!this.profileRepository) {
       throw new Error('Profile repository is required for general resume generation');
     }
@@ -558,6 +597,8 @@ export class ResumeService {
     if (exists) {
       throw new Error('A General Resume already exists. You can only generate one.');
     }
+
+    await this.assertMasterUnlocked(userId);
 
     // Load all profile data
     const [profile, uType, exps, projs, skls, edus, extras, awds, certs, affs, pubs, langs, refs] = await Promise.all([
@@ -575,6 +616,13 @@ export class ResumeService {
       this.profileRepository.getLanguages(userId),
       this.profileRepository.getReferences(userId),
     ]);
+
+    // Same hard content gate as OptimizeResumeUseCase. It has to be checked
+    // HERE too: optimizeOrAssembleGeneral catches the use case's throw and
+    // falls back to assembly, which would otherwise save an empty resume.
+    if (exps.length === 0 && edus.length === 0) {
+      throw new Error('Add at least one education or work experience entry to generate a resume.');
+    }
 
     // Determine visible sections based on user type and available data
     // userType is derived from the data, not the (removed) selector.
@@ -622,8 +670,9 @@ export class ResumeService {
 
     track('resume_generation_started', { type: 'free_general' });
 
-    // Optimize via the free general-resume path; fall back to profile-based
-    // assembly if the optimizer fails, so this never hard-fails.
+    // Optimize via the general-resume path (no credit; unlocked by the first
+    // purchase — a locked account gets `master_locked` rethrown); fall back to
+    // profile-based assembly if the optimizer fails, so this never hard-fails.
     const mergedData = await this.optimizeOrAssembleGeneral(resumeData);
     mergedData.sourceProfileHash = this.profileHashOf(resumeData);
 
@@ -634,17 +683,20 @@ export class ResumeService {
   }
 
   /**
-   * Regenerate the General Resume from updated profile data. No cooldown — it's
-   * offered only when the profile actually changed, and the free-tier daily cap
-   * on /api/optimize-general is the cost backstop.
+   * Regenerate the General Resume from updated profile data. Needs the
+   * master-resume unlock (first purchase). No cooldown — it's offered only when
+   * the profile actually changed, and the daily cap on /api/optimize-general
+   * is the cost backstop.
    */
   async regenerateGeneralResume(userId: string, existingResumeId: string): Promise<ResumeData> {
     if (!this.profileRepository) {
       throw new Error('Profile repository is required for general resume regeneration');
     }
 
+    await this.assertMasterUnlocked(userId);
+
     // No cooldown: regeneration is gated by an actual profile change and bounded
-    // by the free-tier daily cap on /api/optimize-general for cost control.
+    // by the daily cap on /api/optimize-general for cost control.
 
     // Load fresh profile data
     const [profile, uType, exps, projs, skls, edus, extras, awds, certs, affs, pubs, langs, refs] = await Promise.all([
@@ -704,7 +756,7 @@ export class ResumeService {
     // Pre-flight gibberish gate — same as the initial general-resume path.
     this.assertContentIsReal(resumeData);
 
-    // Optimize via the free general-resume path; fall back to profile-based
+    // Optimize via the general-resume path (unlocked by the first purchase); fall back to profile-based
     // assembly if the optimizer fails, so regenerate never hard-fails.
     const mergedData = await this.optimizeOrAssembleGeneral(resumeData);
     mergedData.sourceProfileHash = this.profileHashOf(resumeData);

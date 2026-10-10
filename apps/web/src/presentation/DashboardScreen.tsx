@@ -13,7 +13,6 @@ import { Sparkles, ArrowRight, FileText, Loader2, LifeBuoy, AlertTriangle, Mail,
 import { toast } from 'sonner';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { createResumeService, profileRepository } from '../infrastructure/config/dependencies';
-import { ResumeService } from '../application/services/ResumeService';
 import type { ResumeListItem } from '../domain/repositories/IResumeRepository';
 import type { NavScreen } from './hooks/useBrowserNav';
 import { useT, useLocale } from './i18n/LocaleContext';
@@ -24,6 +23,8 @@ import { consumeSearchClick, type JobSearchInput } from './utils/jobSearch';
 import { track } from '../infrastructure/analytics/track';
 import { useRelativeTime } from './components/dashboard/relativeTime';
 import { useDashboardShell } from './components/dashboard/DashboardShell';
+import { apiErrorMessage } from './i18n/apiErrorMessage.js';
+import { ResumeService } from '../application/services/ResumeService';
 
 interface Props {
   onStartApplication: (targetJob: { company: string; title: string; description: string }) => void;
@@ -50,7 +51,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const t = useT();
   const { locale } = useLocale();
   const rel = useRelativeTime();
-  const { credits, generalResume, setGeneralResume, openPurchase, loadingShell } = useDashboardShell();
+  const { credits, generalResume, openPurchase, loadingShell, masterUnlocked, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
 
   const [company, setCompany] = useState('');
   const [title, setTitle] = useState('');
@@ -60,7 +61,6 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const [recent, setRecent] = useState<ResumeListItem[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0); // bumped after a delete to refetch the grid
-  const [buildingMaster, setBuildingMaster] = useState(false);
   // Profile has neither education nor experience → nothing can be generated.
   const [profileEmpty, setProfileEmpty] = useState(false);
   // The slice of the master profile the job-discovery searches derive from.
@@ -145,29 +145,35 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
     onStartApplication({ company: company.trim(), title: title.trim(), description: jd.trim() });
   };
 
+  // Builds through the shell so it can never race the shell's background
+  // build into a duplicate master resume.
   const handleBuildMaster = async () => {
     if (!user || buildingMaster) return;
-    setBuildingMaster(true);
     try {
-      const id = await createResumeService().generateGeneralResume(user.id);
+      const id = await buildMaster();
+      if (!id) return;
       toast.success(t('dashboard.masterReady'));
-      const now = new Date().toISOString();
-      setGeneralResume({ id, title: ResumeService.GENERAL_RESUME_TITLE, date: now, updatedAt: now });
       onOpenResume(id);
     } catch (err: any) {
       console.error(err);
-      toast.error(err?.message || t('dashboard.masterError'));
-      setBuildingMaster(false);
+      // No pack yet (the unlock status failed to load, so the locked card
+      // didn't render): offer the pack instead of an error.
+      if (ResumeService.isMasterLocked(err)) {
+        openPurchase('master_banner');
+        return;
+      }
+      toast.error(apiErrorMessage(err, t) ?? (err?.message || t('dashboard.masterError')));
     }
   };
 
   const masterUpdatedAt = generalResume?.updatedAt ?? generalResume?.date;
 
-  // The master resume is the free foundation every tailored application is
-  // built from, and it is the thing users lose right after profile setup —
-  // when it does not exist yet. So while it is missing it leads the page,
-  // ABOVE the new-application card; once built it drops back to its normal
-  // slot below. Order is the cue, not another line of copy.
+  // The master resume is the profile-built foundation (the first pack's bonus
+  // since migration 032). For an unlocked account that doesn't have one yet,
+  // it leads the page — ABOVE the new-application card — while the shell
+  // builds it in the background; once built it drops back to its normal slot
+  // below. Order is the cue, not another line of copy. A locked account (no
+  // pack yet) never gets this promotion: see `masterLocked` below.
   // `loadingShell` is load-bearing, not defensive. generalResume is null until
   // the shell's fetch returns, so keying only on it made EVERY dashboard load
   // start in the "missing" layout — the banner rendered above the dark card and
@@ -176,17 +182,22 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   // default while loading is the settled position, and the promotion happens
   // only once we actually know the resume is absent.
   const masterMissing = !loadingShell && !generalResume;
+  // No pack bought and no master resume: the banner becomes a quiet "comes
+  // with your first pack" card in its normal slot — never promoted, no ring,
+  // no dot. Users who already have one keep the normal card.
+  const masterLocked = masterMissing && masterUnlocked === false;
+  const masterPromoted = masterMissing && masterUnlocked === true;
   const masterBanner = (
       <section>
         <div
           className={`flex flex-wrap items-center gap-x-5 gap-y-4 rounded-[18px] border px-[clamp(18px,3vw,28px)] py-[22px] shadow-[0_8px_24px_-12px_rgba(199,126,16,0.25)] ${
-            masterMissing ? 'ring-2 ring-accent-300 ring-offset-2 ring-offset-[#F6F4EE]' : ''
+            masterPromoted ? 'ring-2 ring-accent-300 ring-offset-2 ring-offset-[#F6F4EE]' : ''
           }`}
           style={{ background: 'linear-gradient(120deg, #FFFDF8, #FBF4E4)', borderColor: '#EBD9B4' }}
         >
           <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] border bg-white" style={{ borderColor: '#EFE3C8' }}>
             <FileText size={20} className="text-accent-600" />
-            {masterMissing && (
+            {masterPromoted && (
               // Same dot as the nav item, so the two read as one thing to do.
               <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-accent-500 ring-2 ring-white" aria-hidden />
             )}
@@ -194,10 +205,14 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           <span className="min-w-0 flex-[1_1_320px]">
             <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <span className="font-display text-[19px] font-semibold text-brand-700">{t('dashboard.bannerTitle')}</span>
-              <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-emerald-700">{t('dashboard.masterCostNote')}</span>
+              {masterLocked && (
+                <span className="rounded-full bg-accent-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-accent-700">{t('dashboard.masterPackNote')}</span>
+              )}
             </span>
             <span className="mt-1 block text-[13px] leading-relaxed text-charcoal-500">
-              {masterUpdatedAt
+              {masterLocked
+                ? t('dashboard.bannerBodyLocked')
+                : masterUpdatedAt
                 ? t('dashboard.bannerBody', { when: rel(masterUpdatedAt) ?? '' })
                 : t('dashboard.bannerBodyNoDate')}
             </span>
@@ -209,7 +224,16 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           >
             {t('dashboard.bannerUpdateProfile')}
           </a>
-          {generalResume ? (
+          {masterLocked ? (
+            <button
+              type="button"
+              onClick={() => openPurchase('master_banner')}
+              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-charcoal-300 bg-white px-[22px] py-3 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto"
+            >
+              {t('dashboard.masterUnlockCta')}
+              <ArrowRight size={14} />
+            </button>
+          ) : generalResume ? (
             <button
               type="button"
               onClick={() => onOpenResume(generalResume.id)}
@@ -271,7 +295,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
         </p>
       </section>
 
-      {masterMissing && masterBanner}
+      {masterPromoted && masterBanner}
 
       {/* Start a new application (dark) */}
       <section>
@@ -292,7 +316,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
               <Sparkles size={12} className="text-[#FFF7EA]" fill="#FFF7EA" />
             </span>
             <span className="font-display text-[19px] font-semibold leading-tight text-charcoal-50 sm:text-[22px]">{t('dashboard.startTitle')}</span>
-            <span className="ml-auto shrink-0 self-start whitespace-nowrap rounded-full border border-cta-border px-2.5 py-1 text-[11.5px] font-semibold text-[#A89F8C]">{t('dashboard.startCost')}</span>
+            <span className="ml-auto shrink-0 self-start whitespace-nowrap rounded-full border border-cta-border px-2.5 py-1 text-[11.5px] font-semibold text-[#A89F8C]">{onFreeCredit ? t('dashboard.startCostFree') : t('dashboard.startCost')}</span>
           </div>
 
           <div className="relative flex flex-col gap-3.5">
@@ -347,7 +371,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
         </div>
       </section>
 
-      {!masterMissing && masterBanner}
+      {!masterPromoted && masterBanner}
 
       {/* Recent toolkits */}
       <section>
@@ -404,10 +428,14 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           </span>
           <span className="min-w-0 flex-1 text-[13.5px]">
             <strong className="text-brand-700">
-              {(credits ?? 0) > 0 ? t('dashboard.creditsRemaining', { n: credits ?? 0 }) : t('dashboard.creditsNone')}
+              {onFreeCredit
+                ? t('dashboard.creditsWelcome')
+                : (credits ?? 0) > 0 ? t('dashboard.creditsRemaining', { n: credits ?? 0 }) : t('dashboard.creditsNone')}
             </strong>{' '}
             <span className="text-charcoal-500">
-              {(credits ?? 0) > 0 ? t('dashboard.creditsValueHint') : t('dashboard.creditsNoneHint')} ·{' '}
+              {onFreeCredit
+                ? t('dashboard.creditsWelcomeHint')
+                : (credits ?? 0) > 0 ? t('dashboard.creditsValueHint') : t('dashboard.creditsNoneHint')} ·{' '}
               <a href="#" onClick={(e) => { e.preventDefault(); onNavigate('PURCHASES'); }} className="text-charcoal-500 underline transition-colors hover:text-accent-600">
                 {t('dashboard.purchaseHistoryLink')}
               </a>
@@ -415,7 +443,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           </span>
           <button
             type="button"
-            onClick={openPurchase}
+            onClick={() => openPurchase('dashboard_credits')}
             className="rounded-full bg-accent-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-600 transition-colors hover:bg-accent-100"
           >
             {t('dashboard.topUp')}

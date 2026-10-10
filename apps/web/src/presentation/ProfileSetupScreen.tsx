@@ -724,8 +724,22 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     setShowNoResumeWarn(true);
                     return;
                 }
-                toast.success(t('profileSetup.profileDoneToast'));
-                await handleGenerateGeneralResume();
+                // The master resume is the first pack's bonus (migration 032).
+                // Only an account that has bought one (re-walking the wizard)
+                // gets it built here; everyone else gets the one-time free
+                // credit — a full tailored application — instead.
+                const status = user ? await profileRepository.getCreditStatus(user.id).catch(() => null) : null;
+                if (status?.masterUnlocked) {
+                    toast.success(t('profileSetup.profileDoneToast'));
+                    await handleGenerateGeneralResume();
+                    return;
+                }
+                // A failed claim is not fatal: the dashboard retries it.
+                const granted = status?.welcomePending
+                    ? await profileRepository.claimWelcomeCredit().catch(() => null)
+                    : null;
+                toast.success(granted !== null ? t('profileSetup.welcomeCreditToast') : t('profileSetup.profileDoneToast'));
+                onComplete();
             } catch (error) {
                 console.error('Error completing profile:', error);
                 toast.error(t('profileSetup.profileFinishError'));

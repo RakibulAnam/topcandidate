@@ -1,5 +1,11 @@
 import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurricular, Award, Certification, Affiliation, Publication, Language, Reference, NormalizedItemContent } from '../entities/Resume';
 
+export interface CreditStatus {
+    credits: number;
+    masterUnlocked: boolean;
+    welcomePending: boolean;
+}
+
 export interface IProfileRepository {
     // Profile completeness
     getUserType(userId: string): Promise<UserType | null>;
@@ -13,6 +19,16 @@ export interface IProfileRepository {
 
     /** Returns the user's current toolkit_credits balance (0 if missing). */
     getToolkitCredits(userId: string): Promise<number>;
+
+    /**
+     * Credits plus the two purchase-flow flags (migration 032):
+     * `masterUnlocked` — a pack has been bought, so the master resume can be
+     * generated/regenerated; `welcomePending` — profile complete but the
+     * one-time free credit hasn't been claimed yet.
+     */
+    getCreditStatus(userId: string): Promise<CreditStatus>;
+    /** Claims the one-time free credit. New balance when granted, null when not. */
+    claimWelcomeCredit(): Promise<number | null>;
 
     getExperiences(userId: string): Promise<WorkExperience[]>;
     /** Returns the row id (DB-generated for new items). */

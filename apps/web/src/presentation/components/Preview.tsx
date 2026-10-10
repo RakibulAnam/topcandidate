@@ -246,6 +246,11 @@ interface PreviewProps {
   // True while the initial toolkit bundle (/api/toolkit) is still in flight —
   // absent artifacts render as "generating" spinners instead of "missing".
   toolkitPending?: boolean;
+  // One optional muted line from the host (e.g. the builder's "that was your
+  // free application" nudge). Desktop: foot of the sidebar. Mobile: above the
+  // document (the bottom action dock would cover it below). Preview stays
+  // ignorant of credits.
+  footerNudge?: React.ReactNode;
 }
 
 export const Preview: React.FC<PreviewProps> = ({
@@ -261,6 +266,7 @@ export const Preview: React.FC<PreviewProps> = ({
   onRegenerateItem,
   regeneratingItem = null,
   toolkitPending = false,
+  footerNudge = null,
 }) => {
   const t = useT();
   const [isExporting, setIsExporting] = useState(false);
@@ -1316,13 +1322,15 @@ export const Preview: React.FC<PreviewProps> = ({
               </div>
             ))}
           </nav>
-          <p className="mt-auto border-t border-charcoal-200 p-4 text-[11px] leading-snug text-charcoal-400">
+          {footerNudge && <div className="mt-auto border-t border-charcoal-200 px-4 py-3.5">{footerNudge}</div>}
+          <p className={`${footerNudge ? '' : 'mt-auto '}border-t border-charcoal-200 p-4 text-[11px] leading-snug text-charcoal-400`}>
             {t('preview.sidebarFootnote')}
           </p>
         </aside>
 
         {/* Main Content Area */}
         <main className="flex-1 overflow-auto relative" style={{ background: '#F6F4EE' }}>
+          {footerNudge && <div className="px-4 pt-4 md:hidden">{footerNudge}</div>}
           {activeTab === 'resume' && (
             <div className="px-4 py-6 md:px-10 md:py-14">
               <ScaledDocument zoom={zoom}>{resumeContent}</ScaledDocument>

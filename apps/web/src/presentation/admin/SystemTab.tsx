@@ -144,9 +144,10 @@ export const SystemTab: React.FC<{ api: AdminApi }> = ({ api }) => {
           </Section>
 
           <div className="mt-6">
-            {/* Detection only — nothing here blocks anyone. The free tier is a
-                Master Resume (~$0.003/call, 5/day/account) and new accounts get
-                zero credits, so multi-accounting buys AI spend, not product.
+            {/* Detection only — nothing here blocks anyone. The free tier is
+                ONE tailored application per account (the welcome credit,
+                migration 032, ~$0.016 of AI), so multi-accounting buys one kit
+                per fresh account + full profile — small, but watch for it.
                 These numbers exist so the decision to add signup friction is
                 made on evidence rather than fear. */}
             <Section title="Abuse signals (30d)">
