@@ -8,6 +8,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
 
+const toList = (v: unknown): string[] => {
+  if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
+  if (typeof v === 'string') return v.split(',').map((s) => s.trim()).filter(Boolean);
+  return [];
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
@@ -82,7 +88,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       experiences: experiences.data ?? [],
       educations: educations.data ?? [],
       skills: (skills.data ?? []).map((r) => r.name).filter((n): n is string => Boolean(n && n.trim())),
-      projects: projects.data ?? [],
+      // projects.technologies is plain TEXT in prod (schema.sql says text[]) —
+      // normalize to string[] so the client gets one shape either way.
+      projects: (projects.data ?? []).map((pr) => ({ ...pr, technologies: toList(pr.technologies) })),
     },
     notes: notes.data ?? [],
     audit: audit.data ?? [],

@@ -120,7 +120,7 @@ create table projects (
   user_id uuid references profiles(id) not null,
   name text,
   description text,
-  technologies text[],
+  technologies text,  -- free text as typed (Project.technologies is a string; was wrongly documented as text[])
   link text,
   -- "Polished profile" (migration 016) — see experiences.normalized.
   normalized jsonb,

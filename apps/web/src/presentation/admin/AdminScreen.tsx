@@ -270,6 +270,7 @@ export const AdminScreen: React.FC = () => {
         </header>
 
         <main className="flex-1 px-4 lg:px-8 py-6 max-w-7xl w-full mx-auto">
+          <TabErrorBoundary key={tab}>
           {tab === 'dashboard' && <DashboardTab api={api} onOpenPurchase={goPurchase} onOpenDisputes={() => goTab('disputes')} onOpenOrphans={() => goTab('orphans')} />}
           {tab === 'revenue' && <RevenueTab api={api} />}
           {tab === 'product' && <ProductTab api={api} />}
@@ -283,6 +284,7 @@ export const AdminScreen: React.FC = () => {
           {tab === 'parser' && <ParserFailuresTab api={api} />}
           {tab === 'audit' && <AuditLogTab api={api} />}
           {tab === 'settings' && <SettingsTab api={api} onLock={lock} />}
+          </TabErrorBoundary>
         </main>
       </div>
 
@@ -461,3 +463,22 @@ const CommandPalette: React.FC<{ onPick: (o: PaletteOption) => void; onClose: ()
     </div>
   );
 };
+
+// A render error inside one tab (e.g. an unexpected data shape) used to blank
+// the whole panel. Contain it to the tab and show the message instead; keyed
+// by tab in the shell so switching tabs resets it.
+class TabErrorBoundary extends React.Component<React.PropsWithChildren, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) { console.error('[admin] tab crashed:', error, info.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="bg-white border border-red-200 rounded-2xl p-6">
+        <div className="text-sm font-semibold text-red-700">This screen hit an error.</div>
+        <div className="mt-1 font-mono text-[12px] text-charcoal-600 break-all">{this.state.error.message}</div>
+        <Button size="sm" variant="secondary" className="mt-3" onClick={() => this.setState({ error: null })}>Try again</Button>
+      </div>
+    );
+  }
+}

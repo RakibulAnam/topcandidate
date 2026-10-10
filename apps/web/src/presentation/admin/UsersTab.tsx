@@ -291,7 +291,7 @@ interface UserDetailResp {
     experiences: Array<{ id: string; role: string | null; company: string | null; start_date: string | null; end_date: string | null; is_current: boolean | null }>;
     educations: Array<{ id: string; degree: string | null; field: string | null; school: string | null; start_date: string | null; end_date: string | null }>;
     skills: string[];
-    projects: Array<{ id: string; name: string | null; technologies: string[] | null }>;
+    projects: Array<{ id: string; name: string | null; technologies: string[] | string | null }>;
   };
   loginEmail: string | null;
   emailMismatch: boolean;
@@ -530,7 +530,7 @@ const SKILL_CAP = 24;
 const ProfileOverview: React.FC<{ data: UserDetailResp }> = ({ data }) => {
   const bg = data.background!;
   const p = data.profile;
-  const exps = sortExperiences(bg.experiences.filter((e) => (e.role || e.company || '').trim()));
+  const exps = sortExperiences(bg.experiences.filter((e) => e.role?.trim() || e.company?.trim()));
   const edus = [...bg.educations].sort((a, b) => ((a.end_date || '9999') < (b.end_date || '9999') ? 1 : -1));
   const eduLine = (e: typeof edus[number]) => [[e.degree, e.field].filter(Boolean).join(' in '), e.school].filter(Boolean).join(', ');
   const head = exps[0];
@@ -617,12 +617,15 @@ const ProfileOverview: React.FC<{ data: UserDetailResp }> = ({ data }) => {
             <div className="md:col-span-2">
               <Label>Projects</Label>
               <ul className="text-[12.5px] space-y-1">
-                {bg.projects.map((pr) => (
-                  <li key={pr.id}>
-                    <span className="text-brand-700">{pr.name || 'Untitled'}</span>
-                    {pr.technologies && pr.technologies.length > 0 && <span className="text-[11px] text-charcoal-500"> · {pr.technologies.slice(0, 6).join(', ')}</span>}
-                  </li>
-                ))}
+                {bg.projects.map((pr) => {
+                  const tech = Array.isArray(pr.technologies) ? pr.technologies.slice(0, 6).join(', ') : String(pr.technologies ?? '');
+                  return (
+                    <li key={pr.id}>
+                      <span className="text-brand-700">{pr.name || 'Untitled'}</span>
+                      {tech && <span className="text-[11px] text-charcoal-500"> · {tech}</span>}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
