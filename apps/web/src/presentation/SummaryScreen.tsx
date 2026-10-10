@@ -63,7 +63,7 @@ const CHIPS = [
 ] as const;
 
 export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: Props) => {
-  const { credits, openPurchase } = useDashboardShell();
+  const { credits, openPurchase, onFreeCredit } = useDashboardShell();
   // Set when Generate was pressed at zero credits, so a purchase completed
   // without leaving this screen resumes the hand-off. A ref would not do: the
   // resume is driven by `credits` changing, which only a render can observe.
@@ -266,7 +266,7 @@ export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: 
       {/* Sticky CTA */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-charcoal-200 bg-[rgba(246,244,238,.92)] backdrop-blur-[12px]">
         <div className="mx-auto flex max-w-[1240px] flex-wrap items-center gap-x-5 gap-y-2 px-[clamp(16px,4vw,32px)] py-3.5">
-          <span className="text-[13px] text-charcoal-500"><b className="text-brand-700">{t('summary.cost')}</b> {t('summary.youllGet')}</span>
+          <span className="text-[13px] text-charcoal-500"><b className="text-brand-700">{onFreeCredit ? t('summary.costFree') : t('summary.cost')}</b> {t('summary.youllGet')}</span>
           <span className="hidden flex-wrap gap-1.5 sm:flex">
             {CHIPS.map(c => (
               <span key={c.key} className="rounded-full border px-[11px] py-1 text-[11.5px] font-semibold" style={{ color: c.color, background: c.bg, borderColor: c.border }}>
@@ -284,7 +284,7 @@ export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: 
               if (credits === 0) {
                 blockedAtCredits.current = credits;
                 setPendingGenerate(true);
-                openPurchase();
+                openPurchase('summary_gate');
                 return;
               }
               onGenerate([...selected]);

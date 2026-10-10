@@ -86,6 +86,7 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms, onOpenFeature }: Prop
         t('landing.packInclude3'),
         t('landing.packInclude4'),
         t('landing.packInclude5'),
+        t('landing.packInclude6'),
     ];
 
     const steps = [

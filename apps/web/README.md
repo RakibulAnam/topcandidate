@@ -107,7 +107,7 @@ apps/web/
 │   ├── confirm-purchase.ts bKash webhook (HMAC-gated)
 │   ├── optimize.ts         Paid hot-path (optimizer only; charges the credit)
 │   ├── toolkit.ts          Combined toolkit bundle (free; own invocation since 2026-06-11)
-│   ├── optimize-general.ts Free path (optimizer only)
+│   ├── optimize-general.ts Master-resume path (optimizer only; unlocked by the first purchase)
 │   ├── toolkit-item.ts     Per-item retry (free)
 │   └── ...
 ├── src/

@@ -17,7 +17,7 @@ const script = [
   "Prottek ta job, alada jinish chay. Recruiter dekhei bujhe jay, eta generic. [[slnc 1400]]",
   "Tai prottek job er jonno, resume, cover letter, recruiter email, shob tailor kora lagbe. [[slnc 600]]",
   "Top Candidate e job post ta paste korun. Ek minute er moddhe, puro application kit ready. [[slnc 500]]",
-  "Prothom resume free. [[slnc 1200]]",
+  "Prothom application free. [[slnc 1200]]",
 ].join(" ");
 
 run("say", ["-v", "Rishi", "-r", "168", "-o", join(tmp, "voice.aiff"), script]);

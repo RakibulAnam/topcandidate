@@ -36,6 +36,7 @@ export function apiErrorMessage(err: unknown, t: TFn): string | null {
     case 'blocked': return k('apiError.blocked');
     case 'guard_rejected': return k('apiError.guardRejected');
     case 'generation_failed': return k('apiError.generationFailed');
+    case 'master_locked': return k('apiError.masterLocked');
     default: return null;
   }
 }

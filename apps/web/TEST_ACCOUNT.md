@@ -15,8 +15,8 @@ copy, or reset it via the app's "Forgot password" flow.
 ## What it has
 - **Onboarding complete** → lands directly on the dashboard (not the setup wizard).
 - **3 tailored toolkits** (BRAC Bank PLC, Linear, Standard Chartered Bank Bangladesh) → the "Your toolkits" grid + All Toolkits screen have real content.
-- **~32 credits** (of 35 bought) and **7 completed purchases** → the credits pill and Purchase History screen show real data.
-- No Master/General resume yet → the dashboard shows the "Build it from my profile" banner state.
+- **30 credits**, all admin-granted (incl. the migration-032 welcome credit), and **0 completed purchases** since the 2026-09-28 prod reset → Purchase History is empty.
+- **Has a Master/General resume** and is **unlocked** (`master_resume_unlocked_at` set by hand on 2026-10-11 so QA can regenerate it), even though it has no purchase. The locked and "1 free" / new-account states can't be reached on this account — check them by faking the credit status client-side, not by spending credits or editing the row.
 
 ## How to use
 1. `cd apps/web && npm run dev` → open http://localhost:3000/login (or click **Sign in** from the landing page).

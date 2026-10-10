@@ -149,7 +149,8 @@ export class ProxyResumeOptimizer implements IResumeOptimizer {
   }
 }
 
-// Calls /api/optimize-general — free, no credit gate, optimizer only.
+// Calls /api/optimize-general — no credit charge, optimizer only; 402
+// `master_locked` until the account's first purchase (migration 032).
 // Used exclusively for the General Resume feature.
 export class ProxyGeneralResumeOptimizer implements IResumeOptimizer {
   async optimize(data: ResumeData): Promise<OptimizedResumeData> {

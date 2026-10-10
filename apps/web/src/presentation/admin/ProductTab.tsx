@@ -63,8 +63,8 @@ export const ProductTab: React.FC<{ api: AdminApi }> = ({ api }) => {
           <ContentGrid cols={4}>{Array.from({ length: 4 }).map((_, i) => <Card key={i}><Skeleton className="h-16 w-full" /></Card>)}</ContentGrid>
         ) : (
           <ContentGrid cols={4}>
-            <KpiCard label="Paid generations" value={String(data.generations.paidTailored)} tone="brand" sub="tailored resumes" />
-            <KpiCard label="Free generations" value={String(data.generations.freeGeneral)} sub="general resumes" />
+            <KpiCard label="Tailored generations" value={String(data.generations.paidTailored)} tone="brand" sub="1 credit each (incl. welcome credit)" />
+            <KpiCard label="Master resumes" value={String(data.generations.freeGeneral)} sub="first-pack bonus" />
             <KpiCard label="Gross margin" value={`${data.margin.grossMarginPct.toFixed(1)}%`} tone={data.margin.grossMarginPct < 0 ? 'bad' : 'neutral'} sub="approx" />
             <KpiCard label="AI cost" value={usd(data.aiCost.totalCostUsd)} tone="warn" sub={`${data.aiCost.callsWithCost} priced calls`} />
             <KpiCard label="Sessions" value={String(data.traffic.sessions)} sub={`${data.traffic.pageViews} page views`} />
@@ -122,8 +122,8 @@ export const ProductTab: React.FC<{ api: AdminApi }> = ({ api }) => {
             {data ? (
               <DonutChart
                 data={[
-                  { label: 'Paid (tailored)', value: data.generations.paidTailored },
-                  { label: 'Free (general)', value: data.generations.freeGeneral },
+                  { label: 'Tailored (credit)', value: data.generations.paidTailored },
+                  { label: 'Master resume', value: data.generations.freeGeneral },
                   { label: 'Toolkit items', value: data.generations.toolkitItems },
                   { label: 'Extracts', value: data.generations.extracts },
                 ]}

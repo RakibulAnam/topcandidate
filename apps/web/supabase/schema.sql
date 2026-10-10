@@ -14,6 +14,8 @@ create table profiles (
   github text,
   website text,
   toolkit_credits integer not null default 0,  -- paid tailored-resume generations remaining
+  welcome_credit_at timestamptz,              -- one-time free credit granted (migration 032)
+  master_resume_unlocked_at timestamptz,      -- first completed purchase; gates the master resume (032)
   updated_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now())
 );
@@ -2034,3 +2036,69 @@ create index if not exists educations_user_id_idx        on educations (user_id)
 create index if not exists skills_user_id_idx            on skills (user_id);
 create index if not exists projects_user_id_idx          on projects (user_id);
 create index if not exists generated_resumes_user_id_idx on generated_resumes (user_id, created_at desc);
+
+-- WELCOME CREDIT + MASTER-RESUME UNLOCK (migration 032; its one-time backfill
+-- lives only in the migration). New accounts get one free credit once the
+-- profile is complete; the master resume unlocks on the first completed
+-- purchase.
+-- ---------------------------------------------------------------------------
+-- Unlock on first completed purchase.
+-- ---------------------------------------------------------------------------
+create or replace function public.unlock_master_resume_on_purchase()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if new.status = 'completed'
+     and (tg_op = 'INSERT' or old.status is distinct from 'completed') then
+    update public.profiles
+      set master_resume_unlocked_at = now()
+      where id = new.user_id
+        and master_resume_unlocked_at is null;
+  end if;
+  return new;
+end;
+$$;
+revoke execute on function public.unlock_master_resume_on_purchase() from public, anon, authenticated;
+
+drop trigger if exists trg_unlock_master_resume on public.purchases;
+create trigger trg_unlock_master_resume
+  after insert or update of status on public.purchases
+  for each row execute function public.unlock_master_resume_on_purchase();
+
+-- ---------------------------------------------------------------------------
+-- Claim the one-time welcome credit. User-callable; acts on auth.uid() only.
+-- Returns the new balance when a credit was granted, NULL when nothing was
+-- granted (already claimed, or profile not complete yet).
+-- ---------------------------------------------------------------------------
+create or replace function public.claim_welcome_credit()
+returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_balance integer;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated';
+  end if;
+
+  perform set_config('app.credit_reason', 'welcome_credit', true);
+
+  update public.profiles
+    set toolkit_credits = toolkit_credits + 1,
+        welcome_credit_at = now()
+    where id = v_uid
+      and welcome_credit_at is null
+      and coalesce(onboarding_complete, false)
+    returning toolkit_credits into v_balance;
+
+  return v_balance;
+end;
+$$;
+revoke execute on function public.claim_welcome_credit() from public, anon;
+grant execute on function public.claim_welcome_credit() to authenticated;

@@ -1,5 +1,5 @@
 import { supabase } from '../supabase/client';
-import { IProfileRepository } from '../../domain/repositories/IProfileRepository';
+import { IProfileRepository, CreditStatus } from '../../domain/repositories/IProfileRepository';
 import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurricular, Award, Certification, Affiliation, Publication, Language, Reference, NormalizedItemContent, GuidedFields, InputMode } from '../../domain/entities/Resume';
 
 // Guided Mode columns (input_mode/guided/guided_version) round-trip on every
@@ -143,6 +143,26 @@ export class SupabaseProfileRepository implements IProfileRepository {
             .single();
         if (error) throw error;
         return (data?.toolkit_credits as number | null) ?? 0;
+    }
+
+    async getCreditStatus(userId: string): Promise<CreditStatus> {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('toolkit_credits, master_resume_unlocked_at, welcome_credit_at, onboarding_complete')
+            .eq('id', userId)
+            .single();
+        if (error) throw error;
+        return {
+            credits: (data?.toolkit_credits as number | null) ?? 0,
+            masterUnlocked: !!data?.master_resume_unlocked_at,
+            welcomePending: !data?.welcome_credit_at && !!data?.onboarding_complete,
+        };
+    }
+
+    async claimWelcomeCredit(): Promise<number | null> {
+        const { data, error } = await supabase.rpc('claim_welcome_credit');
+        if (error) throw error;
+        return (data as number | null) ?? null;
     }
 
     // --- Experience ---

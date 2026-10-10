@@ -1,19 +1,21 @@
 // POST /api/optimize-general
 //
-// Free path — runs the resume optimizer only (no toolkit generator, no credit
-// gate). Used exclusively for the General Resume feature, which is free for
-// every user. The 24-hour cooldown between regenerations is enforced
-// client-side by ResumeService; this endpoint enforces auth, the overall
-// daily AI-call cap, AND a stricter per-kind cap (KIND_DAILY_CAPS, 5/day) —
-// the free path has no credit gate, so this cap is its only cost control.
+// Master ("General") resume path — runs the resume optimizer only (no toolkit
+// generator, no credit charge). Since migration 032 the master resume is a
+// bonus of the FIRST pack: generating or regenerating it requires
+// `profiles.master_resume_unlocked_at` (stamped by a trigger when a purchase
+// completes). Users who already had one keep it; only new writes are gated.
+// Beyond that, this endpoint enforces auth, the overall daily AI-call cap, AND
+// a stricter per-kind cap (KIND_DAILY_CAPS, 5/day).
 //
 // Request:  { data: ResumeData }
 // Response: { optimized: OptimizedResumeData }
 //
-// 401 if not authenticated; 429 if user over daily cap; 503 if no AI provider.
+// 401 if not authenticated; 402 `master_locked` if no pack bought yet;
+// 429 if user over daily cap; 503 if no AI provider.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { authenticate } from './_lib/auth.js';
+import { authenticate, userClient } from './_lib/auth.js';
 import { reserveCall, logCall, RateLimitError } from './_lib/rateLimit.js';
 import { buildCallMeta } from './_lib/aiTelemetry.js';
 import { publicAiError } from './_lib/aiErrorResponse.js';
@@ -32,6 +34,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!resumeOptimizer) {
     res.status(503).json({ error: 'No AI provider configured on server' });
+    return;
+  }
+
+  // Master-resume unlock gate — checked before reserving a call so a locked
+  // user doesn't burn their daily cap. Read under the user's own JWT (RLS:
+  // own profile row). A DB hiccup fails open, matching the credit gate in
+  // optimize.ts, so a Supabase blip never blocks paying users.
+  const { data: profile, error: profileError } = await userClient(auth.jwt)
+    .from('profiles')
+    .select('master_resume_unlocked_at')
+    .eq('id', auth.userId)
+    .single();
+  if (profileError) {
+    console.warn(`[optimize-general] unlock check failed (fail-open): ${profileError.message}`);
+  } else if (!profile?.master_resume_unlocked_at) {
+    res.status(402).json({
+      error: 'The master resume is included with your first pack.',
+      code: 'master_locked',
+    });
     return;
   }
 

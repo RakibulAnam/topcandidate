@@ -102,7 +102,7 @@ export const PurchaseHistoryScreen = ({ onBack }: Props) => {
         </div>
         <button
           type="button"
-          onClick={openPurchase}
+          onClick={() => openPurchase('other')}
           className="inline-flex items-center gap-2 rounded-xl bg-accent-400 px-[22px] py-3 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300"
         >
           <Plus size={14} /> {t('purchaseHistory.topUpCta')}
