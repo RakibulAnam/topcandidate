@@ -187,8 +187,12 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   };
 
   // First run: the welcome credit is still unspent and nothing has been built.
-  // Drives the welcome banner and the "Welcome" (not "Welcome back") greeting.
-  const firstRun = onFreeCredit && recentLoaded && recentTotal === 0;
+  // Drives the welcome banner, the first-run layout and the "Welcome" (not
+  // "Welcome back") greeting. While the toolkit count is still loading, an
+  // account on its free credit is assumed to be first-run — it almost always
+  // is — so the page doesn't render the normal layout and then rearrange
+  // itself (master card and empty toolkits vanishing, job board jumping up).
+  const firstRun = onFreeCredit && (!recentLoaded || recentTotal === 0);
   // The banner offers "show jobs" only when that board will actually render.
   const hasJobBoard = (() => {
     if (!searchInput) return false;
@@ -201,6 +205,12 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   // read as a request to pay twice.
   const kitReady = !loadingShell && masterUnlocked === false && credits === 0 && recentLoaded && recentTotal > 0
     && openPurchaseState === null;
+  // The free kit is spent and nothing bought. Known as soon as the shell
+  // loads — before the toolkit count and payment state that kitReady also
+  // waits on — so the master card (its own pack ask) is held back from the
+  // start rather than shown and then pulled when the banner arrives. While a
+  // payment is verifying, neither asks.
+  const outOfFreeCredit = !loadingShell && masterUnlocked === false && credits === 0;
   // Never bought = still in the try-it phase, where the return prompt earns its place.
   const guiding = masterUnlocked === false;
 
@@ -354,7 +364,10 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       {/* Hero */}
       <section>
         <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.08em] text-accent-600">{today}</div>
-        <h1 className="font-display text-[clamp(30px,5.5vw,44px)] font-semibold leading-[1.1] text-brand-700">
+        {/* Space held but text hidden until the shell knows the credit state:
+            otherwise a first-time user reads "Welcome back" for half a second
+            and watches it change to "Welcome". */}
+        <h1 className={`font-display text-[clamp(30px,5.5vw,44px)] font-semibold leading-[1.1] text-brand-700 ${loadingShell ? 'invisible' : ''}`}>
           {t(firstRun ? 'dashboard.welcomeFirst' : 'dashboard.welcomeBack', { name: firstName })}
         </h1>
         <p className="mt-2.5 text-base leading-relaxed text-charcoal-500">
@@ -463,7 +476,11 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           for a pack before the user has seen a single kit. */}
       {firstRun && jobBoard}
 
-      {!masterPromoted && !firstRun && masterBanner}
+      {/* Also stepped aside once the free kit is spent (unless the kit-ready
+          banner was hidden): that banner makes the pack ask and names the
+          master resume as the bonus — a second "Get it with a pack" card right
+          below would be the same ask twice. */}
+      {!masterPromoted && !firstRun && !(outOfFreeCredit && !kitReadyHidden) && masterBanner}
 
       {/* Recent toolkits */}
       {!firstRun && (

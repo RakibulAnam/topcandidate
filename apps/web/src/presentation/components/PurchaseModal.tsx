@@ -1189,7 +1189,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
               </div>
             </section>
 
-            {/* Step 2 — Paste TrxID (last child → sits above the docked footer) */}
+            {/* Step 2 — Paste TrxID (last child → sits above the docked footer).
+                The counter's text colours are the readable variants — emerald-700
+                and the hint's #6B6759 — because #10B981 and the old #9F998A were
+                2.5:1 and 2.8:1 on white, too faint for 11px digits. */}
             <section className="mt-6">
               <StepLabel n={2} label={t('purchaseModal.step2Label')} />
               {/* Where the TrxID is — a picture beats "10-character code" for a
@@ -1256,9 +1259,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
                   <span
                     className={[
                       'text-[11px] font-mono tabular-nums tracking-tight transition-colors',
-                      txnIsValid || charCount > TXN_TARGET_LEN ? 'font-bold' : 'text-[#9F998A]',
+                      txnIsValid || charCount > TXN_TARGET_LEN ? 'font-bold' : 'text-[#6B6759]',
                     ].join(' ')}
-                    style={{ color: txnIsValid ? '#10B981' : charCount > TXN_TARGET_LEN ? BKASH : undefined }}
+                    style={{ color: txnIsValid ? '#047857' : charCount > TXN_TARGET_LEN ? BKASH : undefined }}
                     aria-live="polite"
                   >
                     {charCount}/{TXN_TARGET_LEN}

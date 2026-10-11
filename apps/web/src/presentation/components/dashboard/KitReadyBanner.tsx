@@ -62,7 +62,7 @@ export const KitReadyBanner = ({ onBuy, onOpenKit, onHide }: Props) => {
           {/* The pack, drawn: the same five documents, times five. */}
           <div className="relative mx-auto h-[104px] w-[150px] shrink-0 rounded-2xl bg-[#FFF7EF] p-2.5 sm:mx-0">
             <KitArt />
-            <span className="wb-gift absolute -right-3 -top-3 flex h-11 min-w-11 items-center justify-center rounded-full bg-brand-700 px-2 font-display text-[19px] font-semibold text-accent-300">
+            <span aria-hidden="true" className="wb-gift absolute -right-3 -top-3 flex h-11 min-w-11 items-center justify-center rounded-full bg-brand-700 px-2 font-display text-[19px] font-semibold text-accent-300">
               ×{five}
             </span>
           </div>

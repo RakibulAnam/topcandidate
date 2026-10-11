@@ -12,11 +12,12 @@
 // scrolls to the job-discovery board, the other focuses the paste box on the
 // start card. Nothing here is a tour to read and dismiss.
 //
-// Visibility is owned by the caller (welcome credit unspent + zero toolkits).
+// Visibility is owned by the caller (welcome credit unspent + zero toolkits +
+// a profile that isn't empty, since step 1 claims "Profile done").
 // "Hide for now" lasts one browser session (see bannerSession.ts): an unused
 // gift should greet the user again on their next visit, but never nag within one.
 //
-// Colour: a flat accent-400 slab with brand-800 ink (7:1) and cream step
+// Colour: a flat accent-400 slab with brand-800 ink (7.3:1) and cream step
 // tiles — all brand tokens, no gradient, no tint formula, so it needs no new
 // scoped exception. Motion lives in index.css (`wb-*` keyframes) and stops
 // under prefers-reduced-motion.
@@ -177,7 +178,7 @@ export const WelcomeBanner = ({ onShowJobs, onPaste, onHide }: Props) => {
                 <p className="flex items-center gap-1.5 text-[14.5px] font-bold leading-snug sm:justify-center">
                   <span
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                      done ? 'bg-brand-700 text-white' : 'bg-accent-500 text-white'
+                      done ? 'bg-brand-700 text-white' : 'bg-accent-500 text-brand-800'
                     }`}
                   >
                     {done ? <Check size={12} strokeWidth={3} /> : (i + 1).toLocaleString(locale === 'bn' ? 'bn-BD' : 'en-US')}

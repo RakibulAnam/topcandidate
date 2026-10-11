@@ -76,7 +76,8 @@
   100% { background-position: -200% 50%; }
 }
 
-/* ── First-run welcome banner (components/dashboard/WelcomeBanner.tsx) ──────
+/* ── Home guide banners (components/dashboard/WelcomeBanner.tsx; wb-enter and
+   wb-gift are reused by KitReadyBanner + PasteReturnPrompt) ─────────────────
    Each drawn step animates its own action; the step tiles take turns being
    ringed (2 → 3 → 4) so the eye follows the path without reading. All of it
    stops under prefers-reduced-motion. */
