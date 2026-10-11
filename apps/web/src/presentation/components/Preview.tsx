@@ -1020,6 +1020,16 @@ export const Preview: React.FC<PreviewProps> = ({
   // meaningful — cover letter, recruiter email, LinkedIn note, and interview
   // prep are all JD-specific and are hidden for it.
   const TABS = isGeneralResume ? ALL_TABS.filter((tab) => tab.id === 'resume') : ALL_TABS;
+  // A tailored kit's header names the OPEN document first ("Cover Letter ·
+  // Credit Risk Manager"), so it never says "Resume" over a cover letter; the
+  // tab leads because the phone app bar truncates from the end. The General
+  // Resume is only ever a résumé, so it keeps "<title> Resume".
+  const activeTabLabel = ALL_TABS.find((tab) => tab.id === activeTab)?.label ?? t('preview.tabResume');
+  const headerTitle = isGeneralResume
+    ? (data.targetJob?.title
+        ? `${data.targetJob.title} ${t('preview.resumeTitleSuffix')}`
+        : t('preview.resumeTitleFallback'))
+    : (data.targetJob?.title ? `${activeTabLabel} · ${data.targetJob.title}` : activeTabLabel);
   // Grouped artifact nav (desktop sidebar). Labels reuse the existing sidebar keys.
   const TAB_GROUPS: { labelKey: string; ids: PreviewTab[] }[] = isGeneralResume
     ? [{ labelKey: 'preview.sidebarDocs', ids: ['resume'] }]
@@ -1079,9 +1089,7 @@ export const Preview: React.FC<PreviewProps> = ({
           <ArrowLeft size={20} />
         </button>
         <h1 className="flex-1 min-w-0 truncate text-[15px] font-semibold text-charcoal-800">
-          {data.targetJob?.title
-            ? `${data.targetJob.title} ${t('preview.resumeTitleSuffix')}`
-            : t('preview.resumeTitleFallback')}
+          {headerTitle}
         </h1>
         {(!isGeneralResume || isDocTab) && (
           <div className="relative shrink-0">
@@ -1146,9 +1154,7 @@ export const Preview: React.FC<PreviewProps> = ({
               </p>
             )}
             <h1 className="font-display text-[17px] font-semibold text-brand-700 truncate max-w-[42vw]">
-              {data.targetJob?.title
-                ? `${data.targetJob.title} ${t('preview.resumeTitleSuffix')}`
-                : t('preview.resumeTitleFallback')}
+              {headerTitle}
             </h1>
           </div>
         </div>

@@ -103,6 +103,7 @@ export type PurchaseSource =
   | 'summary_gate'
   | 'builder_gate'
   | 'free_used_nudge'
+  | 'kit_ready_banner'
   | 'resubmit'
   | 'other';
 
@@ -121,7 +122,12 @@ const PACKAGE_ID: PackageId = 'five-pack';
 // Direct `import.meta.env.X` so Vite's AST-based static substitution kicks in.
 const OWNER_BKASH_NUMBER = import.meta.env.VITE_BKASH_PAYMENT_NUMBER || '01XXXXXXXXX';
 
-const TXN_MIN_LEN = 6;
+// A bKash TrxID is exactly 10 letters/digits (e.g. DJA9Q3XBQF). The green
+// check means "this looks like a whole TrxID", so it waits for all 10: at the
+// old 6-character minimum it lit up mid-typing and customers read it as
+// "payment approved". The server still accepts 6+ (api/purchase.ts); this is
+// the input cue, not the gate on what bKash may issue.
+const TXN_PATTERN = /^[A-Z0-9]{10}$/;
 const TXN_TARGET_LEN = 10;
 
 // How long the modal watches the purchase row before giving a verdict.
@@ -440,9 +446,11 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   if (!isOpen) return null;
 
   const trimmedTxn = transactionId.trim();
-  const txnIsValid = trimmedTxn.length >= TXN_MIN_LEN;
+  const txnIsValid = TXN_PATTERN.test(trimmedTxn);
   const busy = phase === 'submitting';
-  const charCount = Math.min(trimmedTxn.length, TXN_TARGET_LEN);
+  // Real length, not capped: "13/10" says "too long" where a capped "10/10"
+  // looked complete beside a field that would not submit.
+  const charCount = trimmedTxn.length;
 
   const handleCopyNumber = async () => {
     try {
@@ -1181,16 +1189,40 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
               </div>
             </section>
 
-            {/* Step 2 — Paste TrxID (last child → sits above the docked footer) */}
+            {/* Step 2 — Paste TrxID (last child → sits above the docked footer).
+                The counter's text colours are the readable variants — emerald-700
+                and the hint's #6B6759 — because #10B981 and the old #9F998A were
+                2.5:1 and 2.8:1 on white, too faint for 11px digits. */}
             <section className="mt-6">
               <StepLabel n={2} label={t('purchaseModal.step2Label')} />
-              <div className="mt-2.5">
+              {/* Where the TrxID is — a picture beats "10-character code" for a
+                  customer looking at an SMS full of numbers. Tight crops of a
+                  real SMS (highlighted) and the app receipt (circled). */}
+              <div className="mt-2.5 grid grid-cols-2 gap-2">
+                {([
+                  { src: '/trxid-sms.jpg', label: 'purchaseModal.trxFromSms', alt: 'purchaseModal.trxFromSmsAlt' },
+                  { src: '/trxid-app.jpg', label: 'purchaseModal.trxFromApp', alt: 'purchaseModal.trxFromAppAlt' },
+                ] as const).map((img) => (
+                  <figure key={img.src} className="m-0 overflow-hidden rounded-xl border border-[#EAE6DA] bg-white">
+                    <img
+                      src={img.src}
+                      alt={t(img.alt)}
+                      width={640}
+                      height={214}
+                      loading="lazy"
+                      className="block aspect-[3/1] w-full object-cover"
+                    />
+                    <figcaption className="px-2.5 py-1.5 text-[11.5px] font-semibold text-[#6B6759]">{t(img.label)}</figcaption>
+                  </figure>
+                ))}
+              </div>
+              <div className="mt-3">
                 <div className="relative">
                   <input
                     ref={txnInputRef}
                     type="text"
                     value={transactionId}
-                    onChange={(e) => setTransactionId(e.target.value.toUpperCase())}
+                    onChange={(e) => setTransactionId(e.target.value.toUpperCase().replace(/\s+/g, ''))}
                     placeholder={t('purchaseModal.bkashTxnIdPlaceholder')}
                     disabled={busy}
                     className="block w-full px-4 py-3.5 pr-14 rounded-2xl border-2 bg-white font-mono text-xl tracking-wider text-[#0F1B2D] placeholder:text-[#CFCBBC] placeholder:font-sans placeholder:text-base focus:outline-none disabled:opacity-60 transition-colors"
@@ -1227,9 +1259,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
                   <span
                     className={[
                       'text-[11px] font-mono tabular-nums tracking-tight transition-colors',
-                      txnIsValid ? 'font-bold' : 'text-[#9F998A]',
+                      txnIsValid || charCount > TXN_TARGET_LEN ? 'font-bold' : 'text-[#6B6759]',
                     ].join(' ')}
-                    style={{ color: txnIsValid ? '#10B981' : undefined }}
+                    style={{ color: txnIsValid ? '#047857' : charCount > TXN_TARGET_LEN ? BKASH : undefined }}
                     aria-live="polite"
                   >
                     {charCount}/{TXN_TARGET_LEN}

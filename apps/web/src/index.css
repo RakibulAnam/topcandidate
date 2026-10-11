@@ -76,6 +76,73 @@
   100% { background-position: -200% 50%; }
 }
 
+/* ── Home guide banners (components/dashboard/WelcomeBanner.tsx; wb-enter and
+   wb-gift are reused by KitReadyBanner + PasteReturnPrompt) ─────────────────
+   Each drawn step animates its own action; the step tiles take turns being
+   ringed (2 → 3 → 4) so the eye follows the path without reading. All of it
+   stops under prefers-reduced-motion. */
+.wb-enter { animation: wbEnter 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes wbEnter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.wb-gift { animation: wbWiggle 3.6s ease-in-out 0.6s infinite; }
+@keyframes wbWiggle {
+  0%, 82%, 100% { transform: rotate(0); }
+  86% { transform: rotate(-12deg) scale(1.06); }
+  90% { transform: rotate(10deg) scale(1.06); }
+  94% { transform: rotate(-6deg); }
+}
+.wb-step { animation: wbStepRing 4.5s ease-in-out infinite; }
+.wb-step-1 { animation-delay: 0s; }
+.wb-step-2 { animation-delay: 1.5s; }
+.wb-step-3 { animation-delay: 3s; }
+@keyframes wbStepRing {
+  0%, 36%, 100% { box-shadow: 0 0 0 0 rgba(15, 27, 45, 0); transform: none; }
+  6%, 28% { box-shadow: 0 0 0 3px #0F1B2D; transform: translateY(-2px); }
+}
+.wb-pop { transform-box: fill-box; transform-origin: center; animation: wbPop 0.6s cubic-bezier(0.3, 1.6, 0.5, 1) 0.4s both; }
+@keyframes wbPop {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+.wb-scan { animation: wbScan 3s ease-in-out infinite; }
+@keyframes wbScan {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(-26px, -6px); }
+  60% { transform: translate(-12px, 10px); }
+}
+.wb-select { animation: wbSelect 3s ease-in-out infinite; }
+@keyframes wbSelect {
+  0%, 10% { opacity: 0; }
+  25%, 85% { opacity: 0.22; }
+  100% { opacity: 0; }
+}
+.wb-fly { animation: wbFly 3s ease-in-out infinite; }
+@keyframes wbFly {
+  0%, 30% { opacity: 0; transform: translate(0, 0); }
+  38% { opacity: 1; transform: translate(0, 0); }
+  62% { opacity: 1; transform: translate(50px, -2px); }
+  70%, 100% { opacity: 0; transform: translate(50px, -2px); }
+}
+.wb-filled { animation: wbFilled 3s ease-in-out infinite; }
+@keyframes wbFilled {
+  0%, 62% { opacity: 0; }
+  72%, 92% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.wb-fan { transform-box: view-box; transform-origin: 48px 62px; animation: wbFan 3s ease-in-out infinite; }
+@keyframes wbFan {
+  0%, 15% { transform: rotate(0); }
+  45%, 85% { transform: rotate(var(--wb-r)); }
+  100% { transform: rotate(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-enter, .wb-gift, .wb-step, .wb-pop, .wb-scan, .wb-select, .wb-fly, .wb-filled { animation: none; }
+  .wb-select { opacity: 0.22; }
+  .wb-fan { animation: none; transform: rotate(var(--wb-r)); }
+}
+
 /* ── Metric-matched font fallbacks ─────────────────────────────────────────
  * The brand fonts load from Google Fonts with font-display: swap, so the first
  * paint uses a local font. Unadjusted, Georgia Bold is ~26% wider than Source

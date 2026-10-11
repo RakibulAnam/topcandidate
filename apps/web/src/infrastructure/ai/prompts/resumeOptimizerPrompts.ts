@@ -10,7 +10,7 @@
 // is what let the provider swap from Groq/OpenRouter to direct Gemini without
 // touching a single rule. The rules are the product; the SDK is not.
 
-import { detectFabricatedTokens } from './toolkitContext.js';
+import { detectFabricatedTokens, totalMonths, calculateTotalExperience } from './toolkitContext.js';
 import { ResumeData, OptimizedResumeData } from '../../../domain/entities/Resume.js';
 
 // ────────────────────────────────────────────────
@@ -1198,36 +1198,6 @@ export function inferSeniority(data: ResumeData): string {
   if (months < 60) return 'Mid (2–5 years)';
   if (months < 96) return 'Senior (5–8 years)';
   return 'Senior+ / Staff (8+ years)';
-}
-
-function totalMonths(
-  experience: { startDate: string; endDate: string; isCurrent: boolean }[]
-): number {
-  let totalMonths = 0;
-  experience.forEach(exp => {
-    const start = new Date(exp.startDate);
-    const end = exp.isCurrent ? new Date() : new Date(exp.endDate);
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
-    let months =
-      (end.getFullYear() - start.getFullYear()) * 12 +
-      (end.getMonth() - start.getMonth());
-    if (end.getDate() < start.getDate()) months -= 1;
-    totalMonths += Math.max(0, months);
-  });
-  return totalMonths;
-}
-
-export function calculateTotalExperience(
-  experience: { startDate: string; endDate: string; isCurrent: boolean }[]
-): string {
-  const months = totalMonths(experience);
-  const years = Math.floor(months / 12);
-  const remaining = months % 12;
-
-  if (years === 0 && remaining === 0) return 'No Experience';
-
-  return `${years ? `${years} year${years > 1 ? 's' : ''}` : ''} ${remaining ? `${remaining} month${remaining > 1 ? 's' : ''}` : ''
-    }`.trim();
 }
 
 // ────────────────────────────────────────────────

@@ -34,6 +34,63 @@
 import { ResumeData } from '../../../domain/entities/Resume.js';
 
 // ────────────────────────────────────────────────────────────────────
+// 🧮 EXPERIENCE DURATION
+// ────────────────────────────────────────────────────────────────────
+// Shared by the optimizer ("Total experience:") and the candidate context
+// below. The toolkit prompts only ever saw raw "(2020-09 – Present)" ranges
+// and no today's date, so the model did the arithmetic itself and got it
+// wrong ("five years" for Sep 2020 → Oct 2026, while the résumé said six).
+// Handing it the computed figure removes the guess.
+//
+// Overlapping roles are counted ONCE (intervals merged before summing). A
+// freelance gig held alongside a full-time job is not extra years of career,
+// and now that the prompts say "use this figure", a summed total would hand the
+// model an inflated number to state as fact.
+export function totalMonths(
+  experience: { startDate: string; endDate: string; isCurrent: boolean }[]
+): number {
+  const spans: [Date, Date][] = [];
+  experience.forEach(exp => {
+    const start = new Date(exp.startDate);
+    const end = exp.isCurrent ? new Date() : new Date(exp.endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || end <= start) return;
+    spans.push([start, end]);
+  });
+  spans.sort((a, b) => a[0].getTime() - b[0].getTime());
+  const merged: [Date, Date][] = [];
+  for (const [start, end] of spans) {
+    const last = merged[merged.length - 1];
+    if (last && start <= last[1]) {
+      if (end > last[1]) last[1] = end;
+    } else {
+      merged.push([start, end]);
+    }
+  }
+  let total = 0;
+  for (const [start, end] of merged) {
+    let months =
+      (end.getFullYear() - start.getFullYear()) * 12 +
+      (end.getMonth() - start.getMonth());
+    if (end.getDate() < start.getDate()) months -= 1;
+    total += Math.max(0, months);
+  }
+  return total;
+}
+
+export function calculateTotalExperience(
+  experience: { startDate: string; endDate: string; isCurrent: boolean }[]
+): string {
+  const months = totalMonths(experience);
+  const years = Math.floor(months / 12);
+  const remaining = months % 12;
+
+  if (years === 0 && remaining === 0) return 'No Experience';
+
+  return `${years ? `${years} year${years > 1 ? 's' : ''}` : ''} ${remaining ? `${remaining} month${remaining > 1 ? 's' : ''}` : ''
+    }`.trim();
+}
+
+// ────────────────────────────────────────────────────────────────────
 // 🧱 CANDIDATE CONTEXT
 // ────────────────────────────────────────────────────────────────────
 //
@@ -67,6 +124,10 @@ export function buildCandidateContext(
   if (data.summary) lines.push(`Summary: ${data.summary}`);
 
   if (data.experience.length > 0) {
+    const total = calculateTotalExperience(data.experience);
+    if (total !== 'No Experience') {
+      lines.push(`Total experience: ${total} (computed from the dates below — use this figure for any "N years" claim)`);
+    }
     lines.push('');
     lines.push('Work experience:');
     for (const e of data.experience) {
@@ -83,8 +144,9 @@ export function buildCandidateContext(
         ? [...refined, ...norm.filter(b => !seenB.has(b.trim().toLowerCase()))]
         : (norm.length ? norm
           : e.rawDescription ? [e.rawDescription] : []);
+      const span = e.startDate ? calculateTotalExperience([e]) : '';
       const tenure = e.startDate
-        ? ` (${e.startDate} – ${e.isCurrent ? 'Present' : (e.endDate || 'present')})`
+        ? ` (${e.startDate} – ${e.isCurrent ? 'Present' : (e.endDate || 'present')}${span && span !== 'No Experience' ? `; ${span}` : ''})`
         : '';
       lines.push(`- ${e.role || 'Role'} at ${e.company || 'Company'}${tenure}`);
       for (const b of bullets) lines.push(`    • ${b}`);

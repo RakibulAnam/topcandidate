@@ -104,9 +104,11 @@ const EMPLOYER_KEY: Record<EmployerArchetype, TKey> = {
 interface Props {
   /** The saved profile, already loaded by DashboardScreen. */
   input: JobSearchInput;
+  /** Fired after a tile opens its board in a new tab (Home uses it to offer the paste box on return). */
+  onOpened?: () => void;
 }
 
-export const JobDiscovery: React.FC<Props> = ({ input }) => {
+export const JobDiscovery: React.FC<Props> = ({ input, onOpened }) => {
   const t = useT();
   const { locale } = useLocale();
   const rel = useRelativeTime();
@@ -176,6 +178,7 @@ export const JobDiscovery: React.FC<Props> = ({ input }) => {
       query: card.query,
       family: card.family,
     });
+    onOpened?.();
   };
 
   // Bangla has no letter case, so uppercase does nothing and the tracking only
@@ -183,7 +186,7 @@ export const JobDiscovery: React.FC<Props> = ({ input }) => {
   const eyebrowType = locale === 'bn' ? '' : 'uppercase tracking-[0.09em]';
 
   return (
-    <section>
+    <section id="job-discovery" className="scroll-mt-24">
       <div className="rounded-[20px] bg-brand-700 p-[clamp(18px,3vw,28px)] shadow-[0_24px_48px_-20px_rgba(25,23,18,0.35)]">
         <div className="mb-1.5 flex items-center gap-2.5">
           <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[7px] bg-accent-400">

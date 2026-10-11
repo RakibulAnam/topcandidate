@@ -1,9 +1,12 @@
 // DashboardScreen — the redesigned Home body (the sticky top bar + footer +
 // shared credits/master/purchase state live in <DashboardShell>, which wraps
-// this). Sections top→bottom: dated welcome hero, the dark inline
-// "Start a new application" card, the Master Resume banner, a 6-card recent
-// toolkits grid, the "Roles you might be interested in" job-discovery list, and
-// the credits + help rows.
+// this). Sections top→bottom: dated welcome hero, the first-run WelcomeBanner
+// (free credit unspent, no toolkits) or its successor KitReadyBanner (free kit
+// built, nothing bought, 0 credits), the dark inline "Start a new application"
+// card, the Master Resume banner, a 6-card recent toolkits grid, the "Roles you
+// might be interested in" job-discovery list, and the credits + help rows. On
+// first run the job board moves up under the start card and the master banner
+// + empty toolkits grid are hidden.
 //
 // The start card captures company/title/JD on the dashboard and hands them to
 // App's handleStartFromDashboard, which prefills from the profile and enters
@@ -19,7 +22,12 @@ import { useT, useLocale } from './i18n/LocaleContext';
 import { CONTACT_FACEBOOK_URL, contactMailto } from './support';
 import { ToolkitCard } from './components/dashboard/ToolkitCard';
 import { JobDiscovery } from './components/dashboard/JobDiscovery';
-import { consumeSearchClick, type JobSearchInput } from './utils/jobSearch';
+import { WelcomeBanner } from './components/dashboard/WelcomeBanner';
+import { KitReadyBanner } from './components/dashboard/KitReadyBanner';
+import { sessionFlag, WELCOME_HIDDEN_KEY, KIT_READY_HIDDEN_KEY } from './components/dashboard/bannerSession';
+import { useOpenPurchase } from './hooks/useOpenPurchase';
+import { PasteReturnPrompt } from './components/dashboard/PasteReturnPrompt';
+import { consumeSearchClick, canDeriveJobSearches, type JobSearchInput } from './utils/jobSearch';
 import { track } from '../infrastructure/analytics/track';
 import { useRelativeTime } from './components/dashboard/relativeTime';
 import { useDashboardShell } from './components/dashboard/DashboardShell';
@@ -60,6 +68,18 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
   const [recent, setRecent] = useState<ResumeListItem[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
+  // False until the first toolkit fetch settles — the welcome banner keys on
+  // "zero toolkits", and 0 is also the pre-fetch default.
+  const [recentLoaded, setRecentLoaded] = useState(false);
+  const [welcomeHidden, setWelcomeHidden] = useState(() => sessionFlag(WELCOME_HIDDEN_KEY));
+  const [kitReadyHidden, setKitReadyHidden] = useState(() => sessionFlag(KIT_READY_HIDDEN_KEY));
+  // undefined = still loading, null = no payment in flight.
+  const openPurchaseState = useOpenPurchase();
+  // Set when a job-discovery tile opens its board; the next time this tab
+  // becomes visible, the paste prompt offers the box (see PasteReturnPrompt).
+  const awaitingReturn = useRef(false);
+  const [showPastePrompt, setShowPastePrompt] = useState(false);
+  const startCardRef = useRef<HTMLElement>(null);
   const [refreshKey, setRefreshKey] = useState(0); // bumped after a delete to refetch the grid
   // Profile has neither education nor experience → nothing can be generated.
   const [profileEmpty, setProfileEmpty] = useState(false);
@@ -81,7 +101,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
     let cancelled = false;
     const svc = createResumeService();
     svc.getGeneratedResumesPaginated(user.id, { page: 1, pageSize: RECENT_LIMIT })
-      .then(({ items, total }) => { if (!cancelled) { setRecent(items); setRecentTotal(total); } })
+      .then(({ items, total }) => { if (!cancelled) { setRecent(items); setRecentTotal(total); setRecentLoaded(true); } })
       .catch((err) => { if (!cancelled) console.warn('recent toolkits failed', err); });
     // The hard content gate is education OR experience — if both are empty,
     // no toolkit or general resume can be generated. Surface a banner. The same
@@ -164,6 +184,60 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       }
       toast.error(apiErrorMessage(err, t) ?? (err?.message || t('dashboard.masterError')));
     }
+  };
+
+  // First run: the welcome credit is still unspent and nothing has been built.
+  // Drives the welcome banner, the first-run layout and the "Welcome" (not
+  // "Welcome back") greeting. While the toolkit count is still loading, an
+  // account on its free credit is assumed to be first-run — it almost always
+  // is — so the page doesn't render the normal layout and then rearrange
+  // itself (master card and empty toolkits vanishing, job board jumping up).
+  const firstRun = onFreeCredit && (!recentLoaded || recentTotal === 0);
+  // The banner offers "show jobs" only when that board will actually render.
+  const hasJobBoard = (() => {
+    if (!searchInput) return false;
+    try { return canDeriveJobSearches(searchInput); } catch { return false; }
+  })();
+  // Chapter two of the guide: the free kit is built, nothing bought, balance 0.
+  // This is the "ask after the aha" slot — the welcome banner's successor.
+  // Held back while a bKash payment is being verified (or that isn't known
+  // yet): "Get 5 more kits" beside a pill saying "verifying your ৳200" would
+  // read as a request to pay twice.
+  const kitReady = !loadingShell && masterUnlocked === false && credits === 0 && recentLoaded && recentTotal > 0
+    && openPurchaseState === null;
+  // The free kit is spent and nothing bought. Known as soon as the shell
+  // loads — before the toolkit count and payment state that kitReady also
+  // waits on — so the master card (its own pack ask) is held back from the
+  // start rather than shown and then pulled when the banner arrives. While a
+  // payment is verifying, neither asks.
+  const outOfFreeCredit = !loadingShell && masterUnlocked === false && credits === 0;
+  // Never bought = still in the try-it phase, where the return prompt earns its place.
+  const guiding = masterUnlocked === false;
+
+  useEffect(() => {
+    if (!guiding) return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || !awaitingReturn.current) return;
+      awaitingReturn.current = false;
+      if (!jdRef.current?.value.trim()) setShowPastePrompt(true);
+    };
+    // visibilitychange covers a tab switch (phones, most desktops); focus
+    // covers a board that opened in its own window.
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [guiding]);
+  // Text in the box means they found the box: the prompt has done its job.
+  useEffect(() => { if (jd.trim()) setShowPastePrompt(false); }, [jd]);
+
+  const scrollToJobs = () =>
+    document.getElementById('job-discovery')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const focusPaste = () => {
+    startCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    jdRef.current?.focus({ preventScroll: true });
   };
 
   const masterUpdatedAt = generalResume?.updatedAt ?? generalResume?.date;
@@ -257,6 +331,10 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       </section>
   );
 
+  const jobBoard = searchInput && (
+    <JobDiscovery input={searchInput} onOpened={() => { if (guiding) awaitingReturn.current = true; }} />
+  );
+
   return (
     <div className="flex flex-col gap-[clamp(28px,4vw,40px)]">
       {/* Incomplete-profile warning — no education/experience means nothing can
@@ -286,8 +364,11 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       {/* Hero */}
       <section>
         <div className="mb-3 text-[13px] font-semibold uppercase tracking-[0.08em] text-accent-600">{today}</div>
-        <h1 className="font-display text-[clamp(30px,5.5vw,44px)] font-semibold leading-[1.1] text-brand-700">
-          {t('dashboard.welcomeBack', { name: firstName })}
+        {/* Space held but text hidden until the shell knows the credit state:
+            otherwise a first-time user reads "Welcome back" for half a second
+            and watches it change to "Welcome". */}
+        <h1 className={`font-display text-[clamp(30px,5.5vw,44px)] font-semibold leading-[1.1] text-brand-700 ${loadingShell ? 'invisible' : ''}`}>
+          {t(firstRun ? 'dashboard.welcomeFirst' : 'dashboard.welcomeBack', { name: firstName })}
         </h1>
         <p className="mt-2.5 text-base leading-relaxed text-charcoal-500">
           <strong className="font-semibold text-brand-700">{t('dashboard.heroSubBold')}</strong>
@@ -297,8 +378,26 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
       {masterPromoted && masterBanner}
 
+      {/* Not with an empty profile: its step 1 says "Profile done ✓", which
+          would contradict the incomplete-profile warning above. */}
+      {firstRun && !welcomeHidden && !profileEmpty && (
+        <WelcomeBanner
+          onShowJobs={hasJobBoard ? scrollToJobs : null}
+          onPaste={focusPaste}
+          onHide={() => setWelcomeHidden(true)}
+        />
+      )}
+
+      {kitReady && !kitReadyHidden && (
+        <KitReadyBanner
+          onBuy={() => openPurchase('kit_ready_banner')}
+          onOpenKit={recent[0] ? () => onOpenResume(recent[0].id) : null}
+          onHide={() => setKitReadyHidden(true)}
+        />
+      )}
+
       {/* Start a new application (dark) */}
-      <section>
+      <section ref={startCardRef} className="scroll-mt-24">
         <div className="relative overflow-hidden rounded-[20px] bg-brand-700 p-[clamp(18px,3vw,28px)] shadow-[0_24px_48px_-20px_rgba(25,23,18,0.35)]">
           <div
             className="pointer-events-none absolute inset-0"
@@ -371,9 +470,20 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
         </div>
       </section>
 
-      {!masterPromoted && masterBanner}
+      {/* First run: the job board moves up to sit right under the box it
+          feeds, and the two sections with nothing to say yet step aside — the
+          empty "Your toolkits" list, and the master-resume card that would ask
+          for a pack before the user has seen a single kit. */}
+      {firstRun && jobBoard}
+
+      {/* Also stepped aside once the free kit is spent (unless the kit-ready
+          banner was hidden): that banner makes the pack ask and names the
+          master resume as the bonus — a second "Get it with a pack" card right
+          below would be the same ask twice. */}
+      {!masterPromoted && !firstRun && !(outOfFreeCredit && !kitReadyHidden) && masterBanner}
 
       {/* Recent toolkits */}
+      {!firstRun && (
       <section>
         <div className="mb-5 flex flex-wrap items-baseline gap-x-3.5 gap-y-2.5">
           <h2 className="font-display text-[22px] font-semibold text-brand-700">{t('dashboard.toolkitsTitle')}</h2>
@@ -413,12 +523,20 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           </div>
         )}
       </section>
+      )}
 
       {/* Job discovery — derived from the profile on every render, never
           persisted, never gated on credits (see JobDiscovery). Deliberately
-          BELOW the toolkits: these links send the user off-site, and the
-          toolkits are what they came back for. */}
-      {searchInput && <JobDiscovery input={searchInput} />}
+          BELOW the toolkits once there are any: these links send the user
+          off-site, and the toolkits are what they came back for. */}
+      {!firstRun && jobBoard}
+
+      {showPastePrompt && (
+        <PasteReturnPrompt
+          onPaste={() => { setShowPastePrompt(false); focusPaste(); }}
+          onClose={() => setShowPastePrompt(false)}
+        />
+      )}
 
       {/* Credits + Help rows */}
       <section className="flex flex-wrap gap-5">

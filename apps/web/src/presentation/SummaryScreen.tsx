@@ -192,7 +192,7 @@ export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: 
   };
 
   return (
-    <div className="pb-24">
+    <div className="pb-40 lg:pb-24">
       <a
         href="#"
         onClick={(e) => { e.preventDefault(); onBack(); }}
@@ -263,10 +263,14 @@ export const SummaryScreen = ({ targetJob, onGenerate, onBack, onEditProfile }: 
         </>
       )}
 
-      {/* Sticky CTA */}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-charcoal-200 bg-[rgba(246,244,238,.92)] backdrop-blur-[12px]">
+      {/* Sticky CTA. Below lg it sits ON TOP of the shell's bottom tab bar
+          (~51px + safe area; 50px leaves a 1px tuck under the bar's border) —
+          pinned at bottom-0 the bar covered all but the top 1px of the button. */}
+      <div className="fixed inset-x-0 bottom-[calc(50px+env(safe-area-inset-bottom))] z-30 lg:bottom-0 border-t border-charcoal-200 bg-[rgba(246,244,238,.92)] backdrop-blur-[12px]">
         <div className="mx-auto flex max-w-[1240px] flex-wrap items-center gap-x-5 gap-y-2 px-[clamp(16px,4vw,32px)] py-3.5">
-          <span className="text-[13px] text-charcoal-500"><b className="text-brand-700">{onFreeCredit ? t('summary.costFree') : t('summary.cost')}</b> {t('summary.youllGet')}</span>
+          <span className="text-[13px] text-charcoal-500"><b className="text-brand-700">{onFreeCredit ? t('summary.costFree') : t('summary.cost')}</b>{' '}
+            {/* The chips it introduces are hidden below sm, so the lead-in goes with them. */}
+            <span className="hidden sm:inline">{t('summary.youllGet')}</span></span>
           <span className="hidden flex-wrap gap-1.5 sm:flex">
             {CHIPS.map(c => (
               <span key={c.key} className="rounded-full border px-[11px] py-1 text-[11.5px] font-semibold" style={{ color: c.color, background: c.bg, borderColor: c.border }}>
