@@ -103,6 +103,7 @@ export type PurchaseSource =
   | 'summary_gate'
   | 'builder_gate'
   | 'free_used_nudge'
+  | 'kit_ready_banner'
   | 'resubmit'
   | 'other';
 
