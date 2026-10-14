@@ -12,6 +12,8 @@ POST https://<web-app-domain>/api/confirm-purchase
 
 URL must match `^https?://.+/api/confirm-purchase$`. The operator pastes the full URL into the mobile app's Settings tab.
 
+Use `https://www.topcandidatebd.com/api/confirm-purchase` (Cloudflare-proxied). Do **not** use the `roh-ats-resume-builder.vercel.app` host: it bypasses Cloudflare, and it failed on Robi/Airtel mobile data (2026-10-14). Set the watcher phone's Private DNS to `dns.google` so a carrier resolver can't take it offline.
+
 ## Headers
 
 | Header | Value | Status |
