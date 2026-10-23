@@ -143,6 +143,50 @@
   .wb-fan { animation: none; transform: rotate(var(--wb-r)); }
 }
 
+/* ── Landing "See demo" walkthrough (components/demo/DemoWalkthrough.tsx) ──
+   Beat-driven: the component flips state on a timeline and these classes
+   animate each change once. Under prefers-reduced-motion the component jumps
+   straight to every stage's final state and these are switched off. */
+.demo-in { animation: demoIn 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes demoIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+.demo-pop { animation: demoPop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+@keyframes demoPop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.demo-select { transform-origin: left center; animation: demoSelect 1s ease-out both; }
+@keyframes demoSelect {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.demo-fill { transform-origin: left center; animation: demoFill 0.65s ease-in-out both; }
+@keyframes demoFill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.demo-scan { animation: demoScan 1.6s ease-in-out infinite; }
+@keyframes demoScan {
+  0% { top: 0%; opacity: 0; }
+  10%, 90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+.demo-cursor { animation: demoCursor 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes demoCursor {
+  from { opacity: 0; transform: translate(-40px, -50px); }
+  to { opacity: 1; transform: none; }
+}
+.demo-caret { animation: demoCaret 1s steps(1) infinite; }
+@keyframes demoCaret { 50% { opacity: 0; } }
+/* Bangla has no case, and letter-spacing pulls its conjuncts apart. */
+html[data-locale="bn"] .demo-eyebrow { text-transform: none; letter-spacing: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .demo-in, .demo-pop, .demo-select, .demo-fill, .demo-cursor { animation: none; }
+  .demo-scan, .demo-caret { animation: none; display: none; }
+}
+
 /* ── Metric-matched font fallbacks ─────────────────────────────────────────
  * The brand fonts load from Google Fonts with font-display: swap, so the first
  * paint uses a local font. Unadjusted, Georgia Bold is ~26% wider than Source
