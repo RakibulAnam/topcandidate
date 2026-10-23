@@ -48,13 +48,12 @@ import {
     Sparkles,
     AlertCircle,
     AlertTriangle,
-    ArrowRight,
     FileText,
     SkipForward,
     Star,
 } from 'lucide-react';
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
-import { TutorialVideoCard, TutorialVideoPlayer } from './components/profile/TutorialVideo';
+import { TutorialVideoCard } from './components/profile/TutorialVideo';
 import { ExtractedProfileData } from '../domain/usecases/ExtractResumeUseCase';
 import { isGibberish } from '../application/validation/gibberishDetector';
 import { isValidEmail } from './components/ui/EmailInput';
@@ -183,8 +182,6 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     // Shown at finish when the user skipped BOTH education and experience — no
     // resume/toolkit can be generated until they add one.
     const [showNoResumeWarn, setShowNoResumeWarn] = useState(false);
-    // Bold "Important!" primer shown once when the builder opens.
-    const [showIntro, setShowIntro] = useState(true);
     // Confirmation when skipping past both essentials (education + experience).
     const [skipWarnOpen, setSkipWarnOpen] = useState(false);
     // Field-level errors for the contact step (keyed "personalInfo.<field>") so
@@ -768,59 +765,6 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         return (
             <div className="min-h-screen bg-charcoal-50 flex items-center justify-center">
                 <Loader2 className="animate-spin text-brand-700" size={32} />
-            </div>
-        );
-    }
-
-    // -------------------- Importance primer (before the builder) --------------------
-    if (showIntro) {
-        return (
-            <div className="bg-paper flex min-h-screen items-center justify-center px-5 py-10">
-                <div className="w-full max-w-lg rounded-[24px] border border-charcoal-200 bg-white p-8 shadow-[0_28px_70px_-28px_rgba(25,23,18,0.4)] sm:p-10">
-                    <div className="mb-6 flex items-center gap-3">
-                        <span
-                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl"
-                            style={{ background: 'linear-gradient(135deg, #EC8752, #C95D27)' }}
-                        >
-                            <AlertTriangle size={22} className="text-[#FFF7EA]" />
-                        </span>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-accent-600">
-                            {t('profileSetup.introEyebrow')}
-                        </p>
-                        {/* Let the user read this primer in either language. */}
-                        <div className="ml-auto shrink-0">
-                            <LanguageToggle variant="compact" />
-                        </div>
-                    </div>
-                    <h1 className="mb-5 font-display text-[clamp(40px,10vw,64px)] font-semibold leading-none text-brand-700">
-                        {t('profileSetup.introTitle')}
-                    </h1>
-                    <p className="mb-6 text-[17px] leading-relaxed text-brand-600">
-                        {t('profileSetup.introLead')}
-                    </p>
-                    <ul className="mb-7 flex flex-col gap-3">
-                        {[t('profileSetup.introPoint1'), t('profileSetup.introPoint2'), t('profileSetup.introPoint3')].map((p, i) => (
-                            <li key={i} className="flex items-start gap-3 text-[15px] leading-snug text-brand-600">
-                                <Check size={18} className="mt-0.5 shrink-0 text-accent-500" />
-                                <span>{p}</span>
-                            </li>
-                        ))}
-                    </ul>
-                    <div className="mb-8">
-                        <p className="mb-3 text-[14px] font-medium text-brand-600">
-                            {t('profileSetup.tutorialIntroLabel')}
-                        </p>
-                        <TutorialVideoPlayer placement="intro" />
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => setShowIntro(false)}
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-brand-700 px-6 py-4 text-[15px] font-semibold text-charcoal-50 transition-colors hover:bg-brand-800"
-                    >
-                        {t('profileSetup.introCta')}
-                        <ArrowRight size={17} />
-                    </button>
-                </div>
             </div>
         );
     }
