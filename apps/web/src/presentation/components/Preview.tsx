@@ -51,6 +51,7 @@ import {
   ToolkitItemStatus,
 } from './Builder/ToolkitViewers';
 import { useT } from '../i18n/LocaleContext';
+import { track } from '../../infrastructure/analytics/track';
 
 type PreviewTab = 'resume' | 'coverLetter' | 'outreachEmail' | 'linkedInMessage' | 'interviewPrep';
 
@@ -271,6 +272,12 @@ export const Preview: React.FC<PreviewProps> = ({
   const t = useT();
   const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<PreviewTab>('resume');
+  const resumeKind = isGeneralResume ? 'master' : 'tailored';
+  // One event per tab the user actually looks at (the first, 'resume', marks
+  // the Preview being opened at all).
+  useEffect(() => {
+    track('preview_tab_viewed', { tab: activeTab, kind: resumeKind });
+  }, [activeTab, resumeKind]);
   const [isPdfGenerating, setIsPdfGenerating] = useState(false);
   // Document zoom for the resume / cover-letter sheet. 'fit' scales the pt
   // sheet to the viewport width (default — the right call on phones; clamps to
@@ -453,6 +460,7 @@ export const Preview: React.FC<PreviewProps> = ({
     setIsExporting(true);
     try {
       await onExportWord(data);
+      track('resume_downloaded', { format: 'docx', kind: resumeKind });
       toast.success(t('preview.resumeWordSuccess'));
     } catch (error) {
       console.error('Export failed', error);
@@ -469,6 +477,7 @@ export const Preview: React.FC<PreviewProps> = ({
     setIsExporting(true);
     try {
       await onExportCoverLetter(data);
+      track('cover_letter_downloaded', { format: 'docx' });
       toast.success(t('preview.coverLetterWordSuccess'));
     } catch (error) {
       console.error('Cover letter export failed', error);
@@ -492,8 +501,10 @@ export const Preview: React.FC<PreviewProps> = ({
     try {
       if (activeTab === 'resume') {
         await onExportPDF(data);
+        track('resume_downloaded', { format: 'pdf', kind: resumeKind });
       } else if (onExportCoverLetterPDF) {
         await onExportCoverLetterPDF(data);
+        track('cover_letter_downloaded', { format: 'pdf' });
       }
       toast.success(t('preview.pdfSuccess'));
     } catch (error) {

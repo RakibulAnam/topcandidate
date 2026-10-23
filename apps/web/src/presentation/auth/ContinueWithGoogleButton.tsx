@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../../infrastructure/auth/AuthContext';
 import { useT } from '../i18n/LocaleContext';
+import { track } from '../../infrastructure/analytics/track';
 
 // Official Google "G" mark. Do NOT recolor — Google brand guidelines require
 // the four-color logo as-is.
@@ -49,6 +50,7 @@ export const ContinueWithGoogleButton: React.FC = () => {
     }, []);
 
     const onClick = async () => {
+        track('login_method_clicked', { method: 'google' });
         setLoading(true);
         try {
             await signInWithGoogle();
@@ -58,6 +60,7 @@ export const ContinueWithGoogleButton: React.FC = () => {
         } catch (error) {
             setLoading(false);
             const msg = error instanceof Error ? error.message : '';
+            track('auth_error', { method: 'google', code: msg === 'already_signed_in' ? 'already_signed_in' : 'oauth_start_failed' });
             if (msg === 'already_signed_in') {
                 toast.error(t('login.googleAlreadySignedIn'));
             } else {

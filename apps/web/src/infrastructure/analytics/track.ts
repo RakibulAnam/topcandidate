@@ -14,6 +14,7 @@
 // the profile at signup (see AuthContext).
 
 import { supabase } from '../supabase/client';
+import { detectDevice, detectInAppBrowser } from '../env/browserEnv';
 
 const ANON_KEY = 'topcandidate.anonId';
 const SESSION_KEY = 'topcandidate.sessionId';
@@ -115,12 +116,17 @@ export function track(event: string, props: Record<string, unknown> = {}): void 
       if (ft.fbclid) clickIds.fbclid = ft.fbclid;
       if (ft.ttclid) clickIds.ttclid = ft.ttclid;
 
+      // Where the visitor is: most traffic arrives through Facebook's in-app
+      // browser, which behaves differently enough (OAuth, downloads, no saved
+      // login) that every funnel question needs to be split on it.
+      const env = { inapp: detectInAppBrowser(), device: detectDevice() };
+
       await supabase.from('analytics_events').insert({
         anon_id: getAnonId(),
         user_id: userId,
         session_id: getSessionId(),
         event,
-        props: { ...clickIds, ...props },
+        props: { ...clickIds, ...env, ...props },
         path: typeof window !== 'undefined' ? window.location.pathname : null,
         referrer: ft.referrer ?? (typeof document !== 'undefined' ? document.referrer || null : null),
         utm_source: ft.utm_source ?? null,

@@ -4,6 +4,7 @@ import { resumeExtractor } from '../../../infrastructure/config/dependencies';
 import { ExtractedProfileData } from '../../../domain/usecases/ExtractResumeUseCase';
 import { extractTextFromPdf, MIN_TEXT_LENGTH } from '../../utils/pdfText';
 import { toast } from 'sonner';
+import { track } from '../../../infrastructure/analytics/track';
 
 // pdf.js reads the file in-browser; for text-based PDFs we send only the
 // extracted text (a few KB), so the file size barely matters — keep a generous
@@ -43,10 +44,12 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
     const processFile = async (file: File) => {
         if (file.type !== 'application/pdf') {
             toast.error('Please upload a PDF file.');
+            track('resume_import_result', { ok: false, reason: 'not_pdf' });
             return;
         }
 
         if (file.size > MAX_FILE_BYTES) {
+            track('resume_import_result', { ok: false, reason: 'too_large' });
             toast.error('This file is too large (max 10 MB). Try a smaller PDF, or skip and fill in your profile manually.');
             return;
         }
@@ -75,6 +78,7 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
             //    multimodal read. This path is bounded by the Vercel body limit.
             if (mode === 'file') {
                 if (file.size > MAX_FALLBACK_BYTES) {
+                    track('resume_import_result', { ok: false, reason: 'scanned_too_large', via: mode });
                     toast.error("We couldn't read this PDF's text (it may be scanned or image-based), and it's too large to process as an image (max 3 MB). Try a text-based PDF or a smaller file, or skip and fill in your profile manually.");
                     setIsProcessing(false);
                     return;
@@ -97,15 +101,18 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
                 !!extractedData.projects?.length ||
                 !!extractedData.personalInfo?.fullName;
             if (!gotSomething) {
+                track('resume_import_result', { ok: false, reason: 'empty', via: mode });
                 toast.error("We couldn't read much from this PDF — it may be a scanned image. Try a text-based PDF, or skip and fill in your profile manually.");
                 setIsProcessing(false);
                 return;
             }
 
+            track('resume_import_result', { ok: true, via: mode });
             toast.success('Resume analyzed successfully!');
             onExtracted(extractedData);
         } catch (error) {
             console.error('Parsing error:', error);
+            track('resume_import_result', { ok: false, reason: 'extract_failed' });
             toast.error(error instanceof Error ? error.message : "We couldn't analyze this resume. Try a text-based PDF, or skip and fill in your profile manually.");
             setIsProcessing(false);
         }
@@ -205,7 +212,7 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip }) => {
 
             <button
                 type="button"
-                onClick={onSkip}
+                onClick={() => { track('resume_import_skipped'); onSkip(); }}
                 disabled={isProcessing}
                 className="w-full py-3 px-4 border border-charcoal-300 text-brand-700 bg-white rounded-full font-semibold text-sm hover:border-brand-700 hover:bg-charcoal-50 transition-colors disabled:opacity-50"
             >

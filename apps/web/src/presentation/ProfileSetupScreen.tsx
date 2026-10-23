@@ -5,7 +5,7 @@
 // to a slim progress bar on mobile. Palette follows AGENTS.md §10 — Editorial
 // Ink + Orange, no gradients.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { profileRepository } from '../infrastructure/config/dependencies';
 import { needsPolish, polishInBackground } from './components/profile/polish';
@@ -213,6 +213,19 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     // AI examples/framing stay consistent (experienced once any job exists).
     const userType = inferUserType(experiences);
 
+    // Which step people reach — and so which one they leave on. Held until the
+    // prefill load settles, because the first render always starts at the
+    // import step and a returning user is moved to the contact step after it.
+    const prefillSettled = useRef(false);
+    useEffect(() => {
+        if (loading || !prefillSettled.current) return;
+        track('profile_setup_step_viewed', {
+            step: SetupStep[currentStep],
+            index: getVisibleSteps().indexOf(currentStep),
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentStep, loading]);
+
     useEffect(() => {
         if (user?.id) {
             loadExistingData({ resetStep: true });
@@ -268,6 +281,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             console.error('Error loading profile data:', error);
             setPrefillFailed(true);
         } finally {
+            prefillSettled.current = true;
             setLoading(false);
         }
     };
