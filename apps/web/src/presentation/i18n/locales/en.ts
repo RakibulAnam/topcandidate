@@ -1621,6 +1621,18 @@ export const en = {
     creditsLine: '+{credits} credits · ৳{amount}',
     empty: 'No top-ups yet — your credit purchases will appear here.',
   },
+  // ── In-app browser escape bar (InAppBrowserBar.tsx) ──
+  inappBar: {
+    label: 'Open in your browser',
+    title: 'You’re inside {app}’s browser',
+    titleGeneric: 'You’re inside an app’s browser',
+    body: 'Open Top Candidate in your own browser — your login stays saved and your resume downloads work properly there.',
+    bodyManual: 'For the best experience, open this page in your own browser — your login stays saved and downloads work properly there.',
+    open: 'Open in browser',
+    copy: 'Copy link',
+    copied: 'Copied',
+    iosHint: 'Didn’t open? Tap ⋯ at the top-right, then “Open in external browser”.',
+  },
 } as const;
 
 // Strip literal-narrow types so bn.ts can supply real translations rather
