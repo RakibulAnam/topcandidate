@@ -7,6 +7,7 @@ import { createResumeService, profileRepository } from '../infrastructure/config
 import { AuthProvider, useAuth } from '../infrastructure/auth/AuthContext';
 import { LoginScreen } from './LoginScreen';
 import { LandingScreen } from './LandingScreen';
+import { InAppBrowserBar } from './components/InAppBrowserBar';
 import { Loader2 } from 'lucide-react';
 
 import { Navbar } from './components/Layout/Navbar';
@@ -345,15 +346,25 @@ const AppContent = () => {
   }
 
   if (!user) {
+    // Signed-out screens are where in-app-browser visitors land from ads —
+    // the moment to offer their real browser, before a login is created here.
     if (screen === 'LOGIN') {
-      return <LoginScreen onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })} />;
+      return (
+        <>
+          <LoginScreen onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })} />
+          <InAppBrowserBar />
+        </>
+      );
     }
     return (
-      <LandingScreen
-        onGetStarted={() => navigate({ screen: 'LOGIN' })}
-        onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })}
-        onOpenFeature={(feature) => navigate({ screen: 'FEATURE', feature })}
-      />
+      <>
+        <LandingScreen
+          onGetStarted={() => navigate({ screen: 'LOGIN' })}
+          onOpenTerms={() => navigate({ screen: 'LEGAL_TERMS' })}
+          onOpenFeature={(feature) => navigate({ screen: 'FEATURE', feature })}
+        />
+        <InAppBrowserBar />
+      </>
     );
   }
 
