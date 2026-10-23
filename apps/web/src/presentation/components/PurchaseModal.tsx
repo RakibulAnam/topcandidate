@@ -76,7 +76,7 @@ import {
   Gift,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useT } from '../i18n/LocaleContext';
+import { useLocale, useT } from '../i18n/LocaleContext';
 import { purchasePackage, type PackageId } from '../../infrastructure/api/purchaseClient';
 import { ApiCallError } from '../../infrastructure/ai/proxy/ProxyClients';
 import {
@@ -168,6 +168,7 @@ type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'problem';
 
 export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, source = 'other', masterBonus = false, freeCredit = false, onUseFreeCredit }) => {
   const t = useT();
+  const { locale } = useLocale();
   const [phase, setPhase] = useState<Phase>('idle');
   // Free-kit gift panel: re-armed on every open, dropped by "See packs".
   const [giftView, setGiftView] = useState(true);
@@ -498,7 +499,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
                 <X size={18} />
               </button>
             </div>
-            <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.22em] text-accent-600">
+            <p className={`mt-4 text-[11px] font-bold text-accent-600 ${locale === 'bn' ? '' : 'uppercase tracking-[0.22em]'}`}>
               {t('purchaseModal.giftEyebrow')}
             </p>
             <h2 id="pm-gift-title" className="mt-1.5 font-display text-[28px] font-semibold leading-tight tracking-tight text-[#0F1B2D] md:text-[32px]">

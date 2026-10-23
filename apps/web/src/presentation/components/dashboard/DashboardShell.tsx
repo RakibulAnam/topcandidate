@@ -21,6 +21,7 @@ import { CreditsBadge } from '../CreditsBadge';
 import { VerifyingPurchasePill } from '../Layout/VerifyingPurchasePill';
 import { PurchaseModal, type PurchaseSource } from '../PurchaseModal';
 import { requestJdFocus } from './jdFocusRequest';
+import { MasterResumeInfoDialog, type MasterInfoFrom } from './MasterResumeInfoDialog';
 import { CommandPalette } from './CommandPalette';
 import { LogoMark } from '../ui/LogoMark';
 
@@ -32,6 +33,9 @@ interface ShellCtx {
   /** The only credit left is the free welcome one (never bought a pack). */
   onFreeCredit: boolean;
   openPurchase: (source?: PurchaseSource) => void;
+  /** Never-bought account reaching for the master resume: explain it first
+   *  (MasterResumeInfoDialog), then the pack sheet if they want it. */
+  openMasterInfo: (from: MasterInfoFrom) => void;
   openSearch: () => void;
   generalResume: ResumeListItem | null;
   /** True while a master-resume build is in flight (background or banner). */
@@ -194,15 +198,22 @@ export const DashboardShell: React.FC<Props> = ({
     ?? user?.email?.split('@')[0]
     ?? t('dashboard.greetingFallbackName');
 
+  // Opened from the master-resume explainer: the user has already chosen to
+  // buy, so the sheet skips the free-kit gift panel.
+  const [purchaseSkipGift, setPurchaseSkipGift] = useState(false);
   const openPurchase = useCallback((source: PurchaseSource = 'other') => {
     setPurchaseSource(source);
+    setPurchaseSkipGift(false);
     setPurchaseOpen(true);
   }, []);
+  const [masterInfoFrom, setMasterInfoFrom] = useState<MasterInfoFrom | null>(null);
+  const openMasterInfo = useCallback((from: MasterInfoFrom) => setMasterInfoFrom(from), []);
   const onFreeCredit = masterUnlocked === false && credits === 1;
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
   const onMasterResume = () => {
     if (generalResume) onOpenResume(generalResume.id);
+    else if (masterUnlocked === false) openMasterInfo('nav');
     else onNavigate('DASHBOARD');
   };
 
@@ -251,7 +262,7 @@ export const DashboardShell: React.FC<Props> = ({
     { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
   ];
 
-  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, onFreeCredit, openPurchase, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
+  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, onFreeCredit, openPurchase, openMasterInfo, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -404,8 +415,23 @@ export const DashboardShell: React.FC<Props> = ({
         // A locked account that already has a master resume (pre-032) isn't
         // getting one as a bonus — don't promise it.
         masterBonus={masterUnlocked === false && !generalResume}
-        freeCredit={onFreeCredit}
+        freeCredit={onFreeCredit && !purchaseSkipGift}
         onUseFreeCredit={() => {
+          requestJdFocus();
+          if (active !== 'home') onNavigate('DASHBOARD');
+        }}
+      />
+
+      <MasterResumeInfoDialog
+        isOpen={masterInfoFrom !== null}
+        from={masterInfoFrom ?? 'nav'}
+        onClose={() => setMasterInfoFrom(null)}
+        onGetPack={() => {
+          setPurchaseSource('master_banner');
+          setPurchaseSkipGift(true);
+          setPurchaseOpen(true);
+        }}
+        onTailor={() => {
           requestJdFocus();
           if (active !== 'home') onNavigate('DASHBOARD');
         }}

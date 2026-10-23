@@ -1316,6 +1316,17 @@ export const bn: Dictionary = {
     },
   },
   // ── Landing "See demo" walkthrough (components/demo/DemoWalkthrough.tsx) ──
+  // ── Master resume explainer (components/dashboard/MasterResumeInfoDialog.tsx) ──
+  masterInfo: {
+    eyebrow: 'প্রথম প্যাকের সাথে পাবেন',
+    title: 'আপনার মাস্টার রেজুমে',
+    point1: 'প্রথম কেনাকাটার সাথে আপনি একটা মাস্টার রেজুমে পাবেন, আপনার প্রোফাইল থেকে তৈরি।',
+    point2: 'এরপর আপনি প্রোফাইল আপডেট করলেই এটা নিজে থেকে আপডেট হয়ে যায়।',
+    whenTitle: 'শুধু জব ডেসক্রিপশন নেই এমন চাকরির জন্য ব্যবহার করুন',
+    whenBody: 'জব পোস্ট থাকলে টেইলরড রেজুমে বেশি ভালো ফল দেয় — আর টুলকিট (কভার লেটার, ইমেইল, LinkedIn নোট আর ইন্টারভিউ প্রস্তুতি) আবেদনে সাহায্য করে।',
+    getPack: 'প্যাক নিন',
+    tailor: 'বরং একটা চাকরির জন্য টেইলর করি',
+  },
   demo: {
     dialogLabel: 'ডেমো: একটা জব অ্যাপ্লিকেশন কিট কীভাবে তৈরি হয়',
     badge: 'ডেমো',
