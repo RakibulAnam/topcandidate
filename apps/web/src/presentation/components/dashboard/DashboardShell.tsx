@@ -20,6 +20,7 @@ import { LanguageToggle } from '../../i18n/LanguageToggle';
 import { CreditsBadge } from '../CreditsBadge';
 import { VerifyingPurchasePill } from '../Layout/VerifyingPurchasePill';
 import { PurchaseModal, type PurchaseSource } from '../PurchaseModal';
+import { requestJdFocus } from './jdFocusRequest';
 import { CommandPalette } from './CommandPalette';
 import { LogoMark } from '../ui/LogoMark';
 
@@ -403,6 +404,11 @@ export const DashboardShell: React.FC<Props> = ({
         // A locked account that already has a master resume (pre-032) isn't
         // getting one as a bonus — don't promise it.
         masterBonus={masterUnlocked === false && !generalResume}
+        freeCredit={onFreeCredit}
+        onUseFreeCredit={() => {
+          requestJdFocus();
+          if (active !== 'home') onNavigate('DASHBOARD');
+        }}
       />
     </Ctx.Provider>
   );

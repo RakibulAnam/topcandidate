@@ -31,6 +31,7 @@ import { consumeSearchClick, canDeriveJobSearches, type JobSearchInput } from '.
 import { track } from '../infrastructure/analytics/track';
 import { useRelativeTime } from './components/dashboard/relativeTime';
 import { useDashboardShell } from './components/dashboard/DashboardShell';
+import { consumeJdFocusRequest, JD_FOCUS_EVENT } from './components/dashboard/jdFocusRequest';
 import { apiErrorMessage } from './i18n/apiErrorMessage.js';
 import { ResumeService } from '../application/services/ResumeService';
 
@@ -239,6 +240,19 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
     startCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     jdRef.current?.focus({ preventScroll: true });
   };
+
+  // "Use my free kit" from the purchase sheet (here, or on another screen that
+  // navigated us Home). Waits for the shell to settle: the first-run layout
+  // reorders the page once credits load, and focusing before that scrolls to
+  // where the box used to be.
+  useEffect(() => {
+    if (loadingShell) return;
+    const run = () => { if (consumeJdFocusRequest()) requestAnimationFrame(focusPaste); };
+    run();
+    window.addEventListener(JD_FOCUS_EVENT, run);
+    return () => window.removeEventListener(JD_FOCUS_EVENT, run);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingShell]);
 
   const masterUpdatedAt = generalResume?.updatedAt ?? generalResume?.date;
 

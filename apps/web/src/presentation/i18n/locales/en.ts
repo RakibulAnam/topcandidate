@@ -53,6 +53,14 @@ export const en = {
   },
   purchaseModal: {
     title: 'Get more toolkit generations',
+    // ── Free-kit gift panel (shown first while the welcome credit is unspent) ──
+    giftEyebrow: 'A gift from us',
+    giftTitle: 'Your first kit is free',
+    giftBody: 'You have 1 free kit waiting. Spend it on the job you want most — everything below, written for that one job.',
+    giftMoreTitle: 'Applying to more than one job?',
+    giftMoreBody: 'Give every job its own kit. A resume sent unchanged to every opening is the one recruiters skip. 5 more kits are ৳200 — ৳40 a job.',
+    giftUseCta: 'Use my free kit',
+    giftSeePacks: 'See packs for more jobs',
     subtitle: 'Each tailored application — resume, cover letter, outreach email, LinkedIn note, and interview prep — uses one generation.',
     subtitleShort: 'Pay once via bKash. Credits land in minutes.',
     packEyebrow: 'Career Toolkit Pack',

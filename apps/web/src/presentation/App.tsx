@@ -507,7 +507,7 @@ const AppContent = () => {
           onDashboardClick={() => navigate({ screen: 'DASHBOARD' })}
           showExitBuilder={false}
         />
-        <ProfileScreen />
+        <ProfileScreen onGoHome={() => navigate({ screen: 'DASHBOARD' })} />
       </div>
     );
   }
