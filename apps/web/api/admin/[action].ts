@@ -59,6 +59,7 @@ import productAnalytics from './_handlers/product-analytics.js';
 import marketing from './_handlers/marketing.js';
 import marketingSpend from './_handlers/marketing-spend.js';
 import systemHealth from './_handlers/system-health.js';
+import jobApplications from './_handlers/job-applications.js';
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
@@ -71,6 +72,7 @@ const HANDLERS: Record<string, Handler> = {
   'revenue-export': revenueExport,
   'customer-intelligence': customerIntelligence,
   'product-analytics': productAnalytics,
+  'job-applications': jobApplications,
   'marketing': marketing,
   'marketing-spend': marketingSpend,
   'system-health': systemHealth,
