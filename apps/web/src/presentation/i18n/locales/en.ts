@@ -1345,6 +1345,17 @@ export const en = {
     },
   },
   // ── Landing "See demo" walkthrough (components/demo/DemoWalkthrough.tsx) ──
+  // ── Master resume explainer (components/dashboard/MasterResumeInfoDialog.tsx) ──
+  masterInfo: {
+    eyebrow: 'Comes with your first pack',
+    title: 'Your master resume',
+    point1: 'You get a master resume with your first purchase, built from your profile.',
+    point2: 'After that it updates itself whenever you update your profile.',
+    whenTitle: 'Use it only for jobs with no job description',
+    whenBody: 'When there is a job post, a tailored resume gets better results — and the toolkit (cover letter, email, LinkedIn note and interview prep) helps you apply.',
+    getPack: 'Get a pack',
+    tailor: 'Tailor for a job instead',
+  },
   demo: {
     dialogLabel: 'Demo: how a job application kit is made',
     badge: 'Demo',

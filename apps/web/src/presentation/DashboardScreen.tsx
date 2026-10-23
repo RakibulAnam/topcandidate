@@ -60,7 +60,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const t = useT();
   const { locale } = useLocale();
   const rel = useRelativeTime();
-  const { credits, generalResume, openPurchase, loadingShell, masterUnlocked, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
+  const { credits, generalResume, openPurchase, openMasterInfo, loadingShell, masterUnlocked, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
 
   const [company, setCompany] = useState('');
   const [title, setTitle] = useState('');
@@ -180,7 +180,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       // No pack yet (the unlock status failed to load, so the locked card
       // didn't render): offer the pack instead of an error.
       if (ResumeService.isMasterLocked(err)) {
-        openPurchase('master_banner');
+        openMasterInfo('build_refused');
         return;
       }
       toast.error(apiErrorMessage(err, t) ?? (err?.message || t('dashboard.masterError')));
@@ -315,7 +315,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           {masterLocked ? (
             <button
               type="button"
-              onClick={() => openPurchase('master_banner')}
+              onClick={() => openMasterInfo('dashboard_banner')}
               className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-charcoal-300 bg-white px-[22px] py-3 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto"
             >
               {t('dashboard.masterUnlockCta')}

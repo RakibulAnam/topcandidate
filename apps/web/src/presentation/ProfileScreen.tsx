@@ -24,6 +24,7 @@ import { PhoneInput, isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { PurchaseModal } from './components/PurchaseModal';
 import { requestJdFocus } from './components/dashboard/jdFocusRequest';
+import { MasterResumeInfoDialog } from './components/dashboard/MasterResumeInfoDialog';
 import { apiErrorMessage } from './i18n/apiErrorMessage.js';
 import { ResumeService } from '../application/services/ResumeService';
 
@@ -102,6 +103,10 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
     // The one credit is the unspent welcome gift (never bought).
     const [onFreeCredit, setOnFreeCredit] = useState(false);
     const [purchaseOpen, setPurchaseOpen] = useState(false);
+    // Every master-resume ask on this page explains it first (issue #65); the
+    // pack sheet then opens without the free-kit gift panel — they chose to buy.
+    const [masterInfoOpen, setMasterInfoOpen] = useState(false);
+    const [purchaseSkipGift, setPurchaseSkipGift] = useState(false);
 
     // Hash of the profile AS SAVED — set on load and after each successful save,
     // never from live edit state. Compared against the hash the general resume
@@ -218,7 +223,7 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
             console.error('General resume generation failed:', error);
             if (ResumeService.isMasterLocked(error)) {
                 setMasterUnlocked(false);
-                setPurchaseOpen(true);
+                setMasterInfoOpen(true);
                 return;
             }
             const message = apiErrorMessage(error, t) ?? (error instanceof Error ? error.message : t('profile.generalResumeFailed'));
@@ -240,7 +245,7 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
             console.error('General resume regeneration failed:', error);
             if (ResumeService.isMasterLocked(error)) {
                 setMasterUnlocked(false);
-                setPurchaseOpen(true);
+                setMasterInfoOpen(true);
                 return;
             }
             const message = apiErrorMessage(error, t) ?? (error instanceof Error ? error.message : t('profile.generalResumeFailed'));
@@ -352,7 +357,7 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                     </p>
                     <button
                         type="button"
-                        onClick={() => setPurchaseOpen(true)}
+                        onClick={() => setMasterInfoOpen(true)}
                         className="w-full shrink-0 rounded-lg border border-charcoal-300 px-4 py-2 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto"
                     >
                         {t('profile.lockedCta')}
@@ -605,8 +610,16 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                 onSuccess={() => { void handlePurchaseSuccess(); }}
                 source="profile_master"
                 masterBonus={!generalResume}
-                freeCredit={onFreeCredit}
+                freeCredit={onFreeCredit && !purchaseSkipGift}
                 onUseFreeCredit={() => { requestJdFocus(); onGoHome?.(); }}
+            />
+
+            <MasterResumeInfoDialog
+                isOpen={masterInfoOpen}
+                from="profile"
+                onClose={() => setMasterInfoOpen(false)}
+                onGetPack={() => { setPurchaseSkipGift(true); setPurchaseOpen(true); }}
+                onTailor={() => { requestJdFocus(); onGoHome?.(); }}
             />
         </div>
     );
