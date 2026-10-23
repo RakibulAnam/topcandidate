@@ -23,6 +23,7 @@ import {
   PrepTopic,
 } from '../../../domain/entities/Resume';
 import { useT } from '../../i18n/LocaleContext';
+import { track } from '../../../infrastructure/analytics/track';
 
 // ─────────────────────────────────────────────────────────────
 // Status card (missing / failed / regenerating)
@@ -161,10 +162,15 @@ const CopyButton = ({
   text,
   label,
   variant = 'secondary',
+  item,
+  part,
 }: {
   text: string;
   label: string;
   variant?: 'primary' | 'secondary';
+  /** Stable, untranslated ids for `toolkit_item_copied` (label is localized). */
+  item: 'outreach' | 'linkedin' | 'interview';
+  part: 'subject' | 'body' | 'full' | 'notes' | 'brief';
 }) => {
   const t = useT();
   const [copied, setCopied] = useState(false);
@@ -172,6 +178,7 @@ const CopyButton = ({
   const onCopy = async () => {
     const ok = await copyToClipboard(text, label, t);
     if (ok) {
+      track('toolkit_item_copied', { item, part });
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -247,7 +254,7 @@ export const OutreachEmailViewer = ({ email }: { email: OutreachEmail }) => {
             </p>
             <p className="font-semibold text-brand-700 truncate">{email.subject}</p>
           </div>
-          <CopyButton text={email.subject} label={t('toolkit.outreachSubject')} />
+          <CopyButton text={email.subject} label={t('toolkit.outreachSubject')} item="outreach" part="subject" />
         </div>
 
         <div className="px-5 py-5">
@@ -255,8 +262,8 @@ export const OutreachEmailViewer = ({ email }: { email: OutreachEmail }) => {
             {email.body}
           </pre>
           <div className="flex flex-wrap gap-2">
-            <CopyButton text={email.body} label={t('toolkit.outreachBody')} />
-            <CopyButton text={fullText} label={t('toolkit.outreachSubjectAndBody')} variant="primary" />
+            <CopyButton text={email.body} label={t('toolkit.outreachBody')} item="outreach" part="body" />
+            <CopyButton text={fullText} label={t('toolkit.outreachSubjectAndBody')} variant="primary" item="outreach" part="full" />
           </div>
         </div>
       </div>
@@ -295,7 +302,7 @@ export const LinkedInMessageViewer = ({ message }: { message: string }) => {
               <span className="text-red-600">{t('toolkit.linkedinTrim')}</span>
             )}
           </div>
-          <CopyButton text={message} label={t('toolkit.linkedinNote')} variant="primary" />
+          <CopyButton text={message} label={t('toolkit.linkedinNote')} variant="primary" item="linkedin" part="full" />
         </div>
       </div>
     </ViewerShell>
@@ -385,7 +392,7 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
             <p className="text-brand-700">{answerStrategy}</p>
           </div>
           <div className="pt-2">
-            <CopyButton text={fullText} label={t('toolkit.interviewQNotes')} />
+            <CopyButton text={fullText} label={t('toolkit.interviewQNotes')} item="interview" part="notes" />
           </div>
         </div>
       )}
@@ -612,7 +619,7 @@ export const InterviewPrepViewer = ({
           >
             {allExpanded ? t('toolkit.interviewCollapseAll') : t('toolkit.interviewExpandAll')}
           </button>
-          <CopyButton text={fullBrief} label={t('toolkit.interviewBrief')} variant="primary" />
+          <CopyButton text={fullBrief} label={t('toolkit.interviewBrief')} variant="primary" item="interview" part="brief" />
         </div>
       </div>
 

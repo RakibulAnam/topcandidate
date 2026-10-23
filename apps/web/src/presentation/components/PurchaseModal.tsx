@@ -229,8 +229,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   }, [isOpen, openPurchase?.paymentReference, trackedTxn]);
 
   // Funnel: one event per open (effect re-fires only when isOpen flips true).
+  const txnStartedTracked = useRef(false);
   useEffect(() => {
     if (!isOpen) return;
+    txnStartedTracked.current = false;
     track('purchase_modal_opened', { source, masterBonus });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -456,6 +458,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
     try {
       await navigator.clipboard.writeText(OWNER_BKASH_NUMBER);
       setCopied(true);
+      track('purchase_number_copied', { source });
     } catch {
       toast.error(t('toolkit.copyFailed'));
     }
@@ -956,6 +959,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   // it is genuinely finished (finishAndClose after a confirmed purchase, and
   // handleUseDifferentTxn when the customer abandons this ID on purpose).
   const handleDismiss = () => {
+    // Where in the flow they gave up — 'idle' with no TrxID typed is the
+    // "looked at the price and left" case.
+    track('purchase_modal_closed', { source, phase, typedTxn: trimmedTxn.length > 0 });
     onClose();
   };
 
@@ -1222,7 +1228,12 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
                     ref={txnInputRef}
                     type="text"
                     value={transactionId}
-                    onChange={(e) => setTransactionId(e.target.value.toUpperCase().replace(/\s+/g, ''))}
+                    onChange={(e) => {
+                      // First keystroke per open: they have (probably) paid and are now
+                      // typing the TrxID — the step between "copied the number" and "submitted".
+                      if (!txnStartedTracked.current) { txnStartedTracked.current = true; track('purchase_txn_started', { source }); }
+                      setTransactionId(e.target.value.toUpperCase().replace(/\s+/g, ''));
+                    }}
                     placeholder={t('purchaseModal.bkashTxnIdPlaceholder')}
                     disabled={busy}
                     className="block w-full px-4 py-3.5 pr-14 rounded-2xl border-2 bg-white font-mono text-xl tracking-wider text-[#0F1B2D] placeholder:text-[#CFCBBC] placeholder:font-sans placeholder:text-base focus:outline-none disabled:opacity-60 transition-colors"

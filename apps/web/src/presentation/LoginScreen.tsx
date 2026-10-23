@@ -42,6 +42,7 @@ import { useT } from './i18n/LocaleContext';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { ContinueWithGoogleButton } from './auth/ContinueWithGoogleButton';
 import { LogoMark } from './components/ui/LogoMark';
+import { track } from '../infrastructure/analytics/track';
 
 type Mode = 'login' | 'signup' | 'forgot';
 
@@ -53,6 +54,18 @@ interface LoginScreenProps {
 // form. Requires the Supabase Google provider to be configured (Client ID +
 // Secret) — see `pending-work/oauth-google-signin.md` §11.
 const OAUTH_GOOGLE_ENABLED = true;
+
+/** A short, stable code for `auth_error` — never the raw message, which can
+ *  echo back what the user typed. */
+const authErrorCode = (message: string): string => {
+    const m = message.toLowerCase();
+    if (m.includes('invalid login credentials')) return 'invalid_credentials';
+    if (m.includes('already registered') || m.includes('already been registered')) return 'already_registered';
+    if (m.includes('email not confirmed')) return 'email_not_confirmed';
+    if (m.includes('rate limit') || m.includes('too many')) return 'rate_limited';
+    if (m.includes('network') || m.includes('fetch')) return 'network';
+    return 'other';
+};
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
     const t = useT();
@@ -82,6 +95,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         clearErrors();
+        track('login_method_clicked', { method: 'email', mode });
 
         // Password-reset path — no password field.
         if (isForgot) {
@@ -103,6 +117,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
 
         if (password.length < 6) {
             setPasswordError(t('login.weakPassword'));
+            track('auth_error', { method: 'email', mode, code: 'weak_password' });
             return;
         }
 
@@ -115,6 +130,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
             if (!result.valid) {
                 setEmailError(result.reason);
                 setLoading(false);
+                track('auth_error', { method: 'email', mode, code: 'email_rejected' });
                 return;
             }
         }
@@ -136,6 +152,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
         } catch (error) {
             const message = error instanceof Error ? error.message : t('login.authFailedFallback');
             setAuthError(message);
+            track('auth_error', { method: 'email', mode, code: authErrorCode(message) });
         } finally {
             setLoading(false);
         }
@@ -144,6 +161,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onOpenTerms }) => {
     const switchMode = (next: Mode) => {
         clearErrors();
         setMode(next);
+        track('login_mode_switched', { to: next });
     };
 
     return (
