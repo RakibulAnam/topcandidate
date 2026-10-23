@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowRight, Check, Plus, Minus, Menu, X, Sparkles, Quote } from 'lucide-react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
+import { ArrowRight, Check, Plus, Minus, Menu, X, Sparkles, Quote, Play } from 'lucide-react';
 import { LanguageToggle } from './i18n/LanguageToggle';
 import { contactMailto } from './support';
 import { track } from '../infrastructure/analytics/track';
@@ -13,6 +13,11 @@ interface Props {
     /** Opens a public feature page in-app; the link's href is the crawlable URL. */
     onOpenFeature?: (slug: FeatureSlug) => void;
 }
+
+// The demo is its own chunk: nothing of it ships with the landing page's first
+// load. `loadDemo` is also called on hover/touch of the button to warm it.
+const loadDemo = () => import('./components/demo/DemoWalkthrough');
+const DemoWalkthrough = lazy(loadDemo);
 
 const Eyebrow = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
     <p className={`text-[11px] uppercase tracking-[0.22em] text-accent-700 font-semibold ${className}`}>
@@ -52,6 +57,20 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms, onOpenFeature }: Prop
     // Funnel: record the landing view once per mount (fire-and-forget).
     useEffect(() => {
         track('landing_viewed');
+    }, []);
+
+    // "See demo" — also opened by a `?demo` link (for ads and posts that want
+    // to send people straight into it).
+    const [demoOpen, setDemoOpen] = useState(false);
+    const openDemo = (source: string) => {
+        track('demo_opened', { source });
+        setDemoOpen(true);
+    };
+    useEffect(() => {
+        try {
+            if (new URLSearchParams(window.location.search).has('demo')) openDemo('link');
+        } catch { /* ignore */ }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const scrollTo = (id: string) => {
@@ -207,10 +226,15 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms, onOpenFeature }: Prop
                             </button>
                             <button
                                 type="button"
-                                onClick={() => scrollTo('toolkit')}
+                                onClick={() => openDemo('hero')}
+                                onPointerEnter={() => { void loadDemo(); }}
+                                onTouchStart={() => { void loadDemo(); }}
                                 className="inline-flex items-center justify-center gap-2 px-6 py-4 text-[15px] font-semibold text-brand-700 bg-charcoal-50 border border-charcoal-300 rounded-full hover:border-brand-700 transition-colors"
                             >
-                                {t('landing.heroCtaSecondary')}
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent-500 text-brand-800">
+                                    <Play size={12} className="translate-x-px" fill="currentColor" />
+                                </span>
+                                {t('landing.heroCtaDemo')}
                             </button>
                         </div>
 
@@ -269,6 +293,22 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms, onOpenFeature }: Prop
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* The mock is the demo's poster: tapping it plays the demo. */}
+                                <button
+                                    type="button"
+                                    onClick={() => openDemo('mock')}
+                                    onPointerEnter={() => { void loadDemo(); }}
+                                    className="group absolute inset-0 z-10 flex items-center justify-center rounded-xl"
+                                    aria-label={t('landing.heroCtaDemo')}
+                                >
+                                    <span className="inline-flex items-center gap-2 rounded-full bg-brand-700/90 px-4 py-2.5 text-[13px] font-semibold text-charcoal-50 shadow-xl shadow-brand-900/25 transition-transform group-hover:scale-105">
+                                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent-500 text-brand-800">
+                                            <Play size={12} className="translate-x-px" fill="currentColor" />
+                                        </span>
+                                        {t('landing.heroCtaDemo')}
+                                    </span>
+                                </button>
 
                                 {/* floating proof chip (sm+) */}
                                 <div className="hidden sm:flex absolute -bottom-7 left-3 bg-brand-700 text-charcoal-50 rounded-2xl px-4 py-3 shadow-xl shadow-brand-900/20 items-center gap-3 max-w-[230px] text-left">
@@ -558,6 +598,12 @@ export const LandingScreen = ({ onGetStarted, onOpenTerms, onOpenFeature }: Prop
                     <p className="text-[12.5px] text-brand-400 whitespace-nowrap">{t('landing.footerCopyright', { year: new Date().getFullYear() })}</p>
                 </div>
             </footer>
+
+            {demoOpen && (
+                <Suspense fallback={<div className="fixed inset-0 z-[70] bg-paper" aria-hidden />}>
+                    <DemoWalkthrough onClose={() => setDemoOpen(false)} onGetStarted={onGetStarted} />
+                </Suspense>
+            )}
         </div>
     );
 };
