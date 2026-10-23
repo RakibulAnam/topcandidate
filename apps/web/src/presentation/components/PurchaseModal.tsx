@@ -73,6 +73,7 @@ import {
   MessageCircle,
   Phone,
   RefreshCw,
+  Gift,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useT } from '../i18n/LocaleContext';
@@ -115,6 +116,12 @@ interface Props {
   source?: PurchaseSource;
   /** Never bought a pack: list the master resume as the first pack's bonus. */
   masterBonus?: boolean;
+  /** The account's one credit is the unspent welcome gift (never bought). The
+   *  sheet then opens on the gift panel instead of the pack. */
+  freeCredit?: boolean;
+  /** "Use my free kit" — take the user to the job-post box. Without it the
+   *  button just closes the sheet. */
+  onUseFreeCredit?: () => void;
 }
 
 const PACKAGE_ID: PackageId = 'five-pack';
@@ -159,9 +166,17 @@ const BKASH_DEEP = '#B80E5D';
 
 type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'problem';
 
-export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, source = 'other', masterBonus = false }) => {
+export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, source = 'other', masterBonus = false, freeCredit = false, onUseFreeCredit }) => {
   const t = useT();
   const [phase, setPhase] = useState<Phase>('idle');
+  // Free-kit gift panel: re-armed on every open, dropped by "See packs".
+  const [giftView, setGiftView] = useState(true);
+  useEffect(() => {
+    if (!isOpen) return;
+    setGiftView(true);
+    if (freeCredit) track('purchase_gift_view', { action: 'shown', source });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
   const [transactionId, setTransactionId] = useState('');
   const [senderMsisdn, setSenderMsisdn] = useState('');
   const [copied, setCopied] = useState(false);
@@ -444,6 +459,93 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   }, [isOpen, phase]);
 
   if (!isOpen) return null;
+
+  // ── Free-kit gift panel ─────────────────────────────────────────────────
+  // Someone still holding the welcome credit who opens this sheet is asking
+  // "what does it cost?" before they have seen what they get. Answer the
+  // question they should be asking first: their first kit is already paid
+  // for. Never shown with a payment in flight — that sheet must resume.
+  const showGift = giftView && freeCredit && phase === 'idle' && !openPurchase?.paymentReference;
+  if (showGift) {
+    const giftItems = [t('purchaseModal.feature1'), t('purchaseModal.feature2'), t('purchaseModal.feature3'), t('purchaseModal.feature4')];
+    const closeGift = () => { track('purchase_gift_view', { action: 'close', source }); onClose(); };
+    return (
+      <div
+        ref={overlayRef}
+        className="fixed inset-x-0 top-[var(--vv-top,0px)] z-50 flex h-[var(--sheet-h,100dvh)] items-end justify-center p-0 md:inset-0 md:top-0 md:h-auto md:items-center md:p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pm-gift-title"
+      >
+        <div className="absolute inset-0 bg-[#09121F]/65 backdrop-blur-md" onClick={closeGift} />
+        <div className="relative flex max-h-full w-full flex-col overflow-y-auto rounded-t-3xl bg-white shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-8 motion-safe:duration-300 md:max-w-lg md:rounded-[28px] md:slide-in-from-bottom-0 md:zoom-in-95 md:duration-200">
+          <div className="flex justify-center pt-2.5 md:hidden">
+            <span className="h-1 w-9 rounded-full bg-[#EAE6DA]" aria-hidden />
+          </div>
+          <div className="px-6 pb-6 pt-4 md:px-9 md:pb-9 md:pt-8">
+            <div className="flex items-start justify-between gap-3">
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent-100 text-accent-600">
+                <Gift size={24} />
+              </span>
+              <button
+                type="button"
+                onClick={closeGift}
+                className="-mr-2 -mt-1 shrink-0 rounded-full p-2 text-[#9F998A] transition-colors hover:bg-[#F2F1EB] hover:text-[#0F1B2D]"
+                aria-label={t('common.close')}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.22em] text-accent-600">
+              {t('purchaseModal.giftEyebrow')}
+            </p>
+            <h2 id="pm-gift-title" className="mt-1.5 font-display text-[28px] font-semibold leading-tight tracking-tight text-[#0F1B2D] md:text-[32px]">
+              {t('purchaseModal.giftTitle')}
+            </h2>
+            <p className="mt-2.5 text-[14.5px] leading-relaxed text-[#4A4639]">
+              {t('purchaseModal.giftBody')}
+            </p>
+            <ul className="mt-4 space-y-2">
+              {giftItems.map((f, i) => (
+                <li key={i} className="flex items-center gap-2.5 text-[14px] text-[#0F1B2D]">
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
+                    <Check size={12} strokeWidth={3.5} />
+                  </span>
+                  <span>{f}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-5 rounded-2xl border border-[#E5E1D8] bg-[#FAF7F0] px-4 py-3.5">
+              <p className="text-[13.5px] font-semibold text-[#0F1B2D]">{t('purchaseModal.giftMoreTitle')}</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-[#6B6759]">{t('purchaseModal.giftMoreBody')}</p>
+            </div>
+            <div className="mt-6 flex flex-col gap-2.5">
+              <button
+                type="button"
+                autoFocus
+                onClick={() => {
+                  track('purchase_gift_view', { action: 'use', source });
+                  onClose();
+                  onUseFreeCredit?.();
+                }}
+                className="inline-flex min-h-[52px] w-full items-center justify-center gap-2 rounded-full bg-brand-700 px-6 text-[15px] font-semibold text-charcoal-50 outline-none transition-colors hover:bg-brand-800 focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2"
+              >
+                {t('purchaseModal.giftUseCta')}
+                <ArrowRight size={17} />
+              </button>
+              <button
+                type="button"
+                onClick={() => { track('purchase_gift_view', { action: 'see_packs', source }); setGiftView(false); }}
+                className="inline-flex min-h-[48px] w-full items-center justify-center rounded-full border border-[#D8D3C4] px-6 text-[14px] font-semibold text-[#0F1B2D] transition-colors hover:border-[#0F1B2D]"
+              >
+                {t('purchaseModal.giftSeePacks')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const trimmedTxn = transactionId.trim();
   const txnIsValid = TXN_PATTERN.test(trimmedTxn);

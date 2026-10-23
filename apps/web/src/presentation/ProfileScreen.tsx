@@ -23,6 +23,7 @@ import { ReferenceSection } from './components/profile/ReferenceSection';
 import { PhoneInput, isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { PurchaseModal } from './components/PurchaseModal';
+import { requestJdFocus } from './components/dashboard/jdFocusRequest';
 import { apiErrorMessage } from './i18n/apiErrorMessage.js';
 import { ResumeService } from '../application/services/ResumeService';
 
@@ -52,7 +53,12 @@ const TAB_KEYS: Record<TabId, 'profile.tabPersonal'> = {
     References: 'profile.tabReferences' as 'profile.tabPersonal',
 };
 
-export const ProfileScreen = () => {
+interface ProfileScreenProps {
+    /** Navigate Home — used by the purchase sheet's "Use my free kit". */
+    onGoHome?: () => void;
+}
+
+export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
     const { user, signOut } = useAuth();
     const t = useT();
     const [activeTab, setActiveTab] = useState<TabId>('Personal');
@@ -93,6 +99,8 @@ export const ProfileScreen = () => {
     // the banners below only render once this is known, so nobody sees a
     // "Generate" button flip into "Get a pack".
     const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
+    // The one credit is the unspent welcome gift (never bought).
+    const [onFreeCredit, setOnFreeCredit] = useState(false);
     const [purchaseOpen, setPurchaseOpen] = useState(false);
 
     // Hash of the profile AS SAVED — set on load and after each successful save,
@@ -178,7 +186,10 @@ export const ProfileScreen = () => {
             if (!user) return;
             try {
                 profileRepository.getCreditStatus(user.id)
-                    .then((st) => setMasterUnlocked(st.masterUnlocked))
+                    .then((st) => {
+                        setMasterUnlocked(st.masterUnlocked);
+                        setOnFreeCredit(!st.masterUnlocked && st.credits === 1);
+                    })
                     // Unknown → treat as unlocked; the server still gates it.
                     .catch(() => setMasterUnlocked(true));
                 const service = createResumeService();
@@ -594,6 +605,8 @@ export const ProfileScreen = () => {
                 onSuccess={() => { void handlePurchaseSuccess(); }}
                 source="profile_master"
                 masterBonus={!generalResume}
+                freeCredit={onFreeCredit}
+                onUseFreeCredit={() => { requestJdFocus(); onGoHome?.(); }}
             />
         </div>
     );
