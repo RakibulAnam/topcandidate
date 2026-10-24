@@ -779,8 +779,15 @@ Per-generator deadlines: optimizer 50s (`/api/optimize`), toolkit 52s (`/api/too
   `/profile-setup` is reachable by URL for anyone signed in, including users who
   already finished it — the route is auth-gated (`AUTHED_SCREENS`) but the real
   boundary is RLS, and the wizard is safe to re-run: it prefills from the DB,
-  every section save is an upsert on `id`, and nothing deletes. Two edges needed
-  guarding. (1) `saveCurrentStep` refuses `PERSONAL_INFO` when the prefill THREW
+  every section save is an upsert on `id` (all `save*` repo methods return the
+  row id), and a list step then deletes only rows the wizard itself loaded or
+  saved that are no longer in the list (`storedIds` + `pruneRemoved`). Before
+  that (fixed 2026-10-25) nothing deleted, so a resume import — which replaces
+  the lists with freshly-id'd items — saved a SECOND copy of every education/
+  experience row on re-run, and trash-icon removals never left the table. Rows
+  created elsewhere (Profile page, dashboard drawer) are never in `storedIds`,
+  and a failed prefill leaves it empty, so neither can be pruned. Two more edges
+  needed guarding. (1) `saveCurrentStep` refuses `PERSONAL_INFO` when the prefill THREW
   (`prefillFailed`) and retries the load instead — `saveProfile` UPDATEs all
   seven contact columns unconditionally, so an empty form we failed to populate
   would blank location/linkedin/github/website. Other steps and the import

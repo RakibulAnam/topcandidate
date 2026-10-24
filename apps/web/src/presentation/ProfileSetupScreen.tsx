@@ -210,6 +210,20 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     // AI examples/framing stay consistent (experienced once any job exists).
     const userType = inferUserType(experiences);
 
+    // Row ids this wizard knows are stored, per list step. Step saves only
+    // upsert, so an item that leaves the list — removed with the trash icon, or
+    // replaced wholesale by a resume import (which mints fresh ids) — would
+    // otherwise stay in the table and show up twice. Only ids we loaded or
+    // saved ourselves are ever deleted, so a failed prefill can't wipe rows.
+    const storedIds = useRef<Partial<Record<SetupStep, Set<string>>>>({});
+    const pruneRemoved = async (step: SetupStep, savedIds: string[], remove: (id: string) => Promise<void>) => {
+        const keep = new Set(savedIds);
+        for (const id of storedIds.current[step] ?? []) {
+            if (!keep.has(id)) await remove(id);
+        }
+        storedIds.current[step] = keep;
+    };
+
     // Which step people reach — and so which one they leave on. Held until the
     // prefill load settles, because the first render always starts at the
     // import step and a returning user is moved to the contact step after it.
@@ -249,6 +263,20 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     profileRepository.getLanguages(user.id),
                     profileRepository.getReferences(user.id),
                 ]);
+
+            const idsOf = (rows: { id: string }[]) => new Set(rows.map(r => r.id));
+            storedIds.current = {
+                [SetupStep.EDUCATION]: idsOf(edus),
+                [SetupStep.EXPERIENCE]: idsOf(exps),
+                [SetupStep.PROJECTS]: idsOf(projs),
+                [SetupStep.EXTRACURRICULARS]: idsOf(extras),
+                [SetupStep.AWARDS]: idsOf(awds),
+                [SetupStep.CERTIFICATIONS]: idsOf(certs),
+                [SetupStep.AFFILIATIONS]: idsOf(affs),
+                [SetupStep.PUBLICATIONS]: idsOf(pubs),
+                [SetupStep.LANGUAGES]: idsOf(langs),
+                [SetupStep.REFERENCES]: idsOf(refs),
+            };
 
             if (profile) setPersonalInfo(profile);
             if (exps.length > 0) setExperiences(exps);
@@ -487,10 +515,14 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                 case SetupStep.PERSONAL_INFO:
                     await profileRepository.saveProfile(user.id, personalInfo);
                     break;
-                case SetupStep.EDUCATION:
-                    for (const edu of education) await profileRepository.saveEducation(user.id, edu);
+                case SetupStep.EDUCATION: {
+                    const ids: string[] = [];
+                    for (const edu of education) ids.push(await profileRepository.saveEducation(user.id, edu));
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteEducation(id));
                     break;
-                case SetupStep.EXPERIENCE:
+                }
+                case SetupStep.EXPERIENCE: {
+                    const ids: string[] = [];
                     // Each save fires a "polished profile" pass in the
                     // background (hash-guarded) — never blocks setup; results
                     // appear on the Profile screen and feed every later
@@ -498,6 +530,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     // so a polish failure costs nothing (next save retries).
                     for (const exp of experiences) {
                         const savedId = await profileRepository.saveExperience(user.id, exp);
+                        ids.push(savedId);
                         if (needsPolish(exp.rawDescription ?? '', exp)) {
                             polishInBackground({
                                 text: exp.rawDescription ?? '',
@@ -506,10 +539,14 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             });
                         }
                     }
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteExperience(id));
                     break;
-                case SetupStep.PROJECTS:
+                }
+                case SetupStep.PROJECTS: {
+                    const ids: string[] = [];
                     for (const proj of projects) {
                         const savedId = await profileRepository.saveProject(user.id, proj);
+                        ids.push(savedId);
                         if (needsPolish(proj.rawDescription ?? '', proj)) {
                             polishInBackground({
                                 text: proj.rawDescription ?? '',
@@ -518,13 +555,17 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             });
                         }
                     }
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteProject(id));
                     break;
+                }
                 case SetupStep.SKILLS:
                     await profileRepository.saveSkills(user.id, skills);
                     break;
-                case SetupStep.EXTRACURRICULARS:
+                case SetupStep.EXTRACURRICULARS: {
+                    const ids: string[] = [];
                     for (const item of extracurriculars) {
                         const savedId = await profileRepository.saveExtracurricular(user.id, item);
+                        ids.push(savedId);
                         if (needsPolish(item.description ?? '', item)) {
                             polishInBackground({
                                 text: item.description ?? '',
@@ -533,10 +574,14 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             });
                         }
                     }
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteExtracurricular(id));
                     break;
-                case SetupStep.AWARDS:
+                }
+                case SetupStep.AWARDS: {
+                    const ids: string[] = [];
                     for (const item of awards) {
                         const savedId = await profileRepository.saveAward(user.id, item);
+                        ids.push(savedId);
                         if ((item.description ?? '').trim() && needsPolish(item.description ?? '', item)) {
                             polishInBackground({
                                 text: item.description ?? '',
@@ -545,22 +590,39 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             });
                         }
                     }
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteAward(id));
                     break;
-                case SetupStep.CERTIFICATIONS:
-                    for (const item of certifications) await profileRepository.saveCertification(user.id, item);
+                }
+                case SetupStep.CERTIFICATIONS: {
+                    const ids: string[] = [];
+                    for (const item of certifications) ids.push(await profileRepository.saveCertification(user.id, item));
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteCertification(id));
                     break;
-                case SetupStep.AFFILIATIONS:
-                    for (const item of affiliations) await profileRepository.saveAffiliation(user.id, item);
+                }
+                case SetupStep.AFFILIATIONS: {
+                    const ids: string[] = [];
+                    for (const item of affiliations) ids.push(await profileRepository.saveAffiliation(user.id, item));
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteAffiliation(id));
                     break;
-                case SetupStep.PUBLICATIONS:
-                    for (const item of publications) await profileRepository.savePublication(user.id, item);
+                }
+                case SetupStep.PUBLICATIONS: {
+                    const ids: string[] = [];
+                    for (const item of publications) ids.push(await profileRepository.savePublication(user.id, item));
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deletePublication(id));
                     break;
-                case SetupStep.LANGUAGES:
-                    for (const item of languages) await profileRepository.saveLanguage(user.id, item);
+                }
+                case SetupStep.LANGUAGES: {
+                    const ids: string[] = [];
+                    for (const item of languages) ids.push(await profileRepository.saveLanguage(user.id, item));
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteLanguage(id));
                     break;
-                case SetupStep.REFERENCES:
-                    for (const item of references) await profileRepository.saveReference(user.id, item);
+                }
+                case SetupStep.REFERENCES: {
+                    const ids: string[] = [];
+                    for (const item of references) ids.push(await profileRepository.saveReference(user.id, item));
+                    await pruneRemoved(currentStep, ids, id => profileRepository.deleteReference(id));
                     break;
+                }
             }
             return true;
         } catch (error) {

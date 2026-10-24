@@ -44,7 +44,8 @@ export interface IProfileRepository {
     deleteExperience(id: string): Promise<void>;
 
     getEducations(userId: string): Promise<Education[]>;
-    saveEducation(userId: string, education: Education): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveEducation(userId: string, education: Education): Promise<string>;
     deleteEducation(id: string): Promise<void>;
 
     getProjects(userId: string): Promise<Project[]>;
@@ -70,22 +71,27 @@ export interface IProfileRepository {
     deleteAward(id: string): Promise<void>;
 
     getCertifications(userId: string): Promise<Certification[]>;
-    saveCertification(userId: string, item: Certification): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveCertification(userId: string, item: Certification): Promise<string>;
     deleteCertification(id: string): Promise<void>;
 
     getAffiliations(userId: string): Promise<Affiliation[]>;
-    saveAffiliation(userId: string, item: Affiliation): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveAffiliation(userId: string, item: Affiliation): Promise<string>;
     deleteAffiliation(id: string): Promise<void>;
 
     getPublications(userId: string): Promise<Publication[]>;
-    savePublication(userId: string, item: Publication): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    savePublication(userId: string, item: Publication): Promise<string>;
     deletePublication(id: string): Promise<void>;
 
     getLanguages(userId: string): Promise<Language[]>;
-    saveLanguage(userId: string, item: Language): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveLanguage(userId: string, item: Language): Promise<string>;
     deleteLanguage(id: string): Promise<void>;
 
     getReferences(userId: string): Promise<Reference[]>;
-    saveReference(userId: string, item: Reference): Promise<void>;
+    /** Returns the row id (DB-generated for new items). */
+    saveReference(userId: string, item: Reference): Promise<string>;
     deleteReference(id: string): Promise<void>;
 }

@@ -281,7 +281,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
         }));
     }
 
-    async saveEducation(userId: string, education: Education): Promise<void> {
+    async saveEducation(userId: string, education: Education): Promise<string> {
         const payload: any = {
             user_id: userId,
             school: education.school,
@@ -296,8 +296,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             payload.id = education.id;
         }
 
-        const { error } = await supabase.from('educations').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('educations')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
         if (error) throw error;
+        return data.id as string;
     }
 
     async deleteEducation(id: string): Promise<void> {
@@ -547,7 +552,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
         }));
     }
 
-    async saveCertification(userId: string, item: Certification): Promise<void> {
+    async saveCertification(userId: string, item: Certification): Promise<string> {
         const payload: any = {
             user_id: userId,
             name: item.name,
@@ -556,8 +561,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             link: item.link,
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('certifications').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('certifications')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
         if (error) throw error;
+        return data.id as string;
     }
 
     async deleteCertification(id: string): Promise<void> {
@@ -583,7 +593,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
         }));
     }
 
-    async saveAffiliation(userId: string, item: Affiliation): Promise<void> {
+    async saveAffiliation(userId: string, item: Affiliation): Promise<string> {
         const payload: any = {
             user_id: userId,
             organization: item.organization,
@@ -592,8 +602,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             end_date: item.endDate,
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('affiliations').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('affiliations')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
         if (error) throw error;
+        return data.id as string;
     }
 
     async deleteAffiliation(id: string): Promise<void> {
@@ -619,7 +634,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
         }));
     }
 
-    async savePublication(userId: string, item: Publication): Promise<void> {
+    async savePublication(userId: string, item: Publication): Promise<string> {
         const payload: any = {
             user_id: userId,
             title: item.title,
@@ -628,8 +643,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             link: item.link,
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('publications').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('publications')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
         if (error) throw error;
+        return data.id as string;
     }
 
     async deletePublication(id: string): Promise<void> {
@@ -653,15 +673,20 @@ export class SupabaseProfileRepository implements IProfileRepository {
         }));
     }
 
-    async saveLanguage(userId: string, item: Language): Promise<void> {
+    async saveLanguage(userId: string, item: Language): Promise<string> {
         const payload: any = {
             user_id: userId,
             name: item.name,
             proficiency: item.proficiency,
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('languages').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('languages')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
         if (error) throw error;
+        return data.id as string;
     }
 
     async deleteLanguage(id: string): Promise<void> {
@@ -691,7 +716,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
         }));
     }
 
-    async saveReference(userId: string, item: Reference): Promise<void> {
+    async saveReference(userId: string, item: Reference): Promise<string> {
         const payload: any = {
             user_id: userId,
             name: item.name,
@@ -702,8 +727,13 @@ export class SupabaseProfileRepository implements IProfileRepository {
             relationship: item.relationship,
         };
         if (item.id && item.id.length > 20) payload.id = item.id;
-        const { error } = await supabase.from('references_list').upsert(payload, { onConflict: 'id' });
+        const { data, error } = await supabase
+            .from('references_list')
+            .upsert(payload, { onConflict: 'id' })
+            .select('id')
+            .single();
         if (error) throw error;
+        return data.id as string;
     }
 
     async deleteReference(id: string): Promise<void> {
