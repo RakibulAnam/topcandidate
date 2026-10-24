@@ -2,7 +2,9 @@
 // shared credits/master/purchase state live in <DashboardShell>, which wraps
 // this). Sections top→bottom: dated welcome hero, the first-run WelcomeBanner
 // (free credit unspent, no toolkits) or its successor KitReadyBanner (free kit
-// built, nothing bought, 0 credits), the dark inline "Start a new application"
+// built, nothing bought, 0 credits), the MasterOfferBanner (never bought, no
+// master resume — the ৳50 / ৳200 offer; under the welcome banner on first run,
+// under the hero otherwise), the dark inline "Start a new application"
 // card, the Master Resume banner, a 6-card recent toolkits grid, the "Roles you
 // might be interested in" job-discovery list, and the credits + help rows. On
 // first run the job board moves up under the start card and the master banner
@@ -24,6 +26,7 @@ import { ToolkitCard } from './components/dashboard/ToolkitCard';
 import { JobDiscovery } from './components/dashboard/JobDiscovery';
 import { WelcomeBanner } from './components/dashboard/WelcomeBanner';
 import { KitReadyBanner } from './components/dashboard/KitReadyBanner';
+import { MasterOfferBanner } from './components/dashboard/MasterOfferBanner';
 import { sessionFlag, WELCOME_HIDDEN_KEY, KIT_READY_HIDDEN_KEY } from './components/dashboard/bannerSession';
 import { useOpenPurchase } from './hooks/useOpenPurchase';
 import { PasteReturnPrompt } from './components/dashboard/PasteReturnPrompt';
@@ -60,7 +63,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const t = useT();
   const { locale } = useLocale();
   const rel = useRelativeTime();
-  const { credits, generalResume, openPurchase, openMasterInfo, loadingShell, masterUnlocked, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
+  const { credits, generalResume, openPurchase, openMasterInfo, loadingShell, masterUnlocked, boughtPack, masterOffer, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
 
   const [company, setCompany] = useState('');
   const [title, setTitle] = useState('');
@@ -204,16 +207,18 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   // Held back while a bKash payment is being verified (or that isn't known
   // yet): "Get 5 more kits" beside a pill saying "verifying your ৳200" would
   // read as a request to pay twice.
-  const kitReady = !loadingShell && masterUnlocked === false && credits === 0 && recentLoaded && recentTotal > 0
+  // `boughtPack`, not `masterUnlocked`: a ৳50 master-resume buyer has never
+  // bought kits, and is exactly who this pack ask is for.
+  const kitReady = !loadingShell && boughtPack === false && credits === 0 && recentLoaded && recentTotal > 0
     && openPurchaseState === null;
   // The free kit is spent and nothing bought. Known as soon as the shell
   // loads — before the toolkit count and payment state that kitReady also
   // waits on — so the master card (its own pack ask) is held back from the
   // start rather than shown and then pulled when the banner arrives. While a
   // payment is verifying, neither asks.
-  const outOfFreeCredit = !loadingShell && masterUnlocked === false && credits === 0;
+  const outOfFreeCredit = !loadingShell && boughtPack === false && credits === 0;
   // Never bought = still in the try-it phase, where the return prompt earns its place.
-  const guiding = masterUnlocked === false;
+  const guiding = boughtPack === false;
 
   useEffect(() => {
     if (!guiding) return;
@@ -270,11 +275,20 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   // default while loading is the settled position, and the promotion happens
   // only once we actually know the resume is absent.
   const masterMissing = !loadingShell && !generalResume;
-  // No pack bought and no master resume: the banner becomes a quiet "comes
-  // with your first pack" card in its normal slot — never promoted, no ring,
-  // no dot. Users who already have one keep the normal card.
+  // No pack bought and no master resume: this card steps aside entirely for
+  // MasterOfferBanner. Users who already have one keep the normal card.
   const masterLocked = masterMissing && masterUnlocked === false;
   const masterPromoted = masterMissing && masterUnlocked === true;
+  // Locked + no master resume: the quiet card is replaced by MasterOfferBanner
+  // — the full ৳50 / ৳200 offer, on the first screen, from the moment the
+  // profile is done (owner, 2026-10-24: one tap from a master resume, and
+  // impossible to miss). Held back while a bKash payment is verifying (a second
+  // "pay" ask beside "verifying your payment" reads as pay twice) and with an
+  // empty profile, which has nothing to build a resume from.
+  const showMasterOffer = masterOffer && !profileEmpty && openPurchaseState === null;
+  const masterOfferBanner = showMasterOffer && (
+    <MasterOfferBanner onChoose={(pkg) => openPurchase('dashboard_master_offer', pkg)} />
+  );
   const masterBanner = (
       <section>
         <div
@@ -293,14 +307,9 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           <span className="min-w-0 flex-[1_1_320px]">
             <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <span className="font-display text-[19px] font-semibold text-brand-700">{t('dashboard.bannerTitle')}</span>
-              {masterLocked && (
-                <span className="rounded-full bg-accent-50 px-2.5 py-0.5 text-[11.5px] font-semibold text-accent-700">{t('dashboard.masterPackNote')}</span>
-              )}
             </span>
             <span className="mt-1 block text-[13px] leading-relaxed text-charcoal-500">
-              {masterLocked
-                ? t('dashboard.bannerBodyLocked')
-                : masterUpdatedAt
+              {masterUpdatedAt
                 ? t('dashboard.bannerBody', { when: rel(masterUpdatedAt) ?? '' })
                 : t('dashboard.bannerBodyNoDate')}
             </span>
@@ -312,16 +321,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           >
             {t('dashboard.bannerUpdateProfile')}
           </a>
-          {masterLocked ? (
-            <button
-              type="button"
-              onClick={() => openMasterInfo('dashboard_banner')}
-              className="inline-flex w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-charcoal-300 bg-white px-[22px] py-3 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto"
-            >
-              {t('dashboard.masterUnlockCta')}
-              <ArrowRight size={14} />
-            </button>
-          ) : generalResume ? (
+          {generalResume ? (
             <button
               type="button"
               onClick={() => onOpenResume(generalResume.id)}
@@ -392,6 +392,9 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
 
       {masterPromoted && masterBanner}
 
+      {/* Not on first run: the welcome banner leads there, and this follows it. */}
+      {!firstRun && masterOfferBanner}
+
       {/* Not with an empty profile: its step 1 says "Profile done ✓", which
           would contradict the incomplete-profile warning above. */}
       {firstRun && !welcomeHidden && !profileEmpty && (
@@ -402,11 +405,16 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
         />
       )}
 
+      {/* First run: right under the free-kit guide — the two things a finished
+          profile has earned, one after the other, before anything else. */}
+      {firstRun && masterOfferBanner}
+
       {kitReady && !kitReadyHidden && (
         <KitReadyBanner
           onBuy={() => openPurchase('kit_ready_banner')}
           onOpenKit={recent[0] ? () => onOpenResume(recent[0].id) : null}
           onHide={() => setKitReadyHidden(true)}
+          masterOwned={masterUnlocked === true}
         />
       )}
 
@@ -494,7 +502,10 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
           banner was hidden): that banner makes the pack ask and names the
           master resume as the bonus — a second "Get it with a pack" card right
           below would be the same ask twice. */}
-      {!masterPromoted && !firstRun && !(outOfFreeCredit && !kitReadyHidden) && masterBanner}
+      {/* The first-run / kit-ready hiding is about a LOCKED master resume (a
+          second pack ask). An unlocked one — the ৳50 buyer's — is theirs, so
+          its card always shows. */}
+      {!masterPromoted && !masterLocked && (masterUnlocked === true || (!firstRun && !(outOfFreeCredit && !kitReadyHidden))) && masterBanner}
 
       {/* Recent toolkits */}
       {!firstRun && (

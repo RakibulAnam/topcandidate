@@ -21,20 +21,31 @@ import { CreditsBadge } from '../CreditsBadge';
 import { VerifyingPurchasePill } from '../Layout/VerifyingPurchasePill';
 import { PurchaseModal, type PurchaseSource } from '../PurchaseModal';
 import { requestJdFocus } from './jdFocusRequest';
-import { MasterResumeInfoDialog, type MasterInfoFrom } from './MasterResumeInfoDialog';
+import { MasterResumeOfferSheet, type MasterInfoFrom } from './MasterResumeOfferSheet';
+import { useMasterPreview } from './MasterResumePreview';
+import { useOpenPurchase } from '../../hooks/useOpenPurchase';
+import type { PackageId } from '../../../infrastructure/api/purchaseClient';
 import { CommandPalette } from './CommandPalette';
 import { LogoMark } from '../ui/LogoMark';
 
 interface ShellCtx {
   credits: number | null;
   refreshCredits: () => Promise<void>;
-  /** A pack has been bought → the master resume can be built. Null while loading. */
+  /** Any purchase has completed → the master resume can be built. Null while loading. */
   masterUnlocked: boolean | null;
+  /** A credit-granting pack has been bought. Null while loading. NOT the same
+   *  as masterUnlocked since the ৳50 master-resume package (migration 033) —
+   *  every "never bought, still in the free-kit phase" decision keys on this. */
+  boughtPack: boolean | null;
   /** The only credit left is the free welcome one (never bought a pack). */
   onFreeCredit: boolean;
-  openPurchase: (source?: PurchaseSource) => void;
-  /** Never-bought account reaching for the master resume: explain it first
-   *  (MasterResumeInfoDialog), then the pack sheet if they want it. */
+  /** Open the bKash sheet. `pkg` preselects a package (default: the pack). */
+  openPurchase: (source?: PurchaseSource, pkg?: PackageId) => void;
+  /** No master resume and never bought: the ৳50 master-resume package is on
+   *  offer (MasterResumeOfferSheet, MasterOfferBanner, the sheet's plan picker). */
+  masterOffer: boolean;
+  /** Account reaching for a master resume it doesn't have: open the offer
+   *  sheet (their resume preview + ৳50 / ৳200 choices). */
   openMasterInfo: (from: MasterInfoFrom) => void;
   openSearch: () => void;
   generalResume: ResumeListItem | null;
@@ -82,6 +93,7 @@ export const DashboardShell: React.FC<Props> = ({
   const [generalResume, setGeneralResume] = useState<ResumeListItem | null>(null);
   const [loadingShell, setLoadingShell] = useState(true);
   const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
+  const [boughtPack, setBoughtPack] = useState<boolean | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseSource, setPurchaseSource] = useState<PurchaseSource>('other');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -136,6 +148,7 @@ export const DashboardShell: React.FC<Props> = ({
       const status = await profileRepository.getCreditStatus(user.id);
       setCredits(status.credits);
       setMasterUnlocked(status.masterUnlocked);
+      setBoughtPack(status.boughtPack);
       if (status.masterUnlocked) void autoBuildMaster();
     } catch (err) {
       console.warn('Could not refresh toolkit credits', err);
@@ -178,6 +191,7 @@ export const DashboardShell: React.FC<Props> = ({
       if (cancelled) return;
       setCredits(balance);
       setMasterUnlocked(status.masterUnlocked);
+      setBoughtPack(status.boughtPack);
       if (status.masterUnlocked && !existing) void autoBuildMaster();
     }).finally(() => { if (!cancelled) setLoadingShell(false); });
     return () => { cancelled = true; };
@@ -201,18 +215,41 @@ export const DashboardShell: React.FC<Props> = ({
   // Opened from the master-resume explainer: the user has already chosen to
   // buy, so the sheet skips the free-kit gift panel.
   const [purchaseSkipGift, setPurchaseSkipGift] = useState(false);
-  const openPurchase = useCallback((source: PurchaseSource = 'other') => {
+  const [purchasePkg, setPurchasePkg] = useState<PackageId>('five-pack');
+  // A package choice is a decision already made: skip the free-kit gift panel
+  // and land on the bKash step for that package.
+  const openPurchase = useCallback((source: PurchaseSource = 'other', pkg?: PackageId) => {
     setPurchaseSource(source);
-    setPurchaseSkipGift(false);
+    setPurchaseSkipGift(pkg !== undefined);
+    setPurchasePkg(pkg ?? 'five-pack');
     setPurchaseOpen(true);
   }, []);
   const [masterInfoFrom, setMasterInfoFrom] = useState<MasterInfoFrom | null>(null);
-  const openMasterInfo = useCallback((from: MasterInfoFrom) => setMasterInfoFrom(from), []);
-  const onFreeCredit = masterUnlocked === false && credits === 1;
+  const openMasterInfo = useCallback((from: MasterInfoFrom) => {
+    // The server just refused a build with master_locked: the account IS
+    // locked, even if the status read failed and left this unknown — without
+    // it the sheet's ৳50 button would land on a ৳200-only purchase sheet.
+    if (from === 'build_refused') setMasterUnlocked(false);
+    setMasterInfoFrom(from);
+  }, []);
+  const onFreeCredit = boughtPack === false && credits === 1;
+  // The profile the master resume would be built from (cached; shared with
+  // the offer sheet and banner). An empty one can't be sold a resume.
+  const openPurchaseState = useOpenPurchase();
+  const preview = useMasterPreview(user?.id, masterUnlocked === false);
+  // Locked, nothing built yet, and the profile has something to build from.
+  // Pre-032 accounts that kept a master resume while locked aren't offered one.
+  const masterOffer = masterUnlocked === false && !loadingShell && !generalResume && preview?.empty !== true;
+  // The priced nav tab additionally steps aside while a payment is in flight
+  // (undefined = not known yet): a "৳50" pill beside "verifying your payment"
+  // invites paying twice.
+  const navOffer = masterOffer && openPurchaseState === null;
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
   const onMasterResume = () => {
     if (generalResume) onOpenResume(generalResume.id);
+    // A payment is in flight: reopen it rather than offer a second purchase.
+    else if (masterUnlocked === false && openPurchaseState) openPurchase('master_nav');
     else if (masterUnlocked === false) openMasterInfo('nav');
     else onNavigate('DASHBOARD');
   };
@@ -221,8 +258,26 @@ export const DashboardShell: React.FC<Props> = ({
     label: string,
     on: () => void,
     isActive: boolean,
-    opts?: { Icon?: React.ComponentType<{ size?: number }>; attention?: boolean },
-  ) => (
+    opts?: { Icon?: React.ComponentType<{ size?: number }>; attention?: boolean; offer?: boolean },
+  ) => opts?.offer ? (
+    // No master resume and never bought: the tab is the one-tap route to the
+    // ৳50 offer, so it is the loudest thing in the bar — a filled orange pill
+    // with its price on it and a radiating dot. Deliberately not subtle (owner,
+    // 2026-10-24): a finished profile has earned this and they should see it.
+    <a
+      href="#"
+      onClick={(e) => { e.preventDefault(); on(); }}
+      className="relative inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-accent-400 py-1.5 pl-3 pr-1.5 text-[13.5px] font-bold text-brand-800 shadow-[0_6px_16px_-8px_rgba(201,93,39,0.9)] transition-colors hover:bg-accent-300"
+    >
+      {opts.Icon && <opts.Icon size={14} />}
+      {label}
+      <span className="rounded-md bg-brand-700 px-1.5 py-0.5 text-[11px] font-bold text-accent-300">{t('masterOffer.navPrice')}</span>
+      <span className="absolute -right-1 -top-1 h-2.5 w-2.5" aria-hidden>
+        <span className="mo-ping absolute inset-0 rounded-full bg-accent-500" />
+        <span className="absolute inset-0 rounded-full bg-accent-600 ring-2 ring-[#F6F4EE]" />
+      </span>
+    </a>
+  ) : (
     <a
       href="#"
       onClick={(e) => { e.preventDefault(); on(); }}
@@ -258,11 +313,12 @@ export const DashboardShell: React.FC<Props> = ({
     // never been built — so mark it until it has been.
     // Locked accounts (no pack yet) don't get the attention cue: it would point
     // at something they can't build, which reads as nagging.
-    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false, attention: !loadingShell && !generalResume && masterUnlocked === true },
+    // `offer` = locked with no master resume: the tab becomes the offer itself.
+    { key: 'master', icon: FileText, label: t('dashboard.navMasterResume'), tabLabel: t('dashboard.navTabMaster'), on: onMasterResume, isActive: false, attention: !loadingShell && !generalResume && masterUnlocked === true, offer: navOffer },
     { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
   ];
 
-  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, onFreeCredit, openPurchase, openMasterInfo, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
+  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, boughtPack, onFreeCredit, openPurchase, masterOffer, openMasterInfo, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -281,7 +337,7 @@ export const DashboardShell: React.FC<Props> = ({
             <nav className="ml-2 hidden items-center gap-1 lg:flex">
               {DESTINATIONS.map((d) => (
                 <React.Fragment key={d.key}>
-                  {navLink(d.label, d.on, d.isActive, d.key === 'master' ? { Icon: d.icon, attention: d.attention } : undefined)}
+                  {navLink(d.label, d.on, d.isActive, d.key === 'master' ? { Icon: d.icon, attention: d.attention, offer: d.offer } : undefined)}
                 </React.Fragment>
               ))}
             </nav>
@@ -373,7 +429,27 @@ export const DashboardShell: React.FC<Props> = ({
           {/* Capped so the tabs stay a group on a tablet instead of drifting to
               the far corners; on a phone the cap never binds. */}
           <div className="mx-auto flex w-full max-w-[520px]">
-          {DESTINATIONS.map(({ key, icon: Icon, tabLabel, on, isActive, attention }) => (
+          {DESTINATIONS.map(({ key, icon: Icon, tabLabel, on, isActive, attention, offer }) => offer ? (
+            // The offer tab: an orange tile lifted out of the bar, price on it.
+            <a
+              key={key}
+              href="#"
+              onClick={(e) => { e.preventDefault(); on(); }}
+              className="relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 py-1.5"
+            >
+              <span className="relative flex h-[30px] items-center gap-1 rounded-full bg-accent-400 px-2.5 text-brand-800 shadow-[0_6px_14px_-6px_rgba(201,93,39,0.9)]">
+                <Icon size={16} strokeWidth={2.4} />
+                <span className="text-[11px] font-extrabold leading-none">{t('masterOffer.navPrice')}</span>
+                <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5" aria-hidden>
+                  <span className="mo-ping absolute inset-0 rounded-full bg-accent-500" />
+                  <span className="absolute inset-0 rounded-full bg-accent-600 ring-2 ring-[#F6F4EE]" />
+                </span>
+              </span>
+              <span className="max-w-full truncate px-0.5 text-[10.5px] font-bold leading-none text-accent-700">
+                {tabLabel}
+              </span>
+            </a>
+          ) : (
             <a
               key={key}
               href="#"
@@ -415,6 +491,8 @@ export const DashboardShell: React.FC<Props> = ({
         // A locked account that already has a master resume (pre-032) isn't
         // getting one as a bonus — don't promise it.
         masterBonus={masterUnlocked === false && !generalResume}
+        masterOffer={masterOffer}
+        initialPackage={purchasePkg}
         freeCredit={onFreeCredit && !purchaseSkipGift}
         onUseFreeCredit={() => {
           requestJdFocus();
@@ -422,15 +500,13 @@ export const DashboardShell: React.FC<Props> = ({
         }}
       />
 
-      <MasterResumeInfoDialog
+      <MasterResumeOfferSheet
         isOpen={masterInfoFrom !== null}
         from={masterInfoFrom ?? 'nav'}
         onClose={() => setMasterInfoFrom(null)}
-        onGetPack={() => {
-          setPurchaseSource('master_banner');
-          setPurchaseSkipGift(true);
-          setPurchaseOpen(true);
-        }}
+        onChoose={(pkg) => openPurchase(masterInfoFrom === 'nav' ? 'master_nav' : 'master_banner', pkg)}
+        freeCredit={onFreeCredit}
+        onEditProfile={onEditProfile}
         onTailor={() => {
           requestJdFocus();
           if (active !== 'home') onNavigate('DASHBOARD');

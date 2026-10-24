@@ -143,6 +143,35 @@
   .wb-fan { animation: none; transform: rotate(var(--wb-r)); }
 }
 
+/* ── Master-resume offer (MasterResumeOfferSheet, MasterOfferBanner, the
+   Master tab in DashboardShell) ─────────────────────────────────────────────
+   mo-float: the user's own resume preview bobs gently, like paper on a desk.
+   mo-ping:  a ring that radiates from the Master tab's dot — the tab is the
+             one-tap route to the offer, so it gets the only moving nav cue.
+   mo-nudge: the primary price button leans in every few seconds. */
+.mo-float { animation: moFloat 5s ease-in-out infinite; }
+@keyframes moFloat {
+  0%, 100% { transform: rotate(var(--mo-r, -3deg)) translateY(0); }
+  50% { transform: rotate(var(--mo-r, -3deg)) translateY(-6px); }
+}
+.mo-ping { animation: moPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite; }
+@keyframes moPing {
+  0% { transform: scale(1); opacity: 0.75; }
+  75%, 100% { transform: scale(2.6); opacity: 0; }
+}
+.mo-nudge { animation: moNudge 4s ease-in-out 1.2s infinite; }
+@keyframes moNudge {
+  0%, 84%, 100% { transform: none; }
+  88% { transform: translateY(-2px) scale(1.015); }
+  92% { transform: none; }
+  95% { transform: translateY(-1px) scale(1.008); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mo-float { animation: none; transform: rotate(var(--mo-r, -3deg)); }
+  .mo-ping, .mo-nudge { animation: none; }
+  .mo-ping { opacity: 0; }
+}
+
 /* ── Landing "See demo" walkthrough (components/demo/DemoWalkthrough.tsx) ──
    Beat-driven: the component flips state on a timeline and these classes
    animate each change once. Under prefers-reduced-motion the component jumps

@@ -104,7 +104,7 @@ export const PurchaseHistorySection: React.FC = () => {
               <div className="flex justify-between gap-3">
                 <dt className="text-charcoal-500 shrink-0">{t('purchaseHistory.colCredits')}</dt>
                 <dd className="text-brand-700 tabular-nums text-right">
-                  {r.status === 'completed' ? `+${r.creditsGranted}` : '—'}
+                  {r.status !== 'completed' ? '—' : r.creditsGranted === 0 ? t('purchaseHistory.masterResumeItem') : `+${r.creditsGranted}`}
                 </dd>
               </div>
             </dl>
@@ -142,7 +142,7 @@ export const PurchaseHistorySection: React.FC = () => {
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-right text-brand-700 tabular-nums">
-                  {r.status === 'completed' ? `+${r.creditsGranted}` : '—'}
+                  {r.status !== 'completed' ? '—' : r.creditsGranted === 0 ? t('purchaseHistory.masterResumeItem') : `+${r.creditsGranted}`}
                 </td>
                 <td className="px-4 py-2.5">
                   <span className={[

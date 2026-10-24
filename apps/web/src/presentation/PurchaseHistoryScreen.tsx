@@ -116,7 +116,7 @@ export const PurchaseHistoryScreen = ({ onBack }: Props) => {
         <StatCard
           eyebrow={t('purchaseHistory.statLastTopUp')}
           value={last ? new Date(last.createdAt).toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit' }) : t('purchaseHistory.statNone')}
-          note={last ? t('purchaseHistory.statLastTopUpNote', { credits: last.creditsGranted }) : ''}
+          note={!last ? '' : last.creditsGranted === 0 ? t('purchaseHistory.masterResumeItem') : t('purchaseHistory.statLastTopUpNote', { credits: last.creditsGranted })}
         />
       </div>
 
@@ -141,7 +141,10 @@ export const PurchaseHistoryScreen = ({ onBack }: Props) => {
                   </span>
                   <span className="min-w-0 flex-[1_1_200px]">
                     <span className="block text-[14.5px] font-semibold text-brand-700">
-                      {t('purchaseHistory.creditsLine', { credits: p.creditsGranted, amount: p.amountTaka.toLocaleString() })}
+                      {/* A 0-credit row is the ৳50 master-resume package (migration 033). */}
+                      {p.creditsGranted === 0
+                        ? t('purchaseHistory.masterLine', { amount: p.amountTaka.toLocaleString() })
+                        : t('purchaseHistory.creditsLine', { credits: p.creditsGranted, amount: p.amountTaka.toLocaleString() })}
                       {p.observedAmountTaka != null && p.observedAmountTaka !== p.amountTaka && (
                         <span className="font-normal text-charcoal-500"> {t('purchaseHistory.observedAmount', { observed: p.observedAmountTaka })}</span>
                       )}

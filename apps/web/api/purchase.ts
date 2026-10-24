@@ -5,12 +5,15 @@
 // Credits are NOT granted here. Confirmation happens out-of-band when the
 // owner's Flutter app reads the bKash SMS and calls /api/confirm-purchase.
 //
-// Request:  { packageId: 'five-pack', transactionId: 'AB12CD34EF', senderMsisdn?: '01XXXXXXXXX' }
+// Request:  { packageId: 'five-pack' | 'master-resume', transactionId: 'AB12CD34EF', senderMsisdn?: '01XXXXXXXXX' }
+//           'five-pack' = 5 credits / ৳200; 'master-resume' = 0 credits / ৳50,
+//           unlocks the master resume (migration 033).
 // Response: { success: true, purchaseId: '<uuid>', status: 'pending', message: '...' }
 //
 // 401 if not authenticated; 400 if packageId or transactionId is invalid;
 // 409 if the transactionId has already been submitted; 429 if user has
-// >= 5 pending purchases in the last 24h.
+// >= 5 pending purchases in the last 24h; 409 already_unlocked for a
+// 'master-resume' purchase on an account that already has it.
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { authenticate, userClient } from './_lib/auth.js';
@@ -80,6 +83,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       return;
     }
+    if (msg.includes('already_unlocked')) {
+      res.status(409).json({
+        error: 'Your master resume is already unlocked.',
+        code: 'already_unlocked',
+      });
+      return;
+    }
     if (msg.includes('too_many_pending')) {
       res.status(429).json({
         error: 'Too many pending purchases. Please wait for confirmation or contact support.',
@@ -103,10 +113,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let message: string;
   switch (status) {
     case 'completed':
-      message = `Payment confirmed — ${creditsGranted ?? ''} credits added to your account.`;
+      message = creditsGranted === 0
+        ? 'Payment confirmed — your master resume is unlocked.'
+        : `Payment confirmed — ${creditsGranted ?? ''} credits added to your account.`;
       break;
     case 'underpaid':
-      message = 'We received less than the pack price. Check the status pill to complete it.';
+      message = 'We received less than the price. Check the status pill to complete it.';
       break;
     case 'msisdn_mismatch_review':
       message = 'Payment received but under review (sender number didn’t match).';

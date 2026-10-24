@@ -55,6 +55,12 @@
 //     user feels they are in a bKash-branded surface for the duration of the
 //     payment. See AGENTS.md §10 for the scoped exception.
 //   - Body scroll is locked while open.
+//
+// TWO PACKAGES (migration 033): 'five-pack' (5 credits, ৳200) and
+// 'master-resume' (the master resume alone, ৳50). The ৳50 one is only offered
+// while `masterOffer` is set (never bought, no master resume): a plan picker
+// sits above the payment steps and the gift panel carries a master-resume
+// card. Every price, label and confirmation line is derived from the package.
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -74,6 +80,7 @@ import {
   Phone,
   RefreshCw,
   Gift,
+  FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useLocale, useT } from '../i18n/LocaleContext';
@@ -105,6 +112,8 @@ export type PurchaseSource =
   | 'builder_gate'
   | 'free_used_nudge'
   | 'kit_ready_banner'
+  | 'master_nav'
+  | 'dashboard_master_offer'
   | 'resubmit'
   | 'other';
 
@@ -122,9 +131,22 @@ interface Props {
   /** "Use my free kit" — take the user to the job-post box. Without it the
    *  button just closes the sheet. */
   onUseFreeCredit?: () => void;
+  /** Never bought and no master resume: offer the ৳50 master-resume package
+   *  (plan picker + a card on the gift panel). */
+  masterOffer?: boolean;
+  /** Package selected when the sheet opens (default: the pack). */
+  initialPackage?: PackageId;
 }
 
-const PACKAGE_ID: PackageId = 'five-pack';
+// Surfaces whose click was about the master resume. Only these (and the gift
+// panel's master card) get the ৳200 / ৳50 picker: on a credit gate — Summary,
+// Builder, "buy more kits" — the ৳50 option buys no credits, so offering it
+// there would sell something that leaves the user still blocked.
+const MASTER_SOURCES: PurchaseSource[] = ['master_nav', 'master_banner', 'dashboard_master_offer', 'profile_master'];
+
+// Mirrors the hardcoded mapping in initiate_purchase (migration 033). The
+// server is the authority; this is only what the sheet displays.
+const PACKAGE_PRICE_TAKA: Record<PackageId, number> = { 'five-pack': 200, 'master-resume': 50 };
 
 // Direct `import.meta.env.X` so Vite's AST-based static substitution kicks in.
 const OWNER_BKASH_NUMBER = import.meta.env.VITE_BKASH_PAYMENT_NUMBER || '01XXXXXXXXX';
@@ -166,10 +188,30 @@ const BKASH_DEEP = '#B80E5D';
 
 type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'problem';
 
-export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, source = 'other', masterBonus = false, freeCredit = false, onUseFreeCredit }) => {
+export const PurchaseModal: React.FC<Props> = ({
+  isOpen, onClose, onSuccess, source = 'other', masterBonus = false, freeCredit = false, onUseFreeCredit,
+  masterOffer = false, initialPackage = 'five-pack',
+}) => {
   const t = useT();
   const { locale } = useLocale();
   const [phase, setPhase] = useState<Phase>('idle');
+  // What the user picked in THIS open (plan picker, gift card, "See packs").
+  // Cleared on close, so the next open starts from its opener's default.
+  const [pkgChoice, setPkgChoice] = useState<PackageId | null>(null);
+  // The gift panel's master card opens the picker even from a non-master source.
+  const [giftChoseMaster, setGiftChoseMaster] = useState(false);
+  // Package of the purchase this sheet is tracking (set at submit / resume).
+  const [trackedPkg, setTrackedPkg] = useState<PackageId | null>(null);
+  useEffect(() => {
+    if (isOpen) return;
+    setPkgChoice(null);
+    setGiftChoseMaster(false);
+    // Closed with nothing tracked (e.g. a TrxID correction whose re-submit
+    // failed — the old row is voided): the package only had to survive for a
+    // retry inside that open. Don't let it pin every later open.
+    if (!trackedTxn) setTrackedPkg(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
   // Free-kit gift panel: re-armed on every open, dropped by "See packs".
   const [giftView, setGiftView] = useState(true);
   useEffect(() => {
@@ -204,6 +246,61 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
 
   // The server's answer to "is a payment already in flight for this user".
   const openPurchase = useOpenPurchase();
+
+  // Which package the sheet is about, derived every render (no effect, so no
+  // frame of a previous open's package). In order:
+  //   1. the purchase this sheet is tracking — fixed server-side once
+  //      submitted; it survives the row settling while the confirmed check is
+  //      up, so a ৳50 unlock is never relabelled "Credits added";
+  //   2. a payment in flight on the server (a 0-credit row is the ৳50
+  //      master-resume package) — whatever surface reopened the sheet;
+  //   3. what the user picked in this open;
+  //   4. the opener's default. The ৳50 package only exists while on offer.
+  const inFlightPkg: PackageId | null = openPurchase?.paymentReference
+    ? (openPurchase.creditsGranted === 0 ? 'master-resume' : 'five-pack')
+    : null;
+  // trackedPkg is read even while trackedTxn is briefly empty: a TrxID
+  // correction voids the old row and clears trackedTxn before re-submitting,
+  // and if that submit fails the corrected purchase must keep its package.
+  // reset() clears it once a purchase is genuinely finished or abandoned.
+  const pkg: PackageId = trackedPkg
+    ?? inFlightPkg
+    ?? (masterOffer ? pkgChoice : null)
+    ?? (masterOffer ? initialPackage : 'five-pack');
+  const isMasterPkg = pkg === 'master-resume';
+  const priceTaka = PACKAGE_PRICE_TAKA[pkg];
+  // Whether this open may show the ৳200 / ৳50 picker (see MASTER_SOURCES).
+  const pickerAllowed = masterOffer
+    && (initialPackage === 'master-resume' || (MASTER_SOURCES as readonly string[]).includes(source) || giftChoseMaster);
+
+  // Reopened while still holding a purchase the server no longer counts as
+  // open: if that row really is over (expired / voided / refunded), the old
+  // card is dead — keeping it would also keep its package, so someone who just
+  // tapped "৳50" would land on a ৳200 problem card. Start clean. The shared
+  // store alone is NOT trusted for this: a failed refresh leaves it at a stale
+  // null while the row is still pending, and resetting then would wipe a live
+  // verification. So ask the server about this exact TrxID first.
+  const wasOpenRef = useRef(false);
+  // Latest tracked TrxID, for the async check below: if the user has moved on
+  // to a new submission by the time the old row's status lands, leave it be.
+  const trackedTxnRef = useRef(trackedTxn);
+  trackedTxnRef.current = trackedTxn;
+  useEffect(() => {
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!justOpened || !trackedTxn || phase === 'confirmed') return;
+    if (openPurchase?.paymentReference === trackedTxn) return;
+    const txn = trackedTxn;
+    let cancelled = false;
+    fetchPurchaseStatus(txn)
+      .then((st) => {
+        if (cancelled || trackedTxnRef.current !== txn) return;
+        if (st.status === 'expired' || st.status === 'failed' || st.status === 'refunded') reset();
+      })
+      .catch(() => { /* unknown — keep the card */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
   // Guards the rehydration below so it runs once per open, not on every change
   // the store emits while the sheet is up.
   const rehydratedFor = useRef<string | null>(null);
@@ -234,6 +331,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
     rehydratedFor.current = txn;
     setTransactionId(txn);
     setTrackedTxn(txn);
+    setTrackedPkg(openPurchase.creditsGranted === 0 ? 'master-resume' : 'five-pack');
     setTrackedSince(new Date(openPurchase.createdAt).getTime());
     // Cold entry (fresh page load, or a purchase this session has never seen):
     // start at 'verifying' and let the watch effect derive the verdict. The
@@ -249,7 +347,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   useEffect(() => {
     if (!isOpen) return;
     txnStartedTracked.current = false;
-    track('purchase_modal_opened', { source, masterBonus });
+    track('purchase_modal_opened', { source, masterBonus, masterOffer, packageId: masterOffer ? initialPackage : 'five-pack' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
@@ -296,7 +394,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   useEffect(() => {
     if (!isOpen) return;
     if (!window.matchMedia('(min-width: 768px)').matches) return;
-    const id = setTimeout(() => txnInputRef.current?.focus(), 140);
+    // preventScroll: with the plan picker above, scrolling to the field would
+    // push the choice they are about to confirm out of view.
+    const id = setTimeout(() => txnInputRef.current?.focus({ preventScroll: true }), 140);
     return () => clearTimeout(id);
   }, [isOpen]);
 
@@ -307,6 +407,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
     setFeaturesOpen(false);
     setCopied(false);
     setTrackedTxn('');
+    setTrackedPkg(null);
     setTrackedSince(null);
     setVerdict(null);
     setVerification(null);
@@ -518,10 +619,43 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
                 </li>
               ))}
             </ul>
-            <div className="mt-5 rounded-2xl border border-[#E5E1D8] bg-[#FAF7F0] px-4 py-3.5">
-              <p className="text-[13.5px] font-semibold text-[#0F1B2D]">{t('purchaseModal.giftMoreTitle')}</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-[#6B6759]">{t('purchaseModal.giftMoreBody')}</p>
-            </div>
+            {masterOffer ? (
+              // The second thing a finished profile has earned. As loud as the
+              // gift itself: an orange-framed card with the price and its own
+              // one-tap button straight to the ৳50 bKash step.
+              <div className="mt-5 rounded-2xl border-2 border-accent-400 bg-[#FFF7EF] p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-700 text-accent-300">
+                    <FileText size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-[11px] font-bold text-accent-700 ${locale === 'bn' ? '' : 'uppercase tracking-[0.14em]'}`}>
+                      {t('purchaseModal.giftMasterEyebrow')}
+                    </p>
+                    <p className="mt-0.5 text-[16px] font-bold leading-snug text-[#0F1B2D]">{t('purchaseModal.giftMasterTitle')}</p>
+                    <p className="mt-1 text-[13px] leading-relaxed text-[#4A4639]">{t('purchaseModal.giftMasterBody')}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    track('purchase_gift_view', { action: 'master_offer', source });
+                    setPkgChoice('master-resume');
+                    setGiftChoseMaster(true);
+                    setGiftView(false);
+                  }}
+                  className="mo-nudge mt-3.5 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-accent-400 px-5 text-[15px] font-bold text-brand-800 shadow-[0_10px_22px_-12px_rgba(201,93,39,0.8)] transition-colors hover:bg-accent-300"
+                >
+                  {t('purchaseModal.giftMasterCta')}
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5 rounded-2xl border border-[#E5E1D8] bg-[#FAF7F0] px-4 py-3.5">
+                <p className="text-[13.5px] font-semibold text-[#0F1B2D]">{t('purchaseModal.giftMoreTitle')}</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-[#6B6759]">{t('purchaseModal.giftMoreBody')}</p>
+              </div>
+            )}
             <div className="mt-6 flex flex-col gap-2.5">
               <button
                 type="button"
@@ -538,7 +672,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
               </button>
               <button
                 type="button"
-                onClick={() => { track('purchase_gift_view', { action: 'see_packs', source }); setGiftView(false); }}
+                onClick={() => { track('purchase_gift_view', { action: 'see_packs', source }); setPkgChoice('five-pack'); setGiftView(false); }}
                 className="inline-flex min-h-[48px] w-full items-center justify-center rounded-full border border-[#D8D3C4] px-6 text-[14px] font-semibold text-[#0F1B2D] transition-colors hover:border-[#0F1B2D]"
               >
                 {t('purchaseModal.giftSeePacks')}
@@ -595,10 +729,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
     const attempt = attempts + 1;
     setPhase('submitting');
     setAttempts(attempt);
-    track('purchase_submitted', { packageId: PACKAGE_ID, attempt });
+    track('purchase_submitted', { packageId: pkg, attempt });
     try {
       const result = await purchasePackage({
-        packageId: PACKAGE_ID,
+        packageId: pkg,
         transactionId: trimmedTxn,
         senderMsisdn: senderMsisdn.trim() || undefined,
       });
@@ -607,6 +741,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
       // customer closes the modal or the tab mid-verification, the purchase is
       // still tracked. Cleared again only if they void a mistyped TrxID.
       setTrackedTxn(trimmedTxn);
+      setTrackedPkg(pkg);
       setTrackedSince(Date.now());
       // Mark it handled BEFORE the store catches up, so the rehydration effect
       // does not treat our own fresh submission as a purchase to resume and
@@ -627,7 +762,9 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
         // The credits are already in the account at this point, so say that.
         // `successToast` ("will land within a few minutes") is the wrong tense
         // here — it belonged to the old flow where submitting only queued.
-        toast.success(t('purchaseModal.confirmedToast', { credits: result.creditsGranted ?? 5 }));
+        toast.success(isMasterPkg
+          ? t('purchaseModal.masterConfirmedToast')
+          : t('purchaseModal.confirmedToast', { credits: result.creditsGranted ?? 5 }));
         // Hold the green check briefly, then refresh credits + close — see the
         // 'confirmed' effect. Kept in one place so both success paths (this one
         // and the mid-window Realtime arrival) behave identically.
@@ -663,6 +800,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
       if (err instanceof ApiCallError) {
         if (err.code === 'duplicate_transaction_id') msg = t('purchaseModal.duplicateTxn');
         else if (err.code === 'invalid_transaction_id') msg = t('purchaseModal.invalidTxn');
+        else if (err.code === 'already_unlocked') msg = t('purchaseModal.alreadyUnlocked');
         else msg = err.message;
       } else if (err instanceof Error) {
         msg = err.message;
@@ -718,13 +856,71 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
     }
   };
 
-  const features = [
-    t('purchaseModal.feature1'),
-    t('purchaseModal.feature2'),
-    t('purchaseModal.feature3'),
-    t('purchaseModal.feature4'),
-    ...(masterBonus ? [t('purchaseModal.featureMasterBonus')] : []),
-  ];
+  const features = isMasterPkg
+    ? [t('purchaseModal.masterFeature1'), t('purchaseModal.masterFeature2'), t('purchaseModal.masterFeature3')]
+    : [
+        t('purchaseModal.feature1'),
+        t('purchaseModal.feature2'),
+        t('purchaseModal.feature3'),
+        t('purchaseModal.feature4'),
+        ...(masterBonus ? [t('purchaseModal.featureMasterBonus')] : []),
+      ];
+  const pkgEyebrow = isMasterPkg ? t('purchaseModal.masterEyebrow') : t('purchaseModal.packEyebrow');
+  const pkgPrice = isMasterPkg ? t('purchaseModal.masterPrice') : t('purchaseModal.packPrice');
+  const pkgName = isMasterPkg ? t('purchaseModal.masterName') : t('purchaseModal.packName');
+  const pkgPerUnit = isMasterPkg ? t('purchaseModal.masterPerUnit') : t('purchaseModal.packPerUnit');
+  const trustLine = isMasterPkg ? t('purchaseModal.masterTrustLine') : t('purchaseModal.trustLine');
+
+  // ৳200 vs ৳50, only while the master resume is on offer. Two radio cards
+  // above the payment steps; switching re-prices the whole sheet in place.
+  // Hidden once a TrxID is on record (e.g. back on the form after "check and
+  // try again"): that purchase's package is fixed server-side, so switching
+  // here would only make the copy disagree with it.
+  const planPicker = masterOffer && pickerAllowed && !trackedTxn && !trackedPkg && !inFlightPkg && (
+    <section className="mb-6">
+      <StepLabel n={1} label={t('purchaseModal.planPickerLabel')} />
+      <div className="mt-3.5 grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('purchaseModal.planPickerLabel')}>
+        {([
+          { id: 'five-pack', title: t('purchaseModal.planPackTitle'), sub: t('purchaseModal.planPackSub'), price: t('purchaseModal.packPrice'), badge: t('masterOffer.packBadge') },
+          { id: 'master-resume', title: t('purchaseModal.planMasterTitle'), sub: t('purchaseModal.planMasterSub'), price: t('purchaseModal.masterPrice'), badge: null },
+        ] as const).map((o) => {
+          const on = pkg === o.id;
+          return (
+            <button
+              key={o.id}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              disabled={busy}
+              onClick={() => { if (!on) { track('purchase_plan_switched', { to: o.id, source }); setPkgChoice(o.id); } }}
+              className="relative flex flex-col rounded-2xl border-2 px-3 pb-3 pt-3.5 text-left transition-colors disabled:opacity-60"
+              style={{ borderColor: on ? BKASH : '#EAE6DA', backgroundColor: on ? `${BKASH}0A` : '#fff' }}
+            >
+              {o.badge && (
+                <span className="absolute -top-2.5 left-3 rounded-full bg-accent-400 px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.06em] text-brand-800">
+                  {o.badge}
+                </span>
+              )}
+              <span className="flex items-start justify-between gap-2">
+                <span className="text-[13px] font-bold leading-snug text-[#0F1B2D]">{o.title}</span>
+                <span
+                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2"
+                  style={{ borderColor: on ? BKASH : '#CFCBBC' }}
+                  aria-hidden
+                >
+                  {on && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: BKASH }} />}
+                </span>
+              </span>
+              <span className="mt-0.5 text-[11.5px] leading-snug text-[#6B6759]">{o.sub}</span>
+              <span className="mt-1.5 font-display text-[22px] font-bold leading-none text-[#0F1B2D]">{o.price}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+  // The plan picker, when shown, is step 1 and pushes the payment steps down.
+  const stepOffset = planPicker ? 1 : 0;
 
   // Success takeover — reused for the mobile full-sheet overlay and the
   // desktop right-panel overlay.
@@ -737,10 +933,10 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
         <Check size={32} strokeWidth={3} className="text-white" />
       </div>
       <div className="font-display text-2xl font-semibold text-[#0F1B2D]">
-        {t('purchaseModal.confirmedHeading')}
+        {isMasterPkg ? t('purchaseModal.masterConfirmedHeading') : t('purchaseModal.confirmedHeading')}
       </div>
       <div className="max-w-xs text-sm text-[#6B6759]">
-        {t('purchaseModal.confirmedSub')}
+        {isMasterPkg ? t('purchaseModal.masterConfirmedSub') : t('purchaseModal.confirmedSub')}
       </div>
     </div>
   );
@@ -766,7 +962,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
       <ol className="w-full max-w-[17rem] space-y-2.5 text-left">
         <VerifyBeat state="done" label={t('purchaseModal.verifyStep1')} />
         <VerifyBeat state="active" label={t('purchaseModal.verifyStep2')} />
-        <VerifyBeat state="pending" label={t('purchaseModal.verifyStep3')} />
+        <VerifyBeat state="pending" label={isMasterPkg ? t('purchaseModal.masterVerifyStep3') : t('purchaseModal.verifyStep3')} />
       </ol>
       <div className="w-full max-w-[17rem] rounded-xl border border-[#EAE6DA] bg-[#FAF7F0] px-3 py-2 text-left">
         <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#6B6759]">
@@ -782,7 +978,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
   // What to say, and what to offer, for each verdict. `primary` decides the
   // main button: retry (we have evidence the ID is wrong), wait (the delay is
   // ours — closing is safe, the pill keeps tracking), or help (needs a human).
-  const expectedTaka = settled?.expected ?? 200;
+  const expectedTaka = settled?.expected ?? priceTaka;
   const observedTaka = settled?.observed ?? null;
   const missingTaka = observedTaka != null ? Math.max(0, expectedTaka - observedTaka) : null;
 
@@ -809,7 +1005,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
         return {
           tone: 'warn',
           title: t('purchaseModal.problemNothingTitle'),
-          body: t('purchaseModal.problemNothingBody'),
+          body: t('purchaseModal.problemNothingBody', { amount: pkgPrice }),
           // 'wait', not 'retry'. This verdict is a guess, not evidence — the
           // body literally says "if you've already sent it, give it another
           // minute", and 20s is only the watcher's first retry. Making the
@@ -1122,17 +1318,17 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
               onClick={() => setFeaturesOpen((v) => !v)}
               aria-expanded={featuresOpen}
               aria-controls="pm-features"
-              aria-label={t('purchaseModal.packEyebrow')}
+              aria-label={pkgEyebrow}
               className="mt-1 flex w-full items-baseline gap-2 pb-3 text-left"
             >
               <span className="font-display text-2xl font-semibold leading-none text-[#0F1B2D] tracking-tight">
-                {t('purchaseModal.packPrice')}
+                {pkgPrice}
               </span>
               <span className="text-[#CFCBBC]">·</span>
               <span className="min-w-0 truncate text-[13px] font-semibold text-[#0F1B2D]">
-                {t('purchaseModal.packName')}
+                {pkgName}
               </span>
-              <span className="hidden text-[12px] text-[#6B6759] xs:inline">{t('purchaseModal.packPerUnit')}</span>
+              <span className="hidden text-[12px] text-[#6B6759] xs:inline">{pkgPerUnit}</span>
               <ChevronDown
                 size={16}
                 className={`ml-auto shrink-0 text-[#9F998A] transition-transform duration-200 motion-reduce:transition-none ${featuresOpen ? 'rotate-180' : ''}`}
@@ -1174,16 +1370,16 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
             {/* Hero — price + what */}
             <div className="mt-10">
               <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
-                {t('purchaseModal.packEyebrow')}
+                {pkgEyebrow}
               </div>
               <div className="mt-2 font-display text-6xl font-semibold text-[#0F1B2D] leading-none tracking-tight">
-                {t('purchaseModal.packPrice')}
+                {pkgPrice}
               </div>
               <div className="mt-3 text-lg font-semibold text-[#0F1B2D] leading-tight">
-                {t('purchaseModal.packName')}
+                {pkgName}
               </div>
               <div className="text-[13px] text-[#6B6759] mt-0.5">
-                {t('purchaseModal.packPerUnit')}
+                {pkgPerUnit}
               </div>
             </div>
 
@@ -1202,7 +1398,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
             {/* Trust line at the bottom of the panel */}
             <div className="mt-auto pt-6 flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed">
               <ShieldCheck size={14} className="text-emerald-600 mt-0.5 shrink-0" />
-              <span>{t('purchaseModal.trustLine')}</span>
+              <span>{trustLine}</span>
             </div>
           </div>
         </aside>
@@ -1240,9 +1436,11 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
           <>
           {/* Scrollable middle */}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-2 md:px-9 md:pt-0">
+            {planPicker}
+
             {/* Step 1 — Send money */}
             <section>
-              <StepLabel n={1} label={t('purchaseModal.step1Label')} />
+              <StepLabel n={1 + stepOffset} label={t('purchaseModal.step1Label')} />
               <div
                 className="mt-2.5 flex flex-col gap-2.5 rounded-2xl border-2 bg-white px-4 py-3.5 sm:flex-row sm:items-center sm:gap-3"
                 style={{ borderColor: '#EAE6DA' }}
@@ -1287,14 +1485,14 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
               <p className="mt-2 text-[12.5px] text-[#6B6759] leading-snug">
                 {t('purchaseModal.step1HintBefore')}
                 <strong className="font-bold" style={{ color: BKASH }}>Send Money</strong>
-                {t('purchaseModal.step1HintAfter')}
+                {t('purchaseModal.step1HintAfter', { amount: pkgPrice })}
               </p>
 
               {/* Mobile trust line — sits at the end of Step 1 so Step 2 (below)
                   stays adjacent to the docked CTA above the keyboard. */}
               <div className="mt-4 flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed md:hidden">
                 <ShieldCheck size={13} className="text-emerald-600 mt-0.5 shrink-0" />
-                <span>{t('purchaseModal.trustLine')}</span>
+                <span>{trustLine}</span>
               </div>
             </section>
 
@@ -1303,7 +1501,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
                 and the hint's #6B6759 — because #10B981 and the old #9F998A were
                 2.5:1 and 2.8:1 on white, too faint for 11px digits. */}
             <section className="mt-6">
-              <StepLabel n={2} label={t('purchaseModal.step2Label')} />
+              <StepLabel n={2 + stepOffset} label={t('purchaseModal.step2Label')} />
               {/* Where the TrxID is — a picture beats "10-character code" for a
                   customer looking at an SMS full of numbers. Tight crops of a
                   real SMS (highlighted) and the app receipt (circled). */}
@@ -1457,7 +1655,7 @@ export const PurchaseModal: React.FC<Props> = ({ isOpen, onClose, onSuccess, sou
               )}
               {phase !== 'submitting' && (
                 <>
-                  {t('purchaseModal.submitCta')}
+                  {isMasterPkg ? t('purchaseModal.masterSubmitCta') : t('purchaseModal.submitCta')}
                   <ArrowRight size={18} />
                 </>
               )}
