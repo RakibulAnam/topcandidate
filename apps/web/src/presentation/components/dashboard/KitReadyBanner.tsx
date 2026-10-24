@@ -24,9 +24,11 @@ interface Props {
   /** Null when there is no toolkit to open (should not happen given the gate). */
   onOpenKit: (() => void) | null;
   onHide: () => void;
+  /** Already unlocked (bought the ৳50 master resume): don't promise it "free with it". */
+  masterOwned?: boolean;
 }
 
-export const KitReadyBanner = ({ onBuy, onOpenKit, onHide }: Props) => {
+export const KitReadyBanner = ({ onBuy, onOpenKit, onHide, masterOwned = false }: Props) => {
   const t = useT();
   const { locale } = useLocale();
 
@@ -72,7 +74,7 @@ export const KitReadyBanner = ({ onBuy, onOpenKit, onHide }: Props) => {
             <h2 id="kit-ready-title" className="font-display text-[clamp(21px,3.4vw,30px)] font-semibold leading-[1.15]">
               {t('dashboard.krTitle')}
             </h2>
-            <p className="mt-1 text-[14px] leading-relaxed text-brand-800/80 sm:text-[15px]">{t('dashboard.krBody')}</p>
+            <p className="mt-1 text-[14px] leading-relaxed text-brand-800/80 sm:text-[15px]">{t(masterOwned ? 'dashboard.krBodyOwned' : 'dashboard.krBody')}</p>
           </div>
         </div>
 

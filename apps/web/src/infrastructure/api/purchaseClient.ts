@@ -11,7 +11,9 @@
 import { supabase } from '../supabase/client';
 import { ApiCallError } from '../ai/proxy/ProxyClients';
 
-export type PackageId = 'five-pack';
+// 'five-pack' = 5 credits / ৳200 (+ the master resume on a first purchase);
+// 'master-resume' = the master resume alone, ৳50 (migration 033).
+export type PackageId = 'five-pack' | 'master-resume';
 
 // initiate_purchase v3 (migration 012) may settle the purchase on submit when
 // the verified bKash SMS already arrived (match-on-submit), so the status can

@@ -612,10 +612,22 @@ declare
 begin
   case p_package_id
     when 'five-pack' then v_credits := 5; v_amount_taka := 200;
+    -- Master resume on its own (migration 033): no credits; the completed
+    -- purchase unlocks the master resume via trg_unlock_master_resume.
+    when 'master-resume' then v_credits := 0; v_amount_taka := 50;
     else
       raise exception 'unknown_package_id'
-        using hint = 'Valid packages: five-pack.';
+        using hint = 'Valid packages: five-pack, master-resume.';
   end case;
+
+  -- Nothing to sell an account that already has the master resume unlocked.
+  if p_package_id = 'master-resume' and exists (
+    select 1 from public.profiles
+    where id = auth.uid() and master_resume_unlocked_at is not null
+  ) then
+    raise exception 'already_unlocked'
+      using hint = 'The master resume is already unlocked for this account.';
+  end if;
 
   if length(coalesce(p_transaction_id, '')) < 6 then
     raise exception 'invalid_transaction_id'

@@ -146,15 +146,28 @@ export class SupabaseProfileRepository implements IProfileRepository {
     }
 
     async getCreditStatus(userId: string): Promise<CreditStatus> {
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('toolkit_credits, master_resume_unlocked_at, welcome_credit_at, onboarding_complete')
-            .eq('id', userId)
-            .single();
+        const [{ data, error }, packs] = await Promise.all([
+            supabase
+                .from('profiles')
+                .select('toolkit_credits, master_resume_unlocked_at, welcome_credit_at, onboarding_complete')
+                .eq('id', userId)
+                .single(),
+            // Any completed credit-granting purchase (RLS: own rows only).
+            supabase
+                .from('purchases')
+                .select('id', { count: 'exact', head: true })
+                .eq('user_id', userId)
+                .eq('status', 'completed')
+                .gt('credits_granted', 0),
+        ]);
         if (error) throw error;
+        const masterUnlocked = !!data?.master_resume_unlocked_at;
         return {
             credits: (data?.toolkit_credits as number | null) ?? 0,
-            masterUnlocked: !!data?.master_resume_unlocked_at,
+            masterUnlocked,
+            // If the count can't be read, fall back to the old proxy (before
+            // migration 033 every unlocked account had bought a pack).
+            boughtPack: packs.error ? masterUnlocked : (packs.count ?? 0) > 0,
             welcomePending: !data?.welcome_credit_at && !!data?.onboarding_complete,
         };
     }

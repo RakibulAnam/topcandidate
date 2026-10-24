@@ -24,7 +24,9 @@ import { PhoneInput, isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { PurchaseModal } from './components/PurchaseModal';
 import { requestJdFocus } from './components/dashboard/jdFocusRequest';
-import { MasterResumeInfoDialog } from './components/dashboard/MasterResumeInfoDialog';
+import { MasterResumeOfferSheet } from './components/dashboard/MasterResumeOfferSheet';
+import { invalidateMasterPreview } from './components/dashboard/MasterResumePreview';
+import type { PackageId } from '../infrastructure/api/purchaseClient';
 import { apiErrorMessage } from './i18n/apiErrorMessage.js';
 import { ResumeService } from '../application/services/ResumeService';
 
@@ -103,10 +105,12 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
     // The one credit is the unspent welcome gift (never bought).
     const [onFreeCredit, setOnFreeCredit] = useState(false);
     const [purchaseOpen, setPurchaseOpen] = useState(false);
-    // Every master-resume ask on this page explains it first (issue #65); the
-    // pack sheet then opens without the free-kit gift panel — they chose to buy.
+    // Every master-resume ask on this page opens the offer sheet first; the
+    // bKash sheet then opens on the package they picked, without the free-kit
+    // gift panel — they chose to buy.
     const [masterInfoOpen, setMasterInfoOpen] = useState(false);
     const [purchaseSkipGift, setPurchaseSkipGift] = useState(false);
+    const [purchasePkg, setPurchasePkg] = useState<PackageId>('five-pack');
 
     // Hash of the profile AS SAVED — set on load and after each successful save,
     // never from live edit state. Compared against the hash the general resume
@@ -128,6 +132,8 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
     }, [user?.id]);
 
     const loadProfileData = async () => {
+        // The offer sheet's resume preview reads the profile; keep it current.
+        invalidateMasterPreview(user?.id);
         // Only show full page loader if we haven't loaded anything yet
         if (!personalInfo.email) {
             setLoading(true);
@@ -193,7 +199,7 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                 profileRepository.getCreditStatus(user.id)
                     .then((st) => {
                         setMasterUnlocked(st.masterUnlocked);
-                        setOnFreeCredit(!st.masterUnlocked && st.credits === 1);
+                        setOnFreeCredit(!st.boughtPack && st.credits === 1);
                     })
                     // Unknown → treat as unlocked; the server still gates it.
                     .catch(() => setMasterUnlocked(true));
@@ -244,8 +250,12 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
         } catch (error) {
             console.error('General resume regeneration failed:', error);
             if (ResumeService.isMasterLocked(error)) {
+                // They already have one: updating it comes with a pack (see
+                // the locked row below), not the ৳50 first-unlock offer.
                 setMasterUnlocked(false);
-                setMasterInfoOpen(true);
+                setPurchasePkg('five-pack');
+                setPurchaseSkipGift(true);
+                setPurchaseOpen(true);
                 return;
             }
             const message = apiErrorMessage(error, t) ?? (error instanceof Error ? error.message : t('profile.generalResumeFailed'));
@@ -347,9 +357,10 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
             )}
 
             {/* General Resume — offer to generate (none yet) once there's content. */}
-            {/* Locked (no pack yet): one quiet row — what it is, where it comes from. */}
+            {/* Locked (never bought): the master-resume offer — orange-framed,
+                priced, one tap to the offer sheet. */}
             {generalChecked && masterUnlocked === false && (generalResumeStale || (!generalResume && (experiences.length > 0 || educations.length > 0))) && (
-                <div className="mb-6 flex flex-col gap-3 rounded-xl border border-charcoal-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className={`mb-6 flex flex-col gap-3 rounded-xl px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${generalResume ? 'border border-charcoal-200 bg-white' : 'border-2 border-accent-400 bg-[#FFF7EF]'}`}>
                     <p className="text-sm text-charcoal-600">
                         {generalResume
                             ? t('profile.lockedRegenBody')
@@ -357,10 +368,19 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                     </p>
                     <button
                         type="button"
-                        onClick={() => setMasterInfoOpen(true)}
-                        className="w-full shrink-0 rounded-lg border border-charcoal-300 px-4 py-2 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto"
+                        // Pre-032 accounts that already HAVE a master resume
+                        // aren't offered the ৳50 unlock (it pitches a resume
+                        // they own): updating it comes with a pack, so go
+                        // straight to the pack sheet.
+                        onClick={() => {
+                            if (generalResume) { setPurchasePkg('five-pack'); setPurchaseSkipGift(true); setPurchaseOpen(true); }
+                            else setMasterInfoOpen(true);
+                        }}
+                        className={generalResume
+                            ? 'w-full shrink-0 rounded-lg border border-charcoal-300 px-4 py-2 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto'
+                            : 'w-full shrink-0 rounded-lg bg-accent-400 px-5 py-2.5 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300 sm:w-auto'}
                     >
-                        {t('profile.lockedCta')}
+                        {generalResume ? t('profile.lockedRegenCta') : t('profile.lockedCta')}
                     </button>
                 </div>
             )}
@@ -610,15 +630,18 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                 onSuccess={() => { void handlePurchaseSuccess(); }}
                 source="profile_master"
                 masterBonus={!generalResume}
+                masterOffer={masterUnlocked === false && !generalResume}
+                initialPackage={purchasePkg}
                 freeCredit={onFreeCredit && !purchaseSkipGift}
                 onUseFreeCredit={() => { requestJdFocus(); onGoHome?.(); }}
             />
 
-            <MasterResumeInfoDialog
+            <MasterResumeOfferSheet
                 isOpen={masterInfoOpen}
                 from="profile"
                 onClose={() => setMasterInfoOpen(false)}
-                onGetPack={() => { setPurchaseSkipGift(true); setPurchaseOpen(true); }}
+                onChoose={(pkg) => { setPurchasePkg(pkg); setPurchaseSkipGift(true); setPurchaseOpen(true); }}
+                freeCredit={onFreeCredit}
                 onTailor={() => { requestJdFocus(); onGoHome?.(); }}
             />
         </div>

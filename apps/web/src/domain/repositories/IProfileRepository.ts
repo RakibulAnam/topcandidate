@@ -3,6 +3,11 @@ import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurric
 export interface CreditStatus {
     credits: number;
     masterUnlocked: boolean;
+    /** Has a completed purchase that granted credits (a pack). Since the ৳50
+     *  master-resume package (migration 033) this is NOT the same as
+     *  `masterUnlocked`: a ৳50 buyer is unlocked but still "never bought a
+     *  pack" for every free-kit / pack-nudge decision. */
+    boughtPack: boolean;
     welcomePending: boolean;
 }
 
@@ -22,8 +27,9 @@ export interface IProfileRepository {
 
     /**
      * Credits plus the two purchase-flow flags (migration 032):
-     * `masterUnlocked` — a pack has been bought, so the master resume can be
-     * generated/regenerated; `welcomePending` — profile complete but the
+     * `masterUnlocked` — any purchase has completed (a pack, or the ৳50
+     * master-resume package), so the master resume can be generated/regenerated;
+     * `boughtPack` — a credit-granting purchase has completed; `welcomePending` — profile complete but the
      * one-time free credit hasn't been claimed yet.
      */
     getCreditStatus(userId: string): Promise<CreditStatus>;

@@ -1,7 +1,7 @@
 # ADR-0005: One free tailored application instead of a free master resume
 
 - **Date:** 2026-10-11
-- **Status:** Accepted
+- **Status:** Accepted. Decision 2 amended by ADR-0006: the master resume can also be bought alone for ৳50.
 
 ## Context
 

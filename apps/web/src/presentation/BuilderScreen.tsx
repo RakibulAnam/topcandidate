@@ -85,6 +85,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // Has this account ever bought a pack? Drives the one-line "that was your
   // free application" nudge on the preview and the modal's master-resume bonus.
   const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
+  // Bought a credit pack (not the same as unlocked since the ৳50 master-resume
+  // package, migration 033) — the free-kit nudges key on this.
+  const [boughtPack, setBoughtPack] = useState<boolean | null>(null);
   const openPurchase = (source: PurchaseSource) => {
     setPurchaseSource(source);
     setPurchaseModalOpen(true);
@@ -268,6 +271,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         if (cancelled) return;
         setCredits(status.credits);
         setMasterUnlocked(status.masterUnlocked);
+        setBoughtPack(status.boughtPack);
       })
       .catch(err => console.warn('Could not load toolkit credits', err))
       .finally(() => {
@@ -625,10 +629,11 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
     if (!user) return;
     profileRepository
       .getCreditStatus(user.id)
-      .then(({ credits: n, masterUnlocked: unlocked }) => {
+      .then(({ credits: n, masterUnlocked: unlocked, boughtPack: bought }) => {
         if (!mountedRef.current) return;
         setCredits(n);
         setMasterUnlocked(unlocked);
+        setBoughtPack(bought);
         setCreditsLoaded(true);
         if (!resumeAfterPurchaseRef.current || n <= 0) return;
         resumeAfterPurchaseRef.current = false;
@@ -678,7 +683,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // Peak-end moment: the user has just seen what a full kit looks like. If
   // that was the free welcome credit (never bought, balance now 0), say so in
   // ONE muted line with the price — no modal, no banner.
-  const freeUsedNudge = resumeKindKnown && !isGeneralResume && masterUnlocked === false && credits === 0 ? (
+  const freeUsedNudge = resumeKindKnown && !isGeneralResume && boughtPack === false && credits === 0 ? (
     <p className="text-[12.5px] leading-snug text-charcoal-500">
       {t('builder.freeUsedNudge')}{' '}
       <button
@@ -732,7 +737,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onDashboardClick={onExit}
         showExitBuilder={true}
         credits={credits}
-        freeCredit={masterUnlocked === false && credits === 1}
+        freeCredit={boughtPack === false && credits === 1}
         onBuyCredits={() => openPurchase('header_badge')}
         onResubmit={() => openPurchase('resubmit')}
         onCredited={handlePurchaseSuccess}
