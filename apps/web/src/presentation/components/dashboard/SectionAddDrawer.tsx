@@ -106,19 +106,25 @@ async function saveSection(sectionKey: string, userId: string, v: Record<string,
       return;
     }
     case 'education':
-      return profileRepository.saveEducation(userId, { id, school: v.school, degree: v.degree, field: v.field || '', endDate: v.endDate || '' });
+      await profileRepository.saveEducation(userId, { id, school: v.school, degree: v.degree, field: v.field || '', endDate: v.endDate || '' });
+      return;
     case 'skills':
       return profileRepository.saveSkills(userId, (v.skills || '').split(/[,\n]/).map(s => s.trim()).filter(Boolean));
     case 'certifications':
-      return profileRepository.saveCertification(userId, { id, name: v.name, issuer: v.issuer || '', date: v.date || '' });
+      await profileRepository.saveCertification(userId, { id, name: v.name, issuer: v.issuer || '', date: v.date || '' });
+      return;
     case 'affiliations':
-      return profileRepository.saveAffiliation(userId, { id, organization: v.organization, role: v.role || '', startDate: v.startDate || '', endDate: v.endDate || '' });
+      await profileRepository.saveAffiliation(userId, { id, organization: v.organization, role: v.role || '', startDate: v.startDate || '', endDate: v.endDate || '' });
+      return;
     case 'publications':
-      return profileRepository.savePublication(userId, { id, title: v.title, publisher: v.publisher || '', date: v.date || '' });
+      await profileRepository.savePublication(userId, { id, title: v.title, publisher: v.publisher || '', date: v.date || '' });
+      return;
     case 'languages':
-      return profileRepository.saveLanguage(userId, { id, name: v.name, proficiency: (v.proficiency || 'Fluent') as LanguageProficiency });
+      await profileRepository.saveLanguage(userId, { id, name: v.name, proficiency: (v.proficiency || 'Fluent') as LanguageProficiency });
+      return;
     case 'references':
-      return profileRepository.saveReference(userId, { id, name: v.name, position: v.position || '', organization: v.organization || '', email: v.email || '', phone: v.phone || '' });
+      await profileRepository.saveReference(userId, { id, name: v.name, position: v.position || '', organization: v.organization || '', email: v.email || '', phone: v.phone || '' });
+      return;
   }
 }
 
