@@ -100,7 +100,7 @@ export const RevenueTab: React.FC<{ api: AdminApi }> = ({ api }) => {
                 <div>
                   <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">Outstanding liability</div>
                   <div className="mt-1 font-display text-3xl font-semibold text-brand-700 leading-none tabular-nums">{taka(data.creditLiability.liabilityTaka)}</div>
-                  <div className="mt-2 text-[12px] text-charcoal-500">{data.creditLiability.outstandingCredits.toLocaleString()} unredeemed credits × ৳40</div>
+                  <div className="mt-2 text-[12px] text-charcoal-500">{data.creditLiability.outstandingCredits.toLocaleString()} unredeemed credits × ৳39.8</div>
                 </div>
                 {data.creditLiability.negativeBalanceUsers > 0 && (
                   <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700 font-semibold">

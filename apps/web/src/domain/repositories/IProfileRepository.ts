@@ -3,11 +3,18 @@ import { PersonalInfo, WorkExperience, Education, Project, UserType, Extracurric
 export interface CreditStatus {
     credits: number;
     masterUnlocked: boolean;
-    /** Has a completed purchase that granted credits (a pack). Since the ৳50
-     *  master-resume package (migration 033) this is NOT the same as
-     *  `masterUnlocked`: a ৳50 buyer is unlocked but still "never bought a
-     *  pack" for every free-kit / pack-nudge decision. */
+    /** Has a completed purchase that granted credits (a pack). Since the
+     *  master-resume package (migration 033, ৳99 since 034) this is NOT the
+     *  same as `masterUnlocked`: a master-resume buyer is unlocked but still
+     *  "never bought a pack" for every pack-nudge decision. */
     boughtPack: boolean;
+    /** Account existed before migration 034: master resume ৳50 (not ৳99) and
+     *  the one-time welcome credit still applies. */
+    legacyPricing: boolean;
+    /** Migration 034 is live (its legacy_pricing column exists): the pack is
+     *  ৳199. False = still on 033 pricing (pack ৳200, master ৳50 for all). */
+    newPricing: boolean;
+    /** Legacy account, profile complete, welcome credit not claimed yet. */
     welcomePending: boolean;
 }
 
@@ -27,13 +34,14 @@ export interface IProfileRepository {
 
     /**
      * Credits plus the two purchase-flow flags (migration 032):
-     * `masterUnlocked` — any purchase has completed (a pack, or the ৳50
+     * `masterUnlocked` — any purchase has completed (a pack, or the ৳99
      * master-resume package), so the master resume can be generated/regenerated;
-     * `boughtPack` — a credit-granting purchase has completed; `welcomePending` — profile complete but the
-     * one-time free credit hasn't been claimed yet.
+     * `boughtPack` — a credit-granting purchase has completed;
+     * `legacyPricing` / `welcomePending` — see CreditStatus.
      */
     getCreditStatus(userId: string): Promise<CreditStatus>;
-    /** Claims the one-time free credit. New balance when granted, null when not. */
+    /** Claims the one-time welcome credit (legacy accounts only, migration
+     *  034). New balance when granted, null when not. */
     claimWelcomeCredit(): Promise<number | null>;
 
     getExperiences(userId: string): Promise<WorkExperience[]>;

@@ -141,7 +141,7 @@ export const PurchaseHistoryScreen = ({ onBack }: Props) => {
                   </span>
                   <span className="min-w-0 flex-[1_1_200px]">
                     <span className="block text-[14.5px] font-semibold text-brand-700">
-                      {/* A 0-credit row is the ৳50 master-resume package (migration 033). */}
+                      {/* A 0-credit row is the master-resume package (migration 033). */}
                       {p.creditsGranted === 0
                         ? t('purchaseHistory.masterLine', { amount: p.amountTaka.toLocaleString() })
                         : t('purchaseHistory.creditsLine', { credits: p.creditsGranted, amount: p.amountTaka.toLocaleString() })}

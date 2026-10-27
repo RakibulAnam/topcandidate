@@ -8,8 +8,8 @@
 // becoming visible again, and only while the paste box is still empty.
 //
 // It floats above the phone tab bar (bottom-right on desktop) and goes away on
-// tap, on ✕, or as soon as the box has text. Orange, like the welcome banner it
-// continues — navy disappeared against the navy job board it usually sits over.
+// tap, on ✕, or as soon as the box has text. Orange, the dashboard's accent
+// for guidance — navy disappeared against the navy job board it usually sits over.
 import React, { useEffect } from 'react';
 import { ClipboardPaste, X } from 'lucide-react';
 import { useT } from '../../i18n/LocaleContext';

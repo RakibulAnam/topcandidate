@@ -6,6 +6,13 @@ export interface IResumeOptimizer {
   optimize(data: ResumeData): Promise<OptimizedResumeData>;
 }
 
+// The master-resume optimizer can also build a preview for a locked account:
+// the same build, but only its summary comes back (the rest is the paid
+// product). Built once per profile and reused when the purchase lands.
+export interface IMasterResumePreviewer {
+  previewSummary(data: ResumeData): Promise<string>;
+}
+
 export class OptimizeResumeUseCase {
   constructor(private resumeOptimizer: IResumeOptimizer) {}
 

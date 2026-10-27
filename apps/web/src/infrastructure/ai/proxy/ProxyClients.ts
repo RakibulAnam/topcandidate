@@ -21,7 +21,7 @@ import {
   IProfileItemNormalizer,
   ProfileItemContext,
 } from '../../../domain/usecases/NormalizeProfileItemUseCase';
-import { IResumeOptimizer } from '../../../domain/usecases/OptimizeResumeUseCase';
+import { IMasterResumePreviewer, IResumeOptimizer } from '../../../domain/usecases/OptimizeResumeUseCase';
 import { IToolkitGenerator } from '../../../domain/usecases/GenerateToolkitUseCase';
 import { ICoverLetterGenerator } from '../../../domain/usecases/GenerateCoverLetterUseCase';
 import { IOutreachEmailGenerator } from '../../../domain/usecases/GenerateOutreachEmailUseCase';
@@ -151,11 +151,17 @@ export class ProxyResumeOptimizer implements IResumeOptimizer {
 
 // Calls /api/optimize-general — no credit charge, optimizer only; 402
 // `master_locked` until the account's first purchase (migration 032).
-// Used exclusively for the General Resume feature.
-export class ProxyGeneralResumeOptimizer implements IResumeOptimizer {
+// Used exclusively for the General Resume feature. `previewSummary` is the
+// locked account's dashboard preview (no unlock needed, summary only).
+export class ProxyGeneralResumeOptimizer implements IResumeOptimizer, IMasterResumePreviewer {
   async optimize(data: ResumeData): Promise<OptimizedResumeData> {
     const r = await postJson<{ optimized: OptimizedResumeData }>('/api/optimize-general', { data });
     return r.optimized;
+  }
+
+  async previewSummary(data: ResumeData): Promise<string> {
+    const r = await postJson<{ summary: string }>('/api/optimize-general', { data, preview: true });
+    return r.summary;
   }
 }
 

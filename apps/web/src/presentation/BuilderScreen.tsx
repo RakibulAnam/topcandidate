@@ -10,7 +10,9 @@ import { useAuth } from '../infrastructure/auth/AuthContext';
 import { Sparkles, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Navbar } from './components/Layout/Navbar';
 import { PurchaseModal, type PurchaseSource } from './components/PurchaseModal';
-import { profileRepository } from '../infrastructure/config/dependencies';
+import { createResumeService, profileRepository } from '../infrastructure/config/dependencies';
+import { packPriceLabel } from './pricing';
+import { useResumeOfferProfile, useResumeOfferSummary } from './components/dashboard/resumeOfferData';
 import { ApiCallError } from '../infrastructure/ai/proxy/ProxyClients';
 import { apiErrorMessage, isRetryPointless } from './i18n/apiErrorMessage.js';
 import { useT } from './i18n/LocaleContext';
@@ -85,9 +87,24 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // Has this account ever bought a pack? Drives the one-line "that was your
   // free application" nudge on the preview and the modal's master-resume bonus.
   const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
-  // Bought a credit pack (not the same as unlocked since the ৳50 master-resume
+  // Bought a credit pack (not the same as unlocked since the master-resume
   // package, migration 033) — the free-kit nudges key on this.
   const [boughtPack, setBoughtPack] = useState<boolean | null>(null);
+  // Has a master ("General") resume row. Pre-032 accounts can be locked and
+  // still have one; they are never sold the ৳99 master resume.
+  const [hasMaster, setHasMaster] = useState<boolean | null>(null);
+  // Account existed before migration 034: the master resume is ৳50, not ৳99.
+  const [legacyPricing, setLegacyPricing] = useState<boolean | null>(null);
+  const [newPricing, setNewPricing] = useState<boolean | null>(null);
+  // An empty profile (no experience or education) can't be built into a
+  // master resume, so it must not be sold one. Cached, shared read.
+  const offerProfile = useResumeOfferProfile(user?.id, masterUnlocked === false);
+  // Same cached preview request as the dashboard: a profile the build refuses
+  // (random text) isn't sold a resume that can't be made either. Only while
+  // the purchase sheet is open (Builder opens it at 0 credits, so no paid
+  // generation is running): it must never add a third concurrent AI call to
+  // the optimizer + toolkit hot path (CLAUDE.md rule 5).
+  const offerSummary = useResumeOfferSummary(user?.id, purchaseModalOpen && masterUnlocked === false && hasMaster === false);
   const openPurchase = (source: PurchaseSource) => {
     setPurchaseSource(source);
     setPurchaseModalOpen(true);
@@ -265,6 +282,9 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    (resumeService ?? createResumeService()).hasGeneralResume(user.id)
+      .then(has => { if (!cancelled) setHasMaster(has); })
+      .catch(() => { /* unknown: the sheet stays pack-only */ });
     profileRepository
       .getCreditStatus(user.id)
       .then(status => {
@@ -272,6 +292,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         setCredits(status.credits);
         setMasterUnlocked(status.masterUnlocked);
         setBoughtPack(status.boughtPack);
+        setLegacyPricing(status.legacyPricing);
+        setNewPricing(status.newPricing);
       })
       .catch(err => console.warn('Could not load toolkit credits', err))
       .finally(() => {
@@ -677,6 +699,12 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       onSuccess={handlePurchaseSuccess}
       source={purchaseSource}
       masterBonus={masterUnlocked === false}
+      // Locked with no master resume: the sheet also offers the ৳99 master
+      // resume (plan picker), the pack preselected — this is a credit gate.
+      masterOffer={masterUnlocked === false && hasMaster === false && offerProfile !== null && !offerProfile.empty && offerSummary.status !== 'unbuildable'}
+      initialPackage="five-pack"
+      legacyPricing={legacyPricing}
+      newPricing={newPricing}
     />
   );
 
@@ -691,7 +719,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         onClick={() => openPurchase('free_used_nudge')}
         className="font-semibold text-accent-600 underline-offset-2 hover:underline"
       >
-        {t('builder.freeUsedNudgeCta')}
+        {t('builder.freeUsedNudgeCta', { price: packPriceLabel(t, newPricing) })}
       </button>
     </p>
   ) : null;

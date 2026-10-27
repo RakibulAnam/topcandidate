@@ -92,9 +92,9 @@ whether the payment reaches the server before or after the customer submits.
 
 | Web state to see | Steps |
 |---|---|
-| Instant credit (green check) | Tap **Pay ৳200**, then paste the TrxID into the web modal and submit. The server already holds the payment, so it settles inside the submit request. |
-| Verifying panel → green check | Submit the TrxID on web FIRST, then tap **Pay ৳200** within 20s. The panel flips to the check live over Realtime. |
-| `likely_typo` | Tap **Pay ৳200**, then submit the **Copy typo** value on web. After 20s the modal reports the mismatch and offers a retry. The card describes NO payment — no amount, no sender, masked or otherwise (web migrations 029/030). Nothing at diagnosis time proves the near-miss belongs to the person asking, and letting the customer-supplied sender number decide the verdict turned it into a "does this number have an unclaimed payment?" oracle. Detection is by TrxID similarity alone. |
+| Instant credit (green check) | Tap **Pay ৳199**, then paste the TrxID into the web modal and submit. The server already holds the payment, so it settles inside the submit request. |
+| Verifying panel → green check | Submit the TrxID on web FIRST, then tap **Pay ৳199** within 20s. The panel flips to the check live over Realtime. |
+| `likely_typo` | Tap **Pay ৳199**, then submit the **Copy typo** value on web. After 20s the modal reports the mismatch and offers a retry. The card describes NO payment — no amount, no sender, masked or otherwise (web migrations 029/030). Nothing at diagnosis time proves the near-miss belongs to the person asking, and letting the customer-supplied sender number decide the verdict turned it into a "does this number have an unclaimed payment?" oracle. Detection is by TrxID similarity alone. |
 | `awaiting_sms` | Only reachable when `watcher_heartbeats` is EMPTY (no ping has ever landed), or while the row is younger than the **15s** grace window. Clear the table, submit an unused TrxID, send nothing. |
 | `nothing_found` | Tap **Send heartbeat now** first and confirm it reports "✓ Heartbeat accepted" — a rejection means that server build has no heartbeat route. Then submit an unused TrxID and wait out the modal's 20s window. A live watcher plus no payment is what makes the firmer copy honest. |
 | `watcher_stale` | Turn on **Pause heartbeat**, wait ~5 min for the server's staleness threshold, then submit on web. Switching the master **Test tools** toggle off also lifts the pause, so the watcher cannot be left mute by accident. |

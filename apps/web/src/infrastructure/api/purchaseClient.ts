@@ -11,8 +11,8 @@
 import { supabase } from '../supabase/client';
 import { ApiCallError } from '../ai/proxy/ProxyClients';
 
-// 'five-pack' = 5 credits / ৳200 (+ the master resume on a first purchase);
-// 'master-resume' = the master resume alone, ৳50 (migration 033).
+// 'five-pack' = 5 credits / ৳199 (+ the master resume on a first purchase);
+// 'master-resume' = the master resume alone, ৳99 (migration 033; repriced by 034).
 export type PackageId = 'five-pack' | 'master-resume';
 
 // initiate_purchase v3 (migration 012) may settle the purchase on submit when

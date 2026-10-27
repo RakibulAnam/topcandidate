@@ -15,6 +15,7 @@ create table profiles (
   website text,
   toolkit_credits integer not null default 0,  -- paid tailored-resume generations remaining
   welcome_credit_at timestamptz,              -- one-time free credit granted (migration 032)
+  legacy_pricing boolean not null default false, -- existed before 034: ৳50 master resume + welcome credit
   master_resume_unlocked_at timestamptz,      -- first completed purchase; gates the master resume (032)
   updated_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now())
@@ -611,10 +612,15 @@ declare
   v_surplus       integer;
 begin
   case p_package_id
-    when 'five-pack' then v_credits := 5; v_amount_taka := 200;
-    -- Master resume on its own (migration 033): no credits; the completed
-    -- purchase unlocks the master resume via trg_unlock_master_resume.
-    when 'master-resume' then v_credits := 0; v_amount_taka := 50;
+    when 'five-pack' then v_credits := 5; v_amount_taka := 199;
+    -- Master resume on its own (migration 033; ৳99 since 034): no credits;
+    -- the completed purchase unlocks the master resume via
+    -- trg_unlock_master_resume.
+    when 'master-resume' then
+      v_credits := 0;
+      v_amount_taka := case when exists (
+        select 1 from public.profiles where id = auth.uid() and legacy_pricing
+      ) then 50 else 99 end;
     else
       raise exception 'unknown_package_id'
         using hint = 'Valid packages: five-pack, master-resume.';
@@ -1453,7 +1459,7 @@ do $$ begin
     alter table ai_call_log drop constraint ai_call_log_kind_check;
   end if;
   alter table ai_call_log add constraint ai_call_log_kind_check
-    check (kind in ('optimize','optimize_general','toolkit','toolkit_item','extract_resume','normalize'));
+    check (kind in ('optimize','optimize_general','master_preview','toolkit','toolkit_item','extract_resume','normalize'));
 end $$;
 
 -- Free vs paid generation typing.
@@ -2081,10 +2087,9 @@ create trigger trg_unlock_master_resume
   for each row execute function public.unlock_master_resume_on_purchase();
 
 -- ---------------------------------------------------------------------------
--- Claim the one-time welcome credit. User-callable; acts on auth.uid() only.
--- Returns the new balance when a credit was granted, NULL when nothing was
--- granted (already claimed, or profile not complete yet).
+-- Claim the one-time welcome credit (migration 032). User-callable.
 -- ---------------------------------------------------------------------------
+-- Since migration 034 only legacy_pricing accounts (existed before 034) get it.
 create or replace function public.claim_welcome_credit()
 returns integer
 language plpgsql
@@ -2105,6 +2110,7 @@ begin
     set toolkit_credits = toolkit_credits + 1,
         welcome_credit_at = now()
     where id = v_uid
+      and legacy_pricing
       and welcome_credit_at is null
       and coalesce(onboarding_complete, false)
     returning toolkit_credits into v_balance;
@@ -2114,3 +2120,19 @@ end;
 $$;
 revoke execute on function public.claim_welcome_credit() from public, anon;
 grant execute on function public.claim_welcome_credit() to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Saved master-resume preview (migration 034). Built once by
+-- /api/optimize-general in preview mode; reused when the ৳99 master-resume
+-- purchase lands. Service role only — the client only ever gets `summary`.
+-- ---------------------------------------------------------------------------
+create table if not exists public.master_previews (
+  user_id      uuid primary key references auth.users on delete cascade,
+  profile_hash text not null,
+  summary      text not null,
+  optimized    jsonb not null,
+  created_at   timestamptz not null default timezone('utc', now()),
+  updated_at   timestamptz not null default timezone('utc', now())
+);
+alter table public.master_previews enable row level security;
+revoke all on table public.master_previews from anon, authenticated;

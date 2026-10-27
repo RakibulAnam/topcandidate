@@ -241,7 +241,7 @@ export const components = {
   // { lang: en|bn, rows?: [[label, value]], win?: [label, value], y: 380, bg }
   price(p, c) {
     const rows = p.rows || [["CV writer in Dhaka", "৳2,000–3,500"], ["Subscription", "৳800+/mo"]];
-    const win = p.win || ["TOP CANDIDATE · 5 applications", "৳200"];
+    const win = p.win || ["TOP CANDIDATE · 5 applications", "৳199"];
     const html = `${bgLayer(c.id, p.bg)}<div class="card price" id="${c.id}-c" style="top:${n(p.y, 380)}px"><div class="eyebrow">${c.esc(n(p.eyebrow, "What it costs"))}</div>${rows.map(([k, v], i) => `<div class="prow old" id="${c.id}-r${i}"><span class="pk">${c.esc(k)}</span><span class="pv">${c.esc(v)}<span class="strike" id="${c.id}-s${i}"></span></span></div>`).join("")}<div class="prow win" id="${c.id}-w"><span>${c.esc(win[0])}</span><span class="pv">${c.esc(win[1])}</span></div></div>`;
     const js = [
       bgIn(c.id, p.bg, c.t0),
@@ -290,7 +290,7 @@ export const components = {
     const bn = p.lang === "bn";
     const head = n(p.headline, bn ? "সব জায়গায় একই রিজিউমে পাঠানো *বন্ধ করুন*।" : "Stop sending the *same resume* everywhere.");
     const btn = n(p.button, bn ? "ফ্রিতে শুরু করুন" : "Start free");
-    const sub = n(p.sub, bn ? "প্রথম আবেদন ফ্রি · ৫টি আবেদন মাত্র ৳২০০ · bKash-এ পেমেন্ট" : "First application free · ৳200 for 5 applications · Pay with bKash");
+    const sub = n(p.sub, bn ? "সাইন আপ ফ্রি · ৫টি আবেদন মাত্র ৳১৯৯ · bKash-এ পেমেন্ট" : "Free to sign up · ৳199 for 5 applications · Pay with bKash");
     const html = `<div class="full-bg" id="${c.id}-bg"></div><div class="brand-lockup" style="top:300px">${logoSvg()}<div class="wordmark" id="${c.id}-wm"><span class="w1">TOP</span> <span class="w2">CANDIDATE</span></div></div><div class="cta-head ${isBn(head) ? "bn" : ""}" id="${c.id}-h" style="top:760px">${c.rich(head)}</div><div class="cta-btn ${isBn(btn) ? "bn" : ""}" id="${c.id}-b" style="top:1130px">${c.esc(btn)} <span class="arr">→</span></div><div class="cta-url" id="${c.id}-u" style="top:1300px">${c.esc(n(p.url, c.B.url))}</div><div class="cta-sub ${isBn(sub) ? "bn" : ""}" id="${c.id}-s" style="top:1380px">${c.esc(sub)}</div><div class="cta-bar" id="${c.id}-bar"></div>`;
     const js = [
       `tl.fromTo("#${c.id}-bg", { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "none" }, ${at(c.t0)});`,

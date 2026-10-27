@@ -216,8 +216,8 @@ of it (see §0.1 and the companion doc).
       in §0.1 — **not** any real customer account).
 - [ ] Do this: Click the **Buy credits / Buy generations** button (top
       right). The purchase modal opens showing the bKash payment number
-      and **৳200**.
-- [ ] Do this: Send **exactly ৳200** in bKash from any real bKash account
+      and **৳199**.
+- [ ] Do this: Send **exactly ৳199** in bKash from any real bKash account
       to the displayed number. (If you don't have real bKash, ask the web
       team to insert a row directly — see the companion doc for the
       "Seed pending row" workflow.)
@@ -253,7 +253,7 @@ of it (see §0.1 and the companion doc).
 - [ ] Do this: Tap the row.
   Expect this: A bottom sheet opens with:
       - The TrxID in big monospace text + a small copy icon.
-      - **Sender** (the phone number), **Amount** (`Tk 200`), **Received**
+      - **Sender** (the phone number), **Amount** (`Tk 199`), **Received**
         time, **Attempts** (1), and no last error.
       - The raw SMS body shown in a grey monospace box.
       - **"Retry now"** button is NOT visible (because the row is DONE).
@@ -391,13 +391,13 @@ not change any other row's `created_at`.
 
 ## 7. Underpayment (NEW in v1.1.0+2) — 409 `underpaid`
 
-The customer claims to send ৳200 but actually sends less.
+The customer claims to send ৳199 but actually sends less.
 
 Pre-step (web side): create a pending purchase for the test user with
-TrxID `QA-UNDER01` expecting ৳200.
+TrxID `QA-UNDER01` expecting ৳199.
 
 - [ ] Do this: Inject an SMS that says `Tk 50.00` (or any amount less
-      than 200) with TrxID `QA-UNDER01`.
+      than 199) with TrxID `QA-UNDER01`.
 - [ ] Open the History tab.
   Expect this:
       - The row's badge changes to **MISMATCH** (red) within ~10 seconds.

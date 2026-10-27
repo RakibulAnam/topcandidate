@@ -45,7 +45,7 @@ class TestToolsPanel extends StatefulWidget {
 }
 
 class _TestToolsPanelState extends State<TestToolsPanel> {
-  static const _packPriceTaka = 200;
+  static const _packPriceTaka = 199;
   static const _defaultSender = '01711234567';
   static const _otherSender = '01799999999';
 
@@ -247,7 +247,7 @@ class _TestToolsPanelState extends State<TestToolsPanel> {
           children: [
             FilledButton.icon(
               icon: const Icon(Icons.payments),
-              label: const Text('Pay ৳200'),
+              label: const Text('Pay ৳199'),
               onPressed: _busy ? null : () => _send(amountTaka: _packPriceTaka, sender: _defaultSender),
             ),
             OutlinedButton.icon(

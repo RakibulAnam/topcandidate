@@ -30,7 +30,7 @@ import { userClient } from './auth.js';
 
 export const DEFAULT_DAILY_CAP = 20;
 
-export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_item' | 'extract_resume' | 'normalize';
+export type CallKind = 'optimize' | 'optimize_general' | 'master_preview' | 'toolkit' | 'toolkit_item' | 'extract_resume' | 'normalize';
 
 // Per-kind daily caps, enforced IN ADDITION to the overall cap. The
 // general-resume path charges no credit (since migration 032 it is unlocked by
@@ -39,13 +39,18 @@ export type CallKind = 'optimize' | 'optimize_general' | 'toolkit' | 'toolkit_it
 // first few.
 export const KIND_DAILY_CAPS: Partial<Record<CallKind, number>> = {
   optimize_general: 5,
+  // The dashboard's locked-account resume preview (optimize-general preview
+  // mode, migration 034): one build per profile version, stored and reused, so
+  // a real user needs one or two a day. Its own cap so previews can never use
+  // up the paid build's optimize_general allowance on the day someone pays.
+  master_preview: 3,
   normalize: 40,
   // Per-item toolkit regeneration is FREE to the user and the most expensive
   // single call we make (~$0.0089 for the bilingual interview block — measured
   // 2026-08-04). Previously it was bounded only by the overall 20/day cap, so an
   // account with zero credits could still burn ~15 x $0.0089 = $0.13/day of our
   // money indefinitely, having paid nothing. Over a month that exceeds the entire
-  // margin on a ৳200 pack — a bigger drain on profit than any model choice.
+  // margin on a ৳199 pack — a bigger drain on profit than any model choice.
   //
   // 8/day is deliberately generous for legitimate use: it is two retries for each
   // of the four artifact types in a single day, and a guard failure is the only
@@ -94,7 +99,7 @@ export class RateLimitError extends Error {
   status = 429;
   constructor(public used: number, public cap: number, public scope: 'daily' | CallKind = 'daily') {
     super(
-      scope === 'optimize_general'
+      scope === 'optimize_general' || scope === 'master_preview'
         ? `Daily free-resume limit reached (${used}/${cap}). Try again in ~24 hours.`
         : `Daily limit reached (${used}/${cap}). Try again in ~24 hours.`
     );

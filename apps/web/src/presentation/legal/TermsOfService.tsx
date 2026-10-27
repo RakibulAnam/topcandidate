@@ -22,7 +22,7 @@ interface Props {
   onBack: () => void;
 }
 
-const LAST_UPDATED = 'October 11, 2026';
+const LAST_UPDATED = 'October 27, 2026';
 
 export const TermsOfService: React.FC<Props> = ({ onBack }) => {
   return (
@@ -122,10 +122,12 @@ export const TermsOfService: React.FC<Props> = ({ onBack }) => {
           <p>
             Tailored application packages (résumé + cover letter + outreach + LinkedIn note +
             interview prep) are sold as <strong>credit packs</strong> denominated in Bangladeshi
-            Taka (BDT). Credits do not expire. Each tailored generation consumes one credit. Each
-            new account receives one free credit once its profile is complete. The{' '}
-            <em>General Résumé</em> (master résumé) is included with an account&apos;s first credit
-            pack and does not consume credits.
+            Taka (BDT). Credits do not expire. Each tailored generation consumes one credit.
+            Signing up and building your profile are free. Accounts that existed before our current
+            pricing took effect keep the one free credit they were offered once their profile is
+            complete; newer accounts do not receive a free credit. The <em>General Résumé</em>{' '}
+            (master résumé) can be bought on its own, or comes included with an account&apos;s first
+            credit pack, and does not consume credits.
           </p>
           <p>
             Payment is collected via <strong>bKash Personal / Agent Send Money</strong> to the

@@ -13,6 +13,7 @@ import { Search, User, LogOut, Home, LayoutGrid, FileText, Receipt } from 'lucid
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { createResumeService, profileRepository } from '../../../infrastructure/config/dependencies';
 import { ResumeService } from '../../../application/services/ResumeService';
+import type { CreditStatus } from '../../../domain/repositories/IProfileRepository';
 import type { ResumeListItem } from '../../../domain/repositories/IResumeRepository';
 import type { NavScreen } from '../../hooks/useBrowserNav';
 import { useT } from '../../i18n/LocaleContext';
@@ -21,32 +22,38 @@ import { CreditsBadge } from '../CreditsBadge';
 import { VerifyingPurchasePill } from '../Layout/VerifyingPurchasePill';
 import { PurchaseModal, type PurchaseSource } from '../PurchaseModal';
 import { requestJdFocus } from './jdFocusRequest';
-import { MasterResumeOfferSheet, type MasterInfoFrom } from './MasterResumeOfferSheet';
-import { useMasterPreview } from './MasterResumePreview';
+import { useResumeOfferProfile, useResumeOfferSummary } from './resumeOfferData';
 import { useOpenPurchase } from '../../hooks/useOpenPurchase';
 import type { PackageId } from '../../../infrastructure/api/purchaseClient';
 import { CommandPalette } from './CommandPalette';
 import { LogoMark } from '../ui/LogoMark';
+import { masterPriceLabel } from '../../pricing';
 
 interface ShellCtx {
   credits: number | null;
-  refreshCredits: () => Promise<void>;
+  refreshCredits: () => Promise<CreditStatus | null>;
   /** Any purchase has completed → the master resume can be built. Null while loading. */
   masterUnlocked: boolean | null;
   /** A credit-granting pack has been bought. Null while loading. NOT the same
-   *  as masterUnlocked since the ৳50 master-resume package (migration 033) —
-   *  every "never bought, still in the free-kit phase" decision keys on this. */
+   *  as masterUnlocked since the master-resume package (migration 033, ৳99
+   *  since 034) — every "never bought a pack" decision keys on this. */
   boughtPack: boolean | null;
+  /** Account existed before migration 034 (৳50 master resume). Null while loading. */
+  legacyPricing: boolean | null;
   /** The only credit left is the free welcome one (never bought a pack). */
   onFreeCredit: boolean;
   /** Open the bKash sheet. `pkg` preselects a package (default: the pack). */
   openPurchase: (source?: PurchaseSource, pkg?: PackageId) => void;
-  /** No master resume and never bought: the ৳50 master-resume package is on
-   *  offer (MasterResumeOfferSheet, MasterOfferBanner, the sheet's plan picker). */
+  /** No master resume and never bought: the ৳99 master-resume package is on
+   *  offer (the dashboard's ResumeOfferPreview, the priced Master tab). */
   masterOffer: boolean;
-  /** Account reaching for a master resume it doesn't have: open the offer
-   *  sheet (their resume preview + ৳50 / ৳200 choices). */
-  openMasterInfo: (from: MasterInfoFrom) => void;
+  /** Locked with no master resume, but the profile read that decides
+   *  `masterOffer` hasn't answered yet — hold the preview's space. */
+  masterOfferPending: boolean;
+  /** Account reaching for a master resume it doesn't have: open the bKash
+   *  sheet on the ৳99 master-resume package. `refused` = the server just said
+   *  master_locked, so the account IS locked whatever the status read said. */
+  openMasterPurchase: (source: PurchaseSource, opts?: { refused?: boolean }) => void;
   openSearch: () => void;
   generalResume: ResumeListItem | null;
   /** True while a master-resume build is in flight (background or banner). */
@@ -94,6 +101,8 @@ export const DashboardShell: React.FC<Props> = ({
   const [loadingShell, setLoadingShell] = useState(true);
   const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
   const [boughtPack, setBoughtPack] = useState<boolean | null>(null);
+  const [legacyPricing, setLegacyPricing] = useState<boolean | null>(null);
+  const [newPricing, setNewPricing] = useState<boolean | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseSource, setPurchaseSource] = useState<PurchaseSource>('other');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -142,16 +151,21 @@ export const DashboardShell: React.FC<Props> = ({
     }
   }, [buildMaster, t]);
 
-  const refreshCredits = useCallback(async () => {
-    if (!user) return;
+  // Resolves with the fresh status (null if it couldn't be read); never rejects.
+  const refreshCredits = useCallback(async (): Promise<CreditStatus | null> => {
+    if (!user) return null;
     try {
       const status = await profileRepository.getCreditStatus(user.id);
       setCredits(status.credits);
       setMasterUnlocked(status.masterUnlocked);
       setBoughtPack(status.boughtPack);
+      setLegacyPricing(status.legacyPricing);
+      setNewPricing(status.newPricing);
       if (status.masterUnlocked) void autoBuildMaster();
+      return status;
     } catch (err) {
       console.warn('Could not refresh toolkit credits', err);
+      return null;
     }
   }, [user, autoBuildMaster]);
 
@@ -173,17 +187,17 @@ export const DashboardShell: React.FC<Props> = ({
       generalResumeRef.current = existing;
       if (!status) return;
       let balance = status.credits;
-      // Backstop for the one-time welcome credit: profile setup claims it on
-      // finish, but if that call failed (or the profile was completed before
-      // this shipped) the shell picks it up. The RPC is idempotent.
+      // Backstop for the one-time welcome credit of accounts that existed
+      // before migration 034: profile setup claims it on finish, but if that
+      // call failed the shell picks it up. The RPC is idempotent, and new
+      // accounts never have welcomePending.
       if (status.welcomePending) {
         const granted = await profileRepository.claimWelcomeCredit().catch(() => null);
         if (granted !== null) {
           balance = granted;
         } else {
-          // Nothing granted here — usually because a parallel claim (profile
-          // setup, another tab) got it first, so `status.credits` predates it.
-          // Re-read rather than show a balance one short.
+          // Nothing granted here — usually a parallel claim (profile setup,
+          // another tab) got it first, so `status.credits` predates it.
           const fresh = await profileRepository.getCreditStatus(user.id).catch(() => null);
           if (fresh) balance = fresh.credits;
         }
@@ -192,6 +206,8 @@ export const DashboardShell: React.FC<Props> = ({
       setCredits(balance);
       setMasterUnlocked(status.masterUnlocked);
       setBoughtPack(status.boughtPack);
+      setLegacyPricing(status.legacyPricing);
+      setNewPricing(status.newPricing);
       if (status.masterUnlocked && !existing) void autoBuildMaster();
     }).finally(() => { if (!cancelled) setLoadingShell(false); });
     return () => { cancelled = true; };
@@ -212,8 +228,8 @@ export const DashboardShell: React.FC<Props> = ({
     ?? user?.email?.split('@')[0]
     ?? t('dashboard.greetingFallbackName');
 
-  // Opened from the master-resume explainer: the user has already chosen to
-  // buy, so the sheet skips the free-kit gift panel.
+  // Opened for a specific package: the user has already chosen to buy, so the
+  // sheet skips the free-kit gift panel.
   const [purchaseSkipGift, setPurchaseSkipGift] = useState(false);
   const [purchasePkg, setPurchasePkg] = useState<PackageId>('five-pack');
   // A package choice is a decision already made: skip the free-kit gift panel
@@ -224,33 +240,57 @@ export const DashboardShell: React.FC<Props> = ({
     setPurchasePkg(pkg ?? 'five-pack');
     setPurchaseOpen(true);
   }, []);
-  const [masterInfoFrom, setMasterInfoFrom] = useState<MasterInfoFrom | null>(null);
-  const openMasterInfo = useCallback((from: MasterInfoFrom) => {
-    // The server just refused a build with master_locked: the account IS
-    // locked, even if the status read failed and left this unknown — without
-    // it the sheet's ৳50 button would land on a ৳200-only purchase sheet.
-    if (from === 'build_refused') setMasterUnlocked(false);
-    setMasterInfoFrom(from);
-  }, []);
+  const openMasterPurchase = useCallback((source: PurchaseSource, opts?: { refused?: boolean }) => {
+    // Without this a refused build whose status read had failed would land on
+    // a pack-only sheet: the master package is only sold while masterOffer
+    // holds. Re-read too, so the sheet learns this account's price (৳50 / ৳99)
+    // if the first read never arrived.
+    // Opened after the re-read lands, so the sheet doesn't open pack-only and
+    // then switch itself to the master resume.
+    if (opts?.refused) {
+      setMasterUnlocked(false);
+      void refreshCredits().then((st) => {
+        // A purchase landed between the 402 and this read: they own it now
+        // (refreshCredits has already started the build). Nothing to sell.
+        if (st?.masterUnlocked) return;
+        setMasterUnlocked(false);
+        openPurchase(source, 'master-resume');
+      });
+      return;
+    }
+    openPurchase(source, 'master-resume');
+  }, [openPurchase, refreshCredits]);
   const onFreeCredit = boughtPack === false && credits === 1;
   // The profile the master resume would be built from (cached; shared with
-  // the offer sheet and banner). An empty one can't be sold a resume.
+  // the dashboard preview). An empty one can't be sold a resume.
   const openPurchaseState = useOpenPurchase();
-  const preview = useMasterPreview(user?.id, masterUnlocked === false);
-  // Locked, nothing built yet, and the profile has something to build from.
-  // Pre-032 accounts that kept a master resume while locked aren't offered one.
-  const masterOffer = masterUnlocked === false && !loadingShell && !generalResume && preview?.empty !== true;
+  const preview = useResumeOfferProfile(user?.id, masterUnlocked === false);
+  // Locked, nothing built yet, and the profile has something to build from —
+  // known, not assumed: offering before the read answers made an empty
+  // profile flash the preview and the priced tab. Pre-032 accounts that kept
+  // a master resume while locked aren't offered one.
+  // `legacyPricing !== null`: never show a price (৳50 / ৳99) before this
+  // account's price is known — the sheet won't sell it until then either.
+  const offerCandidate = masterUnlocked === false && !loadingShell && !generalResume && legacyPricing !== null;
+  const masterOffer = offerCandidate && preview !== null && !preview.empty;
+  const masterOfferPending = offerCandidate && preview === null;
   // The priced nav tab additionally steps aside while a payment is in flight
-  // (undefined = not known yet): a "৳50" pill beside "verifying your payment"
+  // (undefined = not known yet): a "৳99" pill beside "verifying your payment"
   // invites paying twice.
-  const navOffer = masterOffer && openPurchaseState === null;
+  // The same (cached) summary request the dashboard preview makes: if the build
+  // refuses this profile (random text), the resume can't be made, so the tab
+  // stops selling it and sends them to fix the profile instead.
+  const offerSummary = useResumeOfferSummary(user?.id, masterOffer);
+  const offerUnbuildable = masterOffer && offerSummary.status === 'unbuildable';
+  const navOffer = masterOffer && openPurchaseState === null && !offerUnbuildable;
   const openSearch = useCallback(() => setSearchOpen(true), []);
 
   const onMasterResume = () => {
     if (generalResume) onOpenResume(generalResume.id);
     // A payment is in flight: reopen it rather than offer a second purchase.
     else if (masterUnlocked === false && openPurchaseState) openPurchase('master_nav');
-    else if (masterUnlocked === false) openMasterInfo('nav');
+    else if (offerUnbuildable) onEditProfile();
+    else if (masterUnlocked === false) openMasterPurchase('master_nav');
     else onNavigate('DASHBOARD');
   };
 
@@ -261,7 +301,7 @@ export const DashboardShell: React.FC<Props> = ({
     opts?: { Icon?: React.ComponentType<{ size?: number }>; attention?: boolean; offer?: boolean },
   ) => opts?.offer ? (
     // No master resume and never bought: the tab is the one-tap route to the
-    // ৳50 offer, so it is the loudest thing in the bar — a filled orange pill
+    // ৳99 offer, so it is the loudest thing in the bar — a filled orange pill
     // with its price on it and a radiating dot. Deliberately not subtle (owner,
     // 2026-10-24): a finished profile has earned this and they should see it.
     <a
@@ -271,7 +311,7 @@ export const DashboardShell: React.FC<Props> = ({
     >
       {opts.Icon && <opts.Icon size={14} />}
       {label}
-      <span className="rounded-md bg-brand-700 px-1.5 py-0.5 text-[11px] font-bold text-accent-300">{t('masterOffer.navPrice')}</span>
+      <span className="rounded-md bg-brand-700 px-1.5 py-0.5 text-[11px] font-bold text-accent-300">{masterPriceLabel(t, legacyPricing)}</span>
       <span className="absolute -right-1 -top-1 h-2.5 w-2.5" aria-hidden>
         <span className="mo-ping absolute inset-0 rounded-full bg-accent-500" />
         <span className="absolute inset-0 rounded-full bg-accent-600 ring-2 ring-[#F6F4EE]" />
@@ -318,7 +358,7 @@ export const DashboardShell: React.FC<Props> = ({
     { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
   ];
 
-  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, boughtPack, onFreeCredit, openPurchase, masterOffer, openMasterInfo, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
+  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, boughtPack, legacyPricing, onFreeCredit, openPurchase, masterOffer, masterOfferPending, openMasterPurchase, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -439,7 +479,7 @@ export const DashboardShell: React.FC<Props> = ({
             >
               <span className="relative flex h-[30px] items-center gap-1 rounded-full bg-accent-400 px-2.5 text-brand-800 shadow-[0_6px_14px_-6px_rgba(201,93,39,0.9)]">
                 <Icon size={16} strokeWidth={2.4} />
-                <span className="text-[11px] font-extrabold leading-none">{t('masterOffer.navPrice')}</span>
+                <span className="text-[11px] font-extrabold leading-none">{masterPriceLabel(t, legacyPricing)}</span>
                 <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5" aria-hidden>
                   <span className="mo-ping absolute inset-0 rounded-full bg-accent-500" />
                   <span className="absolute inset-0 rounded-full bg-accent-600 ring-2 ring-[#F6F4EE]" />
@@ -491,23 +531,14 @@ export const DashboardShell: React.FC<Props> = ({
         // A locked account that already has a master resume (pre-032) isn't
         // getting one as a bonus — don't promise it.
         masterBonus={masterUnlocked === false && !generalResume}
-        masterOffer={masterOffer}
+        // Not to a profile the build refuses: it would be sold a resume
+        // that can't be made (the dashboard asks them to fix it instead).
+        masterOffer={masterOffer && !offerUnbuildable}
         initialPackage={purchasePkg}
+        legacyPricing={legacyPricing}
+        newPricing={newPricing}
         freeCredit={onFreeCredit && !purchaseSkipGift}
         onUseFreeCredit={() => {
-          requestJdFocus();
-          if (active !== 'home') onNavigate('DASHBOARD');
-        }}
-      />
-
-      <MasterResumeOfferSheet
-        isOpen={masterInfoFrom !== null}
-        from={masterInfoFrom ?? 'nav'}
-        onClose={() => setMasterInfoFrom(null)}
-        onChoose={(pkg) => openPurchase(masterInfoFrom === 'nav' ? 'master_nav' : 'master_banner', pkg)}
-        freeCredit={onFreeCredit}
-        onEditProfile={onEditProfile}
-        onTailor={() => {
           requestJdFocus();
           if (active !== 'home') onNavigate('DASHBOARD');
         }}

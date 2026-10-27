@@ -1,7 +1,7 @@
 // Application Service - Orchestrates use cases
 
 import { ResumeData, OptimizedResumeData, JobToolkit, ToolkitItem, ToolkitErrors, NormalizedItemContent, inferUserType } from '../../domain/entities/Resume';
-import { OptimizeResumeUseCase, IResumeOptimizer } from '../../domain/usecases/OptimizeResumeUseCase';
+import { OptimizeResumeUseCase, IResumeOptimizer, IMasterResumePreviewer } from '../../domain/usecases/OptimizeResumeUseCase';
 import { NormalizeProfileItemUseCase, IProfileItemNormalizer, ProfileItemContext } from '../../domain/usecases/NormalizeProfileItemUseCase';
 import { ExportResumeUseCase, IResumeExporter } from '../../domain/usecases/ExportResumeUseCase';
 import { GenerateCoverLetterUseCase, ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetterUseCase';
@@ -28,6 +28,7 @@ export class ResumeService {
   // Per-item AI polish, reused by the general-resume fallback to convert raw
   // (possibly Banglish) descriptions into professional bullets on demand.
   private normalizeItemUseCase?: NormalizeProfileItemUseCase;
+  private masterPreviewer?: IMasterResumePreviewer;
 
   constructor(
     resumeOptimizer: IResumeOptimizer,
@@ -49,6 +50,9 @@ export class ResumeService {
     // Falls back to the regular optimizer if no dedicated general-resume
     // optimizer is wired (e.g. in local dev without the new endpoint).
     this.generalOptimizeUseCase = new OptimizeResumeUseCase(generalResumeOptimizer ?? resumeOptimizer);
+    if (generalResumeOptimizer && 'previewSummary' in generalResumeOptimizer) {
+      this.masterPreviewer = generalResumeOptimizer as IResumeOptimizer & IMasterResumePreviewer;
+    }
     this.exportUseCase = new ExportResumeUseCase(resumeExporter);
     this.coverLetterUseCase = new GenerateCoverLetterUseCase(coverLetterGenerator);
     this.outreachEmailUseCase = new GenerateOutreachEmailUseCase(outreachEmailGenerator);
@@ -589,18 +593,17 @@ export class ResumeService {
     return run;
   }
 
-  private async generateGeneralResumeOnce(userId: string): Promise<string> {
+  /**
+   * The master resume's input, assembled from the whole profile with a generic
+   * target job. Throws when there is neither education nor experience. Shared
+   * by build, regenerate and the locked-account preview, so all three send the
+   * server the same data (the preview is reused by the build when its profile
+   * hash still matches).
+   */
+  private async loadGeneralResumeData(userId: string): Promise<ResumeData> {
     if (!this.profileRepository) {
       throw new Error('Profile repository is required for general resume generation');
     }
-
-    // Check if general resume already exists
-    const exists = await this.hasGeneralResume(userId);
-    if (exists) {
-      throw new Error('A General Resume already exists. You can only generate one.');
-    }
-
-    await this.assertMasterUnlocked(userId);
 
     // Load all profile data
     const [profile, uType, exps, projs, skls, edus, extras, awds, certs, affs, pubs, langs, refs] = await Promise.all([
@@ -619,9 +622,6 @@ export class ResumeService {
       this.profileRepository.getReferences(userId),
     ]);
 
-    // Same hard content gate as OptimizeResumeUseCase. It has to be checked
-    // HERE too: optimizeOrAssembleGeneral catches the use case's throw and
-    // falls back to assembly, which would otherwise save an empty resume.
     if (exps.length === 0 && edus.length === 0) {
       throw new Error('Add at least one education or work experience entry to generate a resume.');
     }
@@ -641,7 +641,7 @@ export class ResumeService {
     if (refs.length > 0) visibleSections.push('references');
 
     // Assemble ResumeData with a generic target job
-    const resumeData: ResumeData = {
+    return {
       userType: uTypeInferred,
       targetJob: {
         title: 'General Purpose', // header appends " Resume - <year>"; avoid "Resume Resume"
@@ -664,6 +664,41 @@ export class ResumeService {
       visibleSections: Array.from(new Set(visibleSections)),
       template: 'ats-classic',
     };
+  }
+
+  /**
+   * Summary of the master resume this profile would get, for the dashboard
+   * preview shown to an account that has not bought it. The server builds the
+   * whole resume once, keeps it for when the purchase lands, and returns only
+   * the summary. `onProfileHash` gets the profile's content hash as soon as the
+   * profile is read — before the (possibly slow) build — so a caller can tell
+   * whether a summary it already holds still belongs to this profile.
+   */
+  async getMasterPreviewSummary(userId: string, onProfileHash?: (hash: string) => void): Promise<string> {
+    if (!this.masterPreviewer) throw new Error('Master resume preview is not available');
+    const resumeData = await this.loadGeneralResumeData(userId);
+    onProfileHash?.(this.profileHashOf(resumeData));
+    this.assertContentIsReal(resumeData);
+    return this.masterPreviewer.previewSummary(resumeData);
+  }
+
+  private async generateGeneralResumeOnce(userId: string): Promise<string> {
+    if (!this.profileRepository) {
+      throw new Error('Profile repository is required for general resume generation');
+    }
+
+    // Check if general resume already exists
+    const exists = await this.hasGeneralResume(userId);
+    if (exists) {
+      throw new Error('A General Resume already exists. You can only generate one.');
+    }
+
+    await this.assertMasterUnlocked(userId);
+
+    // Same hard content gate as OptimizeResumeUseCase. It has to be checked
+    // HERE too: optimizeOrAssembleGeneral catches the use case's throw and
+    // falls back to assembly, which would otherwise save an empty resume.
+    const resumeData = await this.loadGeneralResumeData(userId);
 
     // Pre-flight gibberish gate — same one the paid path uses. Profile data
     // can still contain keyboard-mashing in long-form fields (experience /
@@ -700,60 +735,7 @@ export class ResumeService {
     // No cooldown: regeneration is gated by an actual profile change and bounded
     // by the daily cap on /api/optimize-general for cost control.
 
-    // Load fresh profile data
-    const [profile, uType, exps, projs, skls, edus, extras, awds, certs, affs, pubs, langs, refs] = await Promise.all([
-      this.profileRepository.getProfile(userId),
-      this.profileRepository.getUserType(userId),
-      this.profileRepository.getExperiences(userId),
-      this.profileRepository.getProjects(userId),
-      this.profileRepository.getSkills(userId),
-      this.profileRepository.getEducations(userId),
-      this.profileRepository.getExtracurriculars(userId),
-      this.profileRepository.getAwards(userId),
-      this.profileRepository.getCertifications(userId),
-      this.profileRepository.getAffiliations(userId),
-      this.profileRepository.getPublications(userId),
-      this.profileRepository.getLanguages(userId),
-      this.profileRepository.getReferences(userId),
-    ]);
-
-    // Determine visible sections. userType is derived from the data.
-    const uTypeInferred = inferUserType(exps);
-    const visibleSections: string[] = ['skills', 'education', 'projects'];
-    if (uTypeInferred === 'experienced') visibleSections.push('experience');
-    if (uTypeInferred === 'student') visibleSections.push('extracurriculars');
-    if (extras.length > 0 && !visibleSections.includes('extracurriculars')) visibleSections.push('extracurriculars');
-    if (awds.length > 0) visibleSections.push('awards');
-    if (certs.length > 0) visibleSections.push('certifications');
-    if (affs.length > 0) visibleSections.push('affiliations');
-    if (pubs.length > 0) visibleSections.push('publications');
-    if (langs.length > 0) visibleSections.push('languages');
-    if (refs.length > 0) visibleSections.push('references');
-
-    // Assemble fresh ResumeData
-    const resumeData: ResumeData = {
-      userType: uTypeInferred,
-      targetJob: {
-        title: 'General Purpose', // header appends " Resume - <year>"; avoid "Resume Resume"
-        company: '',
-        description: 'Create a strong, general-purpose professional resume that highlights the candidate\'s key strengths, experiences, and skills. Focus on versatility and broad appeal to multiple industries and roles. Emphasize transferable skills, measurable achievements, and professional growth.',
-      },
-      personalInfo: profile || { fullName: '', email: '', phone: '', location: '' },
-      summary: '',
-      experience: exps,
-      projects: projs,
-      skills: skls,
-      education: edus,
-      extracurriculars: extras,
-      awards: awds,
-      certifications: certs,
-      affiliations: affs,
-      publications: pubs,
-      languages: langs,
-      references: refs,
-      visibleSections: Array.from(new Set(visibleSections)),
-      template: 'ats-classic',
-    };
+    const resumeData = await this.loadGeneralResumeData(userId);
 
     // Pre-flight gibberish gate — same as the initial general-resume path.
     this.assertContentIsReal(resumeData);

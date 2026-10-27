@@ -1,7 +1,7 @@
 # ADR-0006: Sell the master resume on its own for ৳50
 
 - **Date:** 2026-10-24
-- **Status:** Accepted. Amends ADR-0005, decision 2 and the "৳50 single credit" alternative.
+- **Status:** Accepted. Amends ADR-0005, decision 2 and the "৳50 single credit" alternative. Amended by ADR-0009: ৳99 for new accounts (৳50 kept for older ones), pack ৳199, and the offer surfaces reduced to the dashboard resume preview and the bKash sheet's plan picker.
 
 ## Context
 

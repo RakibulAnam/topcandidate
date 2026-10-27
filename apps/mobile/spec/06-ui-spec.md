@@ -107,7 +107,7 @@ A simple form (no async validators):
    - Generated TrxIDs are `TST` + 7 chars (exactly the 10 the parser demands,
      see spec/02-sms-formats.md) so test rows are greppable server-side.
    - Controls: the TrxID under test (copy / regenerate) plus a one-character-off
-     variant to copy, "Pay ৳200", "Pay ৳150 (underpaid)", "Pay from another
+     variant to copy, "Pay ৳199", "Pay ৳150 (underpaid)", "Pay from another
      number", "Send heartbeat now", and a "Pause heartbeat" switch
      (`bkash_heartbeat_paused`) — the only way to reproduce the web app's
      `watcher_stale` state on demand. Turning the master Test-tools switch off
