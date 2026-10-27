@@ -6,7 +6,7 @@
 // owner's Flutter app reads the bKash SMS and calls /api/confirm-purchase.
 //
 // Request:  { packageId: 'five-pack' | 'master-resume', transactionId: 'AB12CD34EF', senderMsisdn?: '01XXXXXXXXX' }
-//           'five-pack' = 5 credits / ৳200; 'master-resume' = 0 credits / ৳50,
+//           'five-pack' = 5 credits / ৳199; 'master-resume' = 0 credits / ৳99 (migration 034),
 //           unlocks the master resume (migration 033).
 // Response: { success: true, purchaseId: '<uuid>', status: 'pending', message: '...' }
 //

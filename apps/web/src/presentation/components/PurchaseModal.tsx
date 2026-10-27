@@ -56,11 +56,13 @@
 //     payment. See AGENTS.md §10 for the scoped exception.
 //   - Body scroll is locked while open.
 //
-// TWO PACKAGES (migration 033): 'five-pack' (5 credits, ৳200) and
-// 'master-resume' (the master resume alone, ৳50). The ৳50 one is only offered
-// while `masterOffer` is set (never bought, no master resume): a plan picker
-// sits above the payment steps and the gift panel carries a master-resume
-// card. Every price, label and confirmation line is derived from the package.
+// TWO PACKAGES (migration 033): 'five-pack' (5 credits, ৳199 since 034) and
+// 'master-resume' (the master resume alone, ৳99 since migration 034, shown
+// against a struck-through ৳200; the pack is shown against ৳500). While
+// `masterOffer` is set (never bought, no master resume) every open shows a
+// plan picker with both, preselected by the opener — except the dashboard
+// resume preview, whose click already chose the ৳99 resume. Every price,
+// label and confirmation line is derived from the package.
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -100,6 +102,7 @@ import { refreshOpenPurchase, useOpenPurchase } from '../hooks/useOpenPurchase';
 import { setOpenPurchaseVerdict } from '../../infrastructure/api/openPurchaseStore';
 import { track } from '../../infrastructure/analytics/track';
 import { CONTACT_EMAIL, CONTACT_FACEBOOK_URL, contactMailto } from '../support';
+import { masterPriceLabel, masterPriceTaka, packPriceLabel, packPriceTaka } from '../pricing';
 
 /** Which surface opened the modal — sent with `purchase_modal_opened` so the
  *  admin funnel can tell which nudges actually lead to a purchase. */
@@ -111,9 +114,8 @@ export type PurchaseSource =
   | 'summary_gate'
   | 'builder_gate'
   | 'free_used_nudge'
-  | 'kit_ready_banner'
   | 'master_nav'
-  | 'dashboard_master_offer'
+  | 'dashboard_resume_preview'
   | 'resubmit'
   | 'other';
 
@@ -131,22 +133,21 @@ interface Props {
   /** "Use my free kit" — take the user to the job-post box. Without it the
    *  button just closes the sheet. */
   onUseFreeCredit?: () => void;
-  /** Never bought and no master resume: offer the ৳50 master-resume package
-   *  (plan picker + a card on the gift panel). */
+  /** Never bought and no master resume: the ৳99 master-resume package is on
+   *  sale next to the pack (plan picker + a card on the gift panel). */
   masterOffer?: boolean;
   /** Package selected when the sheet opens (default: the pack). */
   initialPackage?: PackageId;
+  /** Account existed before migration 034: the master resume is ৳50, not ৳99. */
+  legacyPricing?: boolean | null;
+  /** Migration 034 is live: the pack is ৳199 (৳200 before it). */
+  newPricing?: boolean | null;
 }
-
-// Surfaces whose click was about the master resume. Only these (and the gift
-// panel's master card) get the ৳200 / ৳50 picker: on a credit gate — Summary,
-// Builder, "buy more kits" — the ৳50 option buys no credits, so offering it
-// there would sell something that leaves the user still blocked.
-const MASTER_SOURCES: PurchaseSource[] = ['master_nav', 'master_banner', 'dashboard_master_offer', 'profile_master'];
 
 // Mirrors the hardcoded mapping in initiate_purchase (migration 033). The
 // server is the authority; this is only what the sheet displays.
-const PACKAGE_PRICE_TAKA: Record<PackageId, number> = { 'five-pack': 200, 'master-resume': 50 };
+const packagePriceTaka = (pkg: PackageId, legacyPricing: boolean | null | undefined, newPricing: boolean | null | undefined): number =>
+  pkg === 'master-resume' ? masterPriceTaka(legacyPricing) : packPriceTaka(newPricing);
 
 // Direct `import.meta.env.X` so Vite's AST-based static substitution kicks in.
 const OWNER_BKASH_NUMBER = import.meta.env.VITE_BKASH_PAYMENT_NUMBER || '01XXXXXXXXX';
@@ -190,22 +191,24 @@ type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'problem';
 
 export const PurchaseModal: React.FC<Props> = ({
   isOpen, onClose, onSuccess, source = 'other', masterBonus = false, freeCredit = false, onUseFreeCredit,
-  masterOffer = false, initialPackage = 'five-pack',
+  masterOffer: masterOfferProp = false, initialPackage = 'five-pack', legacyPricing = null, newPricing = null,
 }) => {
+  // The master resume is only sold once this account's price is known: ৳50
+  // for accounts from before migration 034, ৳99 after. Guessing while the
+  // status read is missing could show ৳99 to someone the server charges ৳50.
+  // Until then the sheet is pack-only.
+  const masterOffer = masterOfferProp && legacyPricing !== null;
   const t = useT();
   const { locale } = useLocale();
   const [phase, setPhase] = useState<Phase>('idle');
   // What the user picked in THIS open (plan picker, gift card, "See packs").
   // Cleared on close, so the next open starts from its opener's default.
   const [pkgChoice, setPkgChoice] = useState<PackageId | null>(null);
-  // The gift panel's master card opens the picker even from a non-master source.
-  const [giftChoseMaster, setGiftChoseMaster] = useState(false);
   // Package of the purchase this sheet is tracking (set at submit / resume).
   const [trackedPkg, setTrackedPkg] = useState<PackageId | null>(null);
   useEffect(() => {
     if (isOpen) return;
     setPkgChoice(null);
-    setGiftChoseMaster(false);
     // Closed with nothing tracked (e.g. a TrxID correction whose re-submit
     // failed — the old row is voided): the package only had to survive for a
     // retry inside that open. Don't let it pin every later open.
@@ -251,11 +254,11 @@ export const PurchaseModal: React.FC<Props> = ({
   // frame of a previous open's package). In order:
   //   1. the purchase this sheet is tracking — fixed server-side once
   //      submitted; it survives the row settling while the confirmed check is
-  //      up, so a ৳50 unlock is never relabelled "Credits added";
-  //   2. a payment in flight on the server (a 0-credit row is the ৳50
+  //      up, so a ৳99 unlock is never relabelled "Credits added";
+  //   2. a payment in flight on the server (a 0-credit row is the
   //      master-resume package) — whatever surface reopened the sheet;
   //   3. what the user picked in this open;
-  //   4. the opener's default. The ৳50 package only exists while on offer.
+  //   4. the opener's default. The ৳99 package only exists while on offer.
   const inFlightPkg: PackageId | null = openPurchase?.paymentReference
     ? (openPurchase.creditsGranted === 0 ? 'master-resume' : 'five-pack')
     : null;
@@ -268,15 +271,29 @@ export const PurchaseModal: React.FC<Props> = ({
     ?? (masterOffer ? pkgChoice : null)
     ?? (masterOffer ? initialPackage : 'five-pack');
   const isMasterPkg = pkg === 'master-resume';
-  const priceTaka = PACKAGE_PRICE_TAKA[pkg];
-  // Whether this open may show the ৳200 / ৳50 picker (see MASTER_SOURCES).
-  const pickerAllowed = masterOffer
-    && (initialPackage === 'master-resume' || (MASTER_SOURCES as readonly string[]).includes(source) || giftChoseMaster);
+  // A payment already in flight keeps the amount its row was created with
+  // (server truth) — one started before a price change (e.g. ৳50 / ৳200
+  // before migration 034) must not be relabelled at today's price.
+  // Only when that row IS what this sheet is about: after a failed TrxID
+  // correction trackedTxn is empty but trackedPkg is kept, and a different
+  // open row's amount must not relabel it.
+  const rowAmount = openPurchase?.paymentReference
+    && (!trackedTxn || trackedTxn === openPurchase.paymentReference)
+    && (!trackedPkg || trackedPkg === inFlightPkg)
+    ? openPurchase.amountTaka
+    : null;
+  const legacyAmount = rowAmount !== null && rowAmount !== packagePriceTaka(pkg, legacyPricing, newPricing) ? rowAmount : null;
+  const priceTaka = legacyAmount ?? packagePriceTaka(pkg, legacyPricing, newPricing);
+  const masterPrice = masterPriceLabel(t, legacyPricing);
+  const packPrice = packPriceLabel(t, newPricing);
+  // Both packages are offered whenever the master resume is for sale, except
+  // from the dashboard resume preview: that tap was already the choice.
+  const pickerAllowed = masterOffer && source !== 'dashboard_resume_preview';
 
   // Reopened while still holding a purchase the server no longer counts as
   // open: if that row really is over (expired / voided / refunded), the old
   // card is dead — keeping it would also keep its package, so someone who just
-  // tapped "৳50" would land on a ৳200 problem card. Start clean. The shared
+  // tapped "৳99" would land on a ৳199 problem card. Start clean. The shared
   // store alone is NOT trusted for this: a failed refresh leaves it at a stale
   // null while the row is still pending, and resetting then would wipe a live
   // verification. So ask the server about this exact TrxID first.
@@ -622,7 +639,7 @@ export const PurchaseModal: React.FC<Props> = ({
             {masterOffer ? (
               // The second thing a finished profile has earned. As loud as the
               // gift itself: an orange-framed card with the price and its own
-              // one-tap button straight to the ৳50 bKash step.
+              // one-tap button straight to the ৳99 bKash step.
               <div className="mt-5 rounded-2xl border-2 border-accent-400 bg-[#FFF7EF] p-4">
                 <div className="flex items-start gap-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-700 text-accent-300">
@@ -632,7 +649,7 @@ export const PurchaseModal: React.FC<Props> = ({
                     <p className={`text-[11px] font-bold text-accent-700 ${locale === 'bn' ? '' : 'uppercase tracking-[0.14em]'}`}>
                       {t('purchaseModal.giftMasterEyebrow')}
                     </p>
-                    <p className="mt-0.5 text-[16px] font-bold leading-snug text-[#0F1B2D]">{t('purchaseModal.giftMasterTitle')}</p>
+                    <p className="mt-0.5 text-[16px] font-bold leading-snug text-[#0F1B2D]">{t('purchaseModal.giftMasterTitle', { price: masterPrice })}</p>
                     <p className="mt-1 text-[13px] leading-relaxed text-[#4A4639]">{t('purchaseModal.giftMasterBody')}</p>
                   </div>
                 </div>
@@ -641,19 +658,18 @@ export const PurchaseModal: React.FC<Props> = ({
                   onClick={() => {
                     track('purchase_gift_view', { action: 'master_offer', source });
                     setPkgChoice('master-resume');
-                    setGiftChoseMaster(true);
                     setGiftView(false);
                   }}
                   className="mo-nudge mt-3.5 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-accent-400 px-5 text-[15px] font-bold text-brand-800 shadow-[0_10px_22px_-12px_rgba(201,93,39,0.8)] transition-colors hover:bg-accent-300"
                 >
-                  {t('purchaseModal.giftMasterCta')}
+                  {t('purchaseModal.giftMasterCta', { price: masterPrice })}
                   <ArrowRight size={16} />
                 </button>
               </div>
             ) : (
               <div className="mt-5 rounded-2xl border border-[#E5E1D8] bg-[#FAF7F0] px-4 py-3.5">
                 <p className="text-[13.5px] font-semibold text-[#0F1B2D]">{t('purchaseModal.giftMoreTitle')}</p>
-                <p className="mt-1 text-[13px] leading-relaxed text-[#6B6759]">{t('purchaseModal.giftMoreBody')}</p>
+                <p className="mt-1 text-[13px] leading-relaxed text-[#6B6759]">{t('purchaseModal.giftMoreBody', { price: packPrice })}</p>
               </div>
             )}
             <div className="mt-6 flex flex-col gap-2.5">
@@ -866,23 +882,27 @@ export const PurchaseModal: React.FC<Props> = ({
         ...(masterBonus ? [t('purchaseModal.featureMasterBonus')] : []),
       ];
   const pkgEyebrow = isMasterPkg ? t('purchaseModal.masterEyebrow') : t('purchaseModal.packEyebrow');
-  const pkgPrice = isMasterPkg ? t('purchaseModal.masterPrice') : t('purchaseModal.packPrice');
-  const pkgName = isMasterPkg ? t('purchaseModal.masterName') : t('purchaseModal.packName');
-  const pkgPerUnit = isMasterPkg ? t('purchaseModal.masterPerUnit') : t('purchaseModal.packPerUnit');
-  const trustLine = isMasterPkg ? t('purchaseModal.masterTrustLine') : t('purchaseModal.trustLine');
+  const pkgPrice = legacyAmount !== null
+    ? `৳${legacyAmount.toLocaleString(locale === 'bn' ? 'bn-BD' : 'en-US')}`
+    : isMasterPkg ? masterPrice : packPrice;
+  // Struck-through anchors (owner's call): the master resume against ৳200,
+  // the pack against ৳500.
+  const pkgWasPrice = legacyAmount !== null
+    ? null
+    : isMasterPkg ? t('purchaseModal.masterWasPrice') : t('purchaseModal.packWasPrice');
 
-  // ৳200 vs ৳50, only while the master resume is on offer. Two radio cards
-  // above the payment steps; switching re-prices the whole sheet in place.
-  // Hidden once a TrxID is on record (e.g. back on the form after "check and
-  // try again"): that purchase's package is fixed server-side, so switching
-  // here would only make the copy disagree with it.
-  const planPicker = masterOffer && pickerAllowed && !trackedTxn && !trackedPkg && !inFlightPkg && (
+  // ৳199 pack vs ৳99 master resume. Two radio cards above the payment steps;
+  // switching re-prices the whole sheet in place. Hidden once a TrxID is on
+  // record (e.g. back on the form after "check and try again"): that
+  // purchase's package is fixed server-side, so switching here would only make
+  // the copy disagree with it.
+  const planPicker = pickerAllowed && !trackedTxn && !trackedPkg && !inFlightPkg && (
     <section className="mb-6">
       <StepLabel n={1} label={t('purchaseModal.planPickerLabel')} />
       <div className="mt-3.5 grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('purchaseModal.planPickerLabel')}>
         {([
-          { id: 'five-pack', title: t('purchaseModal.planPackTitle'), sub: t('purchaseModal.planPackSub'), price: t('purchaseModal.packPrice'), badge: t('masterOffer.packBadge') },
-          { id: 'master-resume', title: t('purchaseModal.planMasterTitle'), sub: t('purchaseModal.planMasterSub'), price: t('purchaseModal.masterPrice'), badge: null },
+          { id: 'five-pack', title: t('purchaseModal.planPackTitle'), sub: t('purchaseModal.planPackSub'), was: t('purchaseModal.packWasPrice'), price: packPrice },
+          { id: 'master-resume', title: t('purchaseModal.planMasterTitle'), sub: t('purchaseModal.planMasterSub'), was: t('purchaseModal.masterWasPrice'), price: masterPrice },
         ] as const).map((o) => {
           const on = pkg === o.id;
           return (
@@ -893,14 +913,9 @@ export const PurchaseModal: React.FC<Props> = ({
               aria-checked={on}
               disabled={busy}
               onClick={() => { if (!on) { track('purchase_plan_switched', { to: o.id, source }); setPkgChoice(o.id); } }}
-              className="relative flex flex-col rounded-2xl border-2 px-3 pb-3 pt-3.5 text-left transition-colors disabled:opacity-60"
+              className="flex flex-col rounded-2xl border-2 px-3 pb-3 pt-3.5 text-left transition-colors disabled:opacity-60"
               style={{ borderColor: on ? BKASH : '#EAE6DA', backgroundColor: on ? `${BKASH}0A` : '#fff' }}
             >
-              {o.badge && (
-                <span className="absolute -top-2.5 left-3 rounded-full bg-accent-400 px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.06em] text-brand-800">
-                  {o.badge}
-                </span>
-              )}
               <span className="flex items-start justify-between gap-2">
                 <span className="text-[13px] font-bold leading-snug text-[#0F1B2D]">{o.title}</span>
                 <span
@@ -912,7 +927,10 @@ export const PurchaseModal: React.FC<Props> = ({
                 </span>
               </span>
               <span className="mt-0.5 text-[11.5px] leading-snug text-[#6B6759]">{o.sub}</span>
-              <span className="mt-1.5 font-display text-[22px] font-bold leading-none text-[#0F1B2D]">{o.price}</span>
+              <span className="mt-1.5 flex items-baseline gap-1.5">
+                <s className="text-[13px] font-semibold text-[#9F998A]">{o.was}</s>
+                <span className="font-display text-[22px] font-bold leading-none text-[#0F1B2D]">{o.price}</span>
+              </span>
             </button>
           );
         })}
@@ -921,6 +939,10 @@ export const PurchaseModal: React.FC<Props> = ({
   );
   // The plan picker, when shown, is step 1 and pushes the payment steps down.
   const stepOffset = planPicker ? 1 : 0;
+  const pkgName = isMasterPkg ? t('purchaseModal.masterName') : t('purchaseModal.packName');
+  const pkgPerUnit = isMasterPkg ? t('purchaseModal.masterPerUnit') : t('purchaseModal.packPerUnit');
+  const trustLine = isMasterPkg ? t('purchaseModal.masterTrustLine') : t('purchaseModal.trustLine');
+
 
   // Success takeover — reused for the mobile full-sheet overlay and the
   // desktop right-panel overlay.
@@ -1321,6 +1343,9 @@ export const PurchaseModal: React.FC<Props> = ({
               aria-label={pkgEyebrow}
               className="mt-1 flex w-full items-baseline gap-2 pb-3 text-left"
             >
+              {pkgWasPrice && (
+                <s className="text-[15px] font-semibold leading-none text-[#9F998A]">{pkgWasPrice}</s>
+              )}
               <span className="font-display text-2xl font-semibold leading-none text-[#0F1B2D] tracking-tight">
                 {pkgPrice}
               </span>
@@ -1372,8 +1397,13 @@ export const PurchaseModal: React.FC<Props> = ({
               <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
                 {pkgEyebrow}
               </div>
-              <div className="mt-2 font-display text-6xl font-semibold text-[#0F1B2D] leading-none tracking-tight">
-                {pkgPrice}
+              <div className="mt-2 flex items-baseline gap-3">
+                {pkgWasPrice && (
+                  <s className="text-2xl font-semibold leading-none text-[#9F998A]">{pkgWasPrice}</s>
+                )}
+                <span className="font-display text-6xl font-semibold text-[#0F1B2D] leading-none tracking-tight">
+                  {pkgPrice}
+                </span>
               </div>
               <div className="mt-3 text-lg font-semibold text-[#0F1B2D] leading-tight">
                 {pkgName}

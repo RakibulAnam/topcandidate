@@ -27,7 +27,7 @@ Pick one angle per video. Say it in the first sentence; show it in the first fra
 | Fear / stakes | cost of inaction | "Ei ek bhul-er jonno apni interview call pacchen na." |
 | Frustration | name the pain exactly | "50 ta apply, 0 ta call. Sound familiar?" |
 | Disagreement | challenge common advice | "'CV ek page-er hote hobe' — shob shomoy na." |
-| Surprise / number | concrete figure | "৳200-e 5 ta full application." (true — see BRAND) |
+| Surprise / number | concrete figure | "৳199-e 5 ta full application." (true — see BRAND) |
 | Status | insider knowledge | "HR-ra je jinish ta kokhono bole na…" |
 | Financial | money angle | "CV writer-ke ৳3,000 deyar age eta dekhen." (price range is from the landing page) |
 | Career mistake | specific error | "Cover letter-e 'Dear Sir/Madam' likhe shuru korsen?" |
@@ -44,9 +44,9 @@ Don't promise outcomes the product doesn't (jobs, interviews, salary).
 
 ## CTA library (real)
 
-"Start free" / "ফ্রিতে শুরু করুন" · "First application free · ৳200 for 5 applications · Pay with bKash" ·
+"Start free" / "ফ্রিতে শুরু করুন" · "Free to sign up · ৳199 for 5 applications · Pay with bKash" ·
 "Stop sending the same resume everywhere." · "Build my application" · topcandidatebd.com ·
-spoken: "Link bio-te", "Prothom application free".
+spoken: "Link bio-te", "Sign up kora free".
 
 ## Tone
 

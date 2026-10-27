@@ -21,8 +21,8 @@ for 9:16 video. Tokens: `shared/brand/tokens.css`; JS mirror: `scripts/lib/confi
 | Cover letter 250–400 words · LinkedIn note < 280 chars · Interview prep 6–8 questions, EN + বাংলা | llms.txt / feature pages |
 | Resume: ATS-ready, 5 templates (Classic, Modern, Serif, Compact, Executive), PDF + Word | TemplateRegistry.ts |
 | "Three steps. About a minute." Paste the job post → We tailor everything → Download, send, prepare | en.ts |
-| First complete application free · ৳200 for 5 applications (≈৳40 each) · Pay with bKash · no card, no subscription | en.ts 1376-1416 |
-| Price compare: CV writer in Dhaka ৳2,000–3,500 · Subscription ৳800+/mo · TOP CANDIDATE ৳200 | en.ts 1364-1372 |
+| Free to sign up · ৳199 for 5 applications (≈৳40 each) · Master resume ৳99 on its own, free with the first pack · Pay with bKash · no card, no subscription | en.ts `landing` (~1436-1549) |
+| Price compare: CV writer in Dhaka ৳2,000–3,500 · Subscription ৳800+/mo · TOP CANDIDATE ৳199 | en.ts 1364-1372 |
 | Banglish input gets turned into English bullet points; platform in English & বাংলা, resumes in English | llms.txt |
 
 Anything else (success rates, user counts, "gets you hired") — **don't claim it.** Landing

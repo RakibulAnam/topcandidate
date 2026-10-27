@@ -797,10 +797,12 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     setShowNoResumeWarn(true);
                     return;
                 }
-                // The master resume is the first pack's bonus (migration 032).
-                // Only an account that has bought one (re-walking the wizard)
-                // gets it built here; everyone else gets the one-time free
-                // credit — a full tailored application — instead.
+                // Only an account that has already bought the master resume
+                // (re-walking the wizard) gets it built here; everyone else
+                // lands on the dashboard's resume preview. Accounts that
+                // existed before migration 034 still claim their one-time
+                // welcome credit here; new ones have none (welcomePending is
+                // false for them).
                 const status = user ? await profileRepository.getCreditStatus(user.id).catch(() => null) : null;
                 if (status?.masterUnlocked) {
                     toast.success(t('profileSetup.profileDoneToast'));

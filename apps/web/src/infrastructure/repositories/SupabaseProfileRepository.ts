@@ -149,7 +149,10 @@ export class SupabaseProfileRepository implements IProfileRepository {
         const [{ data, error }, packs] = await Promise.all([
             supabase
                 .from('profiles')
-                .select('toolkit_credits, master_resume_unlocked_at, welcome_credit_at, onboarding_complete')
+                // `*`, not a column list: legacy_pricing arrives with
+                // migration 034, and naming it would fail every read before
+                // that migration runs.
+                .select('*')
                 .eq('id', userId)
                 .single(),
             // Any completed credit-granting purchase (RLS: own rows only).
@@ -162,13 +165,19 @@ export class SupabaseProfileRepository implements IProfileRepository {
         ]);
         if (error) throw error;
         const masterUnlocked = !!data?.master_resume_unlocked_at;
+        // No column yet = migration 034 not applied = everyone is still on the
+        // old prices (master ৳50, pack ৳200), which is what the server charges.
+        const newPricing = !!data && 'legacy_pricing' in data;
+        const legacyPricing = (data?.legacy_pricing as boolean | undefined) ?? true;
         return {
             credits: (data?.toolkit_credits as number | null) ?? 0,
             masterUnlocked,
             // If the count can't be read, fall back to the old proxy (before
             // migration 033 every unlocked account had bought a pack).
             boughtPack: packs.error ? masterUnlocked : (packs.count ?? 0) > 0,
-            welcomePending: !data?.welcome_credit_at && !!data?.onboarding_complete,
+            legacyPricing,
+            newPricing,
+            welcomePending: legacyPricing && !data?.welcome_credit_at && !!data?.onboarding_complete,
         };
     }
 

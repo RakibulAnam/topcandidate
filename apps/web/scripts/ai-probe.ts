@@ -651,7 +651,7 @@ async function bench(client: GeminiClient, runs: number) {
 
   // Per-generation = optimizer + toolkit, the 2-call paid hot path.
   console.log('── per paid generation (optimizer + toolkit), same model for both');
-  const REV_NET = 1.59; // ৳200 at ~123.4 BDT/USD, minus ~1.8% bKash merchant fee
+  const REV_NET = 1.58; // ৳199 at ~123.4 BDT/USD, minus ~1.8% bKash merchant fee
   for (const model of MODELS) {
     const c = rows.filter((r) => r.model === model).reduce((s, r) => s + (r.avgCost as number), 0);
     const pack = c * 5;

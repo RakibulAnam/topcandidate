@@ -4,14 +4,14 @@
 // breakdown, a 30-day zero-filled revenue sparkline, and credit liability.
 //
 // Supabase JS has no SQL aggregate sugar, so we fetch bounded row sets and
-// aggregate in JS (same approach as summary.ts). ৳40/credit (৳200 = 5 credits).
+// aggregate in JS (same approach as summary.ts). ≈ ৳40/credit (৳199 = 5 credits since migration 034).
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
-const TAKA_PER_CREDIT = 40;
+const TAKA_PER_CREDIT = 199 / 5;
 const FAILURE_STATUSES = ['failed', 'expired', 'underpaid', 'msisdn_mismatch_review'] as const;
 
 function sinceFor(range: Range): Date | null {
@@ -139,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     dailyRevenue,
     creditLiability: {
       outstandingCredits,
-      liabilityTaka: outstandingCredits * TAKA_PER_CREDIT,
+      liabilityTaka: Math.round(outstandingCredits * TAKA_PER_CREDIT),
       negativeBalanceUsers,
     },
   });

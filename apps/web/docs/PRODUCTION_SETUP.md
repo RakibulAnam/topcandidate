@@ -434,7 +434,7 @@ Based on the architecture documented in `AGENTS.md` and what the above stack sup
 ### Revenue vs cost at the target scale (50K paying users / month)
 
 ```
-Monthly revenue (50K × ৳200)         ৳10,000,000   ($81,400)
+Monthly revenue (50K × ৳199)          ৳9,950,000   ($81,000)
 Monthly operating cost                    ~৳43,000     ($350)
    ├─ Vercel Pro                          ৳2,500       ($20)
    ├─ Supabase Pro                        ৳3,000       ($25)

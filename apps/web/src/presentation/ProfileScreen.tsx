@@ -24,8 +24,8 @@ import { PhoneInput, isValidPhone } from './components/ui/PhoneInput';
 import { useT } from './i18n/LocaleContext';
 import { PurchaseModal } from './components/PurchaseModal';
 import { requestJdFocus } from './components/dashboard/jdFocusRequest';
-import { MasterResumeOfferSheet } from './components/dashboard/MasterResumeOfferSheet';
-import { invalidateMasterPreview } from './components/dashboard/MasterResumePreview';
+import { invalidateMasterPreview } from './components/dashboard/resumeOfferData';
+import { masterPriceLabel } from './pricing';
 import type { PackageId } from '../infrastructure/api/purchaseClient';
 import { apiErrorMessage } from './i18n/apiErrorMessage.js';
 import { ResumeService } from '../application/services/ResumeService';
@@ -104,13 +104,15 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
     const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
     // The one credit is the unspent welcome gift (never bought).
     const [onFreeCredit, setOnFreeCredit] = useState(false);
+    // Account existed before migration 034: the master resume is ৳50, not ৳99.
+    const [legacyPricing, setLegacyPricing] = useState<boolean | null>(null);
+    const [newPricing, setNewPricing] = useState<boolean | null>(null);
     const [purchaseOpen, setPurchaseOpen] = useState(false);
-    // Every master-resume ask on this page opens the offer sheet first; the
-    // bKash sheet then opens on the package they picked, without the free-kit
-    // gift panel — they chose to buy.
-    const [masterInfoOpen, setMasterInfoOpen] = useState(false);
     const [purchaseSkipGift, setPurchaseSkipGift] = useState(false);
     const [purchasePkg, setPurchasePkg] = useState<PackageId>('five-pack');
+    // Every master-resume ask on this page is the ৳99 master-resume package,
+    // straight to the bKash step (no free-kit gift panel — they chose to buy).
+    const openMasterPurchase = () => { setPurchasePkg('master-resume'); setPurchaseSkipGift(true); setPurchaseOpen(true); };
 
     // Hash of the profile AS SAVED — set on load and after each successful save,
     // never from live edit state. Compared against the hash the general resume
@@ -132,7 +134,7 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
     }, [user?.id]);
 
     const loadProfileData = async () => {
-        // The offer sheet's resume preview reads the profile; keep it current.
+        // The dashboard's resume preview reads the profile; keep it current.
         invalidateMasterPreview(user?.id);
         // Only show full page loader if we haven't loaded anything yet
         if (!personalInfo.email) {
@@ -200,6 +202,8 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                     .then((st) => {
                         setMasterUnlocked(st.masterUnlocked);
                         setOnFreeCredit(!st.boughtPack && st.credits === 1);
+                        setLegacyPricing(st.legacyPricing);
+                        setNewPricing(st.newPricing);
                     })
                     // Unknown → treat as unlocked; the server still gates it.
                     .catch(() => setMasterUnlocked(true));
@@ -229,7 +233,15 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
             console.error('General resume generation failed:', error);
             if (ResumeService.isMasterLocked(error)) {
                 setMasterUnlocked(false);
-                setMasterInfoOpen(true);
+                // The first status read may have failed (it's then treated as
+                // unlocked): re-read so the sheet knows this account's price,
+                // and open it after — never pack-only first, then switching.
+                const st = await profileRepository.getCreditStatus(user.id).catch(() => null);
+                // A purchase landed between the 402 and this read: unlocked
+                // now, so there is nothing to sell — they can build it.
+                if (st?.masterUnlocked) { setMasterUnlocked(true); return; }
+                if (st) { setLegacyPricing(st.legacyPricing); setNewPricing(st.newPricing); }
+                openMasterPurchase();
                 return;
             }
             const message = apiErrorMessage(error, t) ?? (error instanceof Error ? error.message : t('profile.generalResumeFailed'));
@@ -251,7 +263,7 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
             console.error('General resume regeneration failed:', error);
             if (ResumeService.isMasterLocked(error)) {
                 // They already have one: updating it comes with a pack (see
-                // the locked row below), not the ৳50 first-unlock offer.
+                // the locked row below), not the ৳99 first-unlock offer.
                 setMasterUnlocked(false);
                 setPurchasePkg('five-pack');
                 setPurchaseSkipGift(true);
@@ -358,29 +370,30 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
 
             {/* General Resume — offer to generate (none yet) once there's content. */}
             {/* Locked (never bought): the master-resume offer — orange-framed,
-                priced, one tap to the offer sheet. */}
-            {generalChecked && masterUnlocked === false && (generalResumeStale || (!generalResume && (experiences.length > 0 || educations.length > 0))) && (
+                priced, one tap to the ৳99 bKash sheet. */}
+            {/* The priced row waits for this account's price (৳50 / ৳99) to be known. */}
+            {generalChecked && masterUnlocked === false && (generalResumeStale || (!generalResume && legacyPricing !== null && (experiences.length > 0 || educations.length > 0))) && (
                 <div className={`mb-6 flex flex-col gap-3 rounded-xl px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${generalResume ? 'border border-charcoal-200 bg-white' : 'border-2 border-accent-400 bg-[#FFF7EF]'}`}>
                     <p className="text-sm text-charcoal-600">
                         {generalResume
                             ? t('profile.lockedRegenBody')
-                            : <><b className="font-semibold text-brand-700">{t('profile.lockedTitle')}</b> — {t('profile.lockedBody')}</>}
+                            : <><b className="font-semibold text-brand-700">{t('profile.lockedTitle')}</b> — {t('profile.lockedBody', { price: masterPriceLabel(t, legacyPricing) })}</>}
                     </p>
                     <button
                         type="button"
                         // Pre-032 accounts that already HAVE a master resume
-                        // aren't offered the ৳50 unlock (it pitches a resume
+                        // aren't offered the ৳99 unlock (it pitches a resume
                         // they own): updating it comes with a pack, so go
                         // straight to the pack sheet.
                         onClick={() => {
                             if (generalResume) { setPurchasePkg('five-pack'); setPurchaseSkipGift(true); setPurchaseOpen(true); }
-                            else setMasterInfoOpen(true);
+                            else openMasterPurchase();
                         }}
                         className={generalResume
                             ? 'w-full shrink-0 rounded-lg border border-charcoal-300 px-4 py-2 text-sm font-semibold text-brand-700 transition-colors hover:border-accent-400 hover:text-accent-700 sm:w-auto'
                             : 'w-full shrink-0 rounded-lg bg-accent-400 px-5 py-2.5 text-sm font-bold text-brand-800 transition-colors hover:bg-accent-300 sm:w-auto'}
                     >
-                        {generalResume ? t('profile.lockedRegenCta') : t('profile.lockedCta')}
+                        {generalResume ? t('profile.lockedRegenCta') : t('profile.lockedCta', { price: masterPriceLabel(t, legacyPricing) })}
                     </button>
                 </div>
             )}
@@ -632,17 +645,10 @@ export const ProfileScreen = ({ onGoHome }: ProfileScreenProps = {}) => {
                 masterBonus={!generalResume}
                 masterOffer={masterUnlocked === false && !generalResume}
                 initialPackage={purchasePkg}
+                legacyPricing={legacyPricing}
+                newPricing={newPricing}
                 freeCredit={onFreeCredit && !purchaseSkipGift}
                 onUseFreeCredit={() => { requestJdFocus(); onGoHome?.(); }}
-            />
-
-            <MasterResumeOfferSheet
-                isOpen={masterInfoOpen}
-                from="profile"
-                onClose={() => setMasterInfoOpen(false)}
-                onChoose={(pkg) => { setPurchasePkg(pkg); setPurchaseSkipGift(true); setPurchaseOpen(true); }}
-                freeCredit={onFreeCredit}
-                onTailor={() => { requestJdFocus(); onGoHome?.(); }}
             />
         </div>
     );

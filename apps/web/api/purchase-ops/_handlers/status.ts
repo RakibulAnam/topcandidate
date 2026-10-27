@@ -63,7 +63,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       message = 'Verifying your bKash payment…';
       break;
     case 'completed':
-      // A 0-credit row is the ৳50 master-resume package (migration 033).
+      // A 0-credit row is the master-resume package (migration 033).
       message = data.credits_granted === 0
         ? 'Master resume unlocked.'
         : `${data.credits_granted} credits added.`;

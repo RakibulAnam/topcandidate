@@ -1,7 +1,7 @@
 # ADR-0005: One free tailored application instead of a free master resume
 
 - **Date:** 2026-10-11
-- **Status:** Accepted. Decision 2 amended by ADR-0006: the master resume can also be bought alone for ৳50.
+- **Status:** Accepted. Decision 2 amended by ADR-0006: the master resume can also be bought alone for ৳50. Decision 1 (the welcome credit) retired for new accounts by ADR-0009 (accounts from before it keep it); prices superseded by ADR-0009 (pack ৳199, master resume ৳99 / ৳50 for older accounts).
 
 ## Context
 

@@ -8,7 +8,7 @@
 // source hashes, refined bullets) so a background polish landing after
 // generation never reads as a "profile change".
 
-import { contentHash } from './contentHash';
+import { contentHash } from './contentHash.js';
 
 const DERIVED_KEYS = new Set(['normalized', 'normalizedSourceHash', 'refinedBullets']);
 

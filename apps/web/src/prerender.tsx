@@ -152,7 +152,7 @@ const landingJsonLd = (locale: Locale) => {
         publisher: { '@id': ORG_ID },
         offers: [
           { '@type': 'Offer', name: l.trustFree, price: '0', priceCurrency: 'BDT' },
-          { '@type': 'Offer', name: l.trustPrice, price: '200', priceCurrency: 'BDT' },
+          { '@type': 'Offer', name: l.trustPrice, price: '199', priceCurrency: 'BDT' },
         ],
       },
       faqPage(`${url(path)}#faq`, locale, faqs),
