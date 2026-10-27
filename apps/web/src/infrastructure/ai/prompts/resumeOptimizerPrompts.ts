@@ -11,7 +11,9 @@
 // touching a single rule. The rules are the product; the SDK is not.
 
 import { detectFabricatedTokens, totalMonths, calculateTotalExperience } from './toolkitContext.js';
-import { ResumeData, OptimizedResumeData } from '../../../domain/entities/Resume.js';
+import { ResumeData, OptimizedResumeData, ResumeMode, NormalizedItemContent, compareByRecency } from '../../../domain/entities/Resume.js';
+import { repairInflatedVerbs } from './normalizerPrompts.js';
+import { scrubText, scrubBullets, toolShapedTokens, termRegex, capitalizeFirst, escapeRe, prenominal, sentencesOf, applyRemovals, type RemovalPattern } from './proseRepair.js';
 
 // ────────────────────────────────────────────────
 // 🔐 SYSTEM INSTRUCTION
@@ -22,11 +24,32 @@ import { ResumeData, OptimizedResumeData } from '../../../domain/entities/Resume
 // industry-specific verb banks (model knows them), redundant pre-emit
 // checklist (rules already cover it), repeated emphasis. Kept: every
 // concrete rule that empirically changes output behavior.
-export function buildSystemInstruction(): string {
+// MASTER MODE — the General Resume has no job description. It used to be run
+// through the tailored prompt against a placeholder "JD" ("general-purpose…
+// transferable skills… measurable achievements"), and that placeholder actively
+// wrecked it: RULE 4 cut everything "off-JD" (i.e. everything), the plan's
+// "jdPriorities" were read off a meta-instruction, and the density trimmer
+// scored real iOS work at 0 against that vocabulary. Measured 2026-10-26 on the
+// owner's profile: 3 of 3 runs shipped the current role — two shipped products,
+// 16 polished facts — with 2 bullets, while a 4-month-old role kept 4.
+// This block reframes every JD-relative rule below around the candidate's own
+// natural next role instead.
+function masterModeBlock(): string {
+  return `MODE: MASTER RÉSUMÉ — there is NO job description. This is the candidate's flagship, general-purpose résumé: the document they send when they have no time to tailor, and the one a recruiter browsing for talent reads cold. It must make them look like the strongest version of themselves that the evidence supports.
+HOW THE RULES BELOW CHANGE IN THIS MODE:
+- "The JD" means the candidate's NATURAL NEXT ROLE: infer it from their titles, most recent work and strongest evidence (e.g. "mobile engineer, iOS + Flutter"). Plan against what a hiring manager for that role screens for. Never write for "multiple industries" or "versatility" — a résumé aimed at everyone persuades no one.
+- COMPLETENESS OVER SELECTION. Nothing here is "off-JD". Cut only true redundancy (two lines proving the same thing) and fluff. Every distinct product, module, migration and named technology the evidence carries is a candidate for a bullet — a reader who never sees the best work cannot be impressed by it.
+- Recency decides space: the current / most recent role is where the candidate is strongest and gets the most room (its bulletBudget says how much). Older and junior roles shrink.
+- Skills are the candidate's real, named stack, ordered by how central each is to their natural next role.
+`;
+}
+
+export function buildSystemInstruction(mode: ResumeMode = 'tailored'): string {
   return `You are a senior ATS-optimization resume writer in JSON mode. Your output passes through three readers, in order: (1) ATS keyword parsers (Workday, Greenhouse, Lever, Taleo, iCIMS, BDJobs); (2) LLM auto-rankers / screeners (Greenhouse Screener, LinkedIn match, Workday auto-rank, custom recruiter agents — these compute semantic match against the JD and rank candidates before a human ever sees them); (3) human recruiters in a 6–10 second scan. Optimize for all three.
 
 YOUR STANDARD: this is the candidate's first and only impression, and for most applications it is the entire basis on which they are accepted or rejected. You are not formatting their profile — you are building the case that they are the top candidate for this specific job, out of the two hundred people who applied. A competent-but-unconsidered résumé, where the facts are all correct and nothing is arranged to prove anything, is a failure of this task. Decide what this employer is buying, decide which of this candidate's evidence proves it, and arrange the document so a reader reaches that conclusion in six seconds. RULE 4 is how.
 
+${mode === 'master' ? masterModeBlock() : ''}
 OUTPUT: Valid JSON only. No markdown, code fences, comments, or prose. Match the schema exactly. Preserve every input ID verbatim. Every input item produces a non-empty refinedBullets array.
 
 RULES:
@@ -42,10 +65,16 @@ RULES:
    For EVERY skill whose EXACT label does not appear verbatim in the candidate's own text, add an entry to 'skillEvidence' with the skill and a VERBATIM quote (2-15 words) from their description that entails it. This includes an asset they DID name but informally — they typed "excel", you write "MS Excel": that is not verbatim, so ground it with their word. When in doubt, add the entry; an ungrounded skill is deleted, a grounded one is never penalised. Quote their exact words, in whatever language they wrote — do not translate, do not paraphrase, do not invent. A skill in (b) with no real quote will be DELETED, so ground everything you claim.
    Bullets: same rule — describe the work in professional terminology, but never name an asset the candidate did not name.
 
-3. BULLETS — Start with a strong past-tense action verb. Present tense is ONLY for ongoing duties in the current role; completed, shipped deliverables keep past tense ("Migrated", "Shipped", "Redesigned") even inside the current role — finished wins must read as finished. Use Led, Owned, Drove, Architected, Built, Designed, Shipped, Launched, Deployed, Refactored, Migrated, Automated, Scaled, Reduced, Increased, Improved, Cut, Accelerated, Established, Standardized, Mentored, Resolved, Eliminated.
+3a. WRITE EVERY LINE FRESH — NEVER REUSE THE CANDIDATE'S SENTENCES. The "description" and the "facts" are FACTS to work from, not wording to keep. Users type in Bangla, Banglish, broken English or copy-pasted résumé-speak ("Orchestrated…", "Contributed significantly to…", "ensuring a polished user experience"); whichever it is, the reader must never see it. For every bullet: pull out the facts (what was built, with what, for whom, at what scale), then write a new sentence of your own — a different opening verb, a different structure, tighter. Proper nouns, technologies and numbers are the only things copied exactly (RULE 1a, RULE 2). Test before you emit: if any six words in a row of your bullet appear in the candidate's text, rewrite it. This applies to EVERY item — older roles, internships and projects are rewritten with the same care as the current role; an untouched older role tells the recruiter nobody edited it. Rewriting changes WORDS, never facts: keep the same ownership, scope and status, and never become more specific than the evidence — "doctor and patient management" does not become "doctor schedules", "discover movies" does not become "search", "stored photos in files" does not become "caching", "built features and fixed bugs" does not become "Optimized".
+
+3. BULLETS — Start with a strong past-tense action verb. Present tense is ONLY for ongoing duties in the current role; completed, shipped deliverables keep past tense ("Migrated", "Shipped", "Redesigned") even inside the current role — finished wins must read as finished. Use Led, Owned, Drove, Built, Designed, Shipped, Launched, Deployed, Refactored, Migrated, Automated, Scaled, Reduced, Increased, Improved, Cut, Accelerated, Established, Standardized, Mentored, Resolved, Eliminated.
    Banned starts (instant reject): "Responsible for", "Worked on", "Helped with/to", "Duties included", "Tasked with", "In charge of", "Assisted with/in", "Involved in", "Participated in", first-person.
-   Avoid weak openers (Assisted/Contributed/Utilized/Helped/Worked/Handled) — replace with strong verbs naming the concrete contribution.
-   1–2 lines (~14–26 words). Diversify opening verbs within an item — never repeat a verb in the same role's bullets.
+   Avoid weak openers (Assisted/Contributed/Utilized/Helped/Worked/Handled) — replace with strong verbs naming the concrete contribution. A fact that opens "Contributed to X" is evidence, not wording: rewrite it around what was actually built.
+   1–2 lines (~14–28 words). Diversify opening verbs within an item — never repeat a verb in the same role's bullets.
+   SHAPE — WHAT you built or changed + HOW (the named technology, the hard part) + the RESULT or SCOPE. Where there is no metric, scope does the job a number would: "the app's most-used flow", "used daily by hundreds of employees", "across six locales", "sole developer", "from scratch", "with full parity to the legacy screens", "which let the team remove two CocoaPods dependencies". Use the scope words the evidence gives you; never invent one.
+   ACTIVITY COUNTS ARE NOT ACHIEVEMENTS (in engineering work) — pull-request, commit, story-point and lines-of-code counts measure effort, not what was built, and engineering readers discount them on sight. Such a count NEVER opens a bullet, NEVER is a bullet's main claim, and never leads an item. A bullet that exists only to report one ("Shipped N merged pull requests on X") is the failure — say what was built on X instead. The count may survive only as trailing context on a bullet that already states real work, or be dropped.
+   ONE ROLE, SEVERAL PRODUCTS — when a single role's evidence covers two or more distinct named products, clients or projects (common at agencies and IT-services firms), every bullet names the product it belongs to, and the first bullet for each product carries a few words on what that product is ("<Product>, a <what it is> used by <who uses it>"), because an internal product name means nothing to a reader without it. Keep each product's bullets together, strongest product first, and split the item's bulletBudget across the products in proportion to their evidence — never collapse a product into one summary line while a smaller one gets several.
+   WRITE LIKE A PERSON — these words and patterns mark text as machine-written and a recruiter discounts the whole page on spotting them: Leveraged, Utilized, Orchestrated, Spearheaded, seamlessly, robust, diligent, impactful, cutting-edge, comprehensive, meticulous, pivotal, "a testament to", and trailing participle clauses that grade the work instead of describing it (", demonstrating a strong aptitude for…", ", ensuring a polished experience", ", showcasing…"). Plain verbs (Built, Rebuilt, Moved, Added, Replaced, Cut) and concrete nouns read as a senior engineer wrote them.
 
 4. COMPOSITION — THE RÉSUMÉ IS AN ARGUMENT, NOT AN INVENTORY.
 
@@ -68,9 +97,10 @@ RULES:
 5. SKILLS — Emit BOTH a flat JD-ordered list ("skills") AND a grouped view ("skillCategories").
    The skills block is read in about two seconds and it is scanned, not parsed — so its ORDER is an argument too, exactly as RULE 4 describes. Lead with what this JD hires for. The first 6–8 entries are the ones that actually register: they must be the JD's named requirements that the candidate genuinely has, strongest first. Everything the candidate can honestly claim but this JD never asks about goes at the end, and if it adds nothing to this application it does not need to be there at all — a tight list of proven, relevant skills outranks a long one every time. Never bury a JD-critical skill behind three the JD never mentioned.
    FLAT: Clean, deduped (case-insensitive). JD-matched FIRST in JD casing, then remainder. Canonical forms ("CI/CD", "REST API", "PostgreSQL"). 1–3 words each.
+   NAMED BEATS GENERIC — a specific tool the candidate named is worth more than the category it belongs to, because it is checkable and it is what recruiters search for: "Quick", "Nimble", "Maestro" beat "Unit Testing"; "Swift Package Manager" and "SwiftData" beat "Dependency Management" and "Data Persistence"; "Riverpod" and "Bloc" beat "State Management". List the named ones; keep a generic label only when no named item covers it. Vague capability labels ("Performance Optimization", "Feature Development", "Bug Resolution", "Mobile Application Development") are the first cuts.
    LENGTH — aim for 12–20 entries. Past roughly twenty the section stops being read and starts being skimmed for the ones the reader came for, so every extra entry makes the important ones harder to find. If you are over, the cuts come off the tail (the things this JD never asks about), never off the JD-matched head.
    NO SOFT SKILLS — this is absolute and it is where this list usually goes wrong. "Team Leadership", "Event Coordination", "Communication", "Problem Solving", "Time Management", "Adaptability", "Attention to Detail" and their relatives do not belong in a skills list in any field. They are unfalsifiable, every applicant claims them, and a recruiter reads them as filler that dilutes the real entries around them. Leadership is proved by a bullet that says what was led, not by the word. Watch especially for these arriving from an extracurricular or a club role that has nothing to do with the target job — that is the most common source, and such an item contributing zero skills to this list is the correct outcome, not an omission.
-   PLATFORM/DOMAIN: when the candidate's evidence (canonicalBullets, normalized skills, or raw description) establishes a platform or domain the JD targets — e.g. iOS, Android, Data Engineering, Fintech — surface that exact platform/domain term in the flat list and its bucket (Domain, or Tools & Platforms). It is proven by the concrete stack (Swift/SwiftUI/Objective-C ⇒ iOS), not a new claim, so do NOT drop it as unmatched.
+   PLATFORM/DOMAIN: when the candidate's evidence (facts, normalized skills, or raw description) establishes a platform or domain the JD targets — e.g. iOS, Android, Data Engineering, Fintech — surface that exact platform/domain term in the flat list and its bucket (Domain, or Tools & Platforms). It is proven by the concrete stack (Swift/SwiftUI/Objective-C ⇒ iOS), not a new claim, so do NOT drop it as unmatched.
    CATEGORIES: Group the same items into role-appropriate buckets so a recruiter scanning by topic finds them fast. Pick category names from this taxonomy where they fit, but use only the categories the candidate actually has items for — never fabricate empty buckets:
      • Languages — EVERY programming language the candidate has, with no exceptions and nothing else filed elsewhere: Swift, Kotlin, Dart, Python, TypeScript, Java, C#, Go, SQL, Objective-C. A language is not a "tool" or a "platform" — Swift under Tools & Platforms is a filing error a technical reader notices immediately. Spoken languages go here too, but only when the profile actually lists proficiencies.
      • Frameworks & Libraries
@@ -83,7 +113,7 @@ RULES:
    For non-tech fields, substitute fitting category names ("Clinical Skills", "Research Methods", "Design Tools", "Legal Domains"). Every item in "skillCategories" MUST also exist in the flat "skills" array (categories regroup; they don't introduce new skills). Order categories so the JD-most-relevant bucket is first. Within a bucket, JD-matched items first.
    FILE EACH SKILL ONCE, IN THE RIGHT BUCKET. A skill appears in exactly ONE category — the same item under two headings reads as padding in the one section a recruiter scans for substance ("AWS" under both Tools & Platforms and Cloud & Infrastructure is a defect, not thoroughness). And "Methodologies" means WAYS OF WORKING — Agile, Scrum, TDD, Code Review, CI/CD as a practice. It is not the leftovers drawer: a technology, protocol or interface style belongs in a technical bucket ("REST API" is Frameworks & Libraries or Tools & Platforms, never a methodology), and a capability label like "Debugging", "Legacy Code Migration" or "Cross-Platform Mobile Development" belongs under Domain or a field-appropriate competency heading. If an item does not clearly fit any bucket you have opened, it is usually a sign the flat list should not carry it either.
 
-6. SUMMARY — 2–4 sentences, ~50–90 words, no first-person, no clichés.
+6. SUMMARY — 2–3 sentences, ~40–70 words, no first-person, no clichés. Shorter and specific beats longer and general: name the single strongest proof (a product, a migration, a module) by name.
    GOAL: a positioning statement that earns the recruiter's next 5 seconds AND scores high on LLM auto-rankers. Recruiters read 200+ resumes for one role; LLMs rank them. The summary is what differentiates this candidate from the rest of the applicant pool — NOT a recap of their bullets.
 
    STRUCTURE — use only what the input supports; no fixed sentence count:
@@ -106,17 +136,18 @@ RULES:
    - METRIC DUPLICATION — Do not lift any specific number, %, $, or metric-bearing outcome that appears in any refined bullet. The same number in summary AND a bullet flags as filler in both human and AI screens. Tenure ("7 years"), generic scope ("multi-region", "cross-team"), and aggregate counts that summarise across roles are fine. You MAY name the candidate's single most JD-relevant proof point (a named migration, module, system, or product) WITHOUT its metric — one concrete noun in the summary is differentiation, not filler; just never repeat its number.
    - CLICHÉS — "results-driven", "passionate", "team player", "go-getter", "innovative", "proven track record", "dynamic", "self-starter", "synergy", "value-add", "thought leader", "highly motivated", "detail-oriented", "strong communication skills".
    - VAGUE HEDGES — "various", "diverse", "multiple", "extensive", "wide range".
-   - GENERIC OPENERS — Do not begin with "Highly", "Experienced", "Skilled" + adjective. Lead with role + specifics.
+   - GENERIC OPENERS — Do not begin with "Highly", "Experienced", "Skilled", "Versatile" + adjective. Lead with role + specifics.
+   - EMPTY CLAIMS — "Demonstrated ability/capability/expertise in…", "strong aptitude for…", "focused on building maintainable codebases and robust user experiences" assert a quality instead of showing it. Replace each with the thing that proves it.
 
    Students / entry-level: a. degree + field + graduation year + 1–2 JD-aligned focus areas; b. internships, coursework themes, or major project patterns (synthesized, not bullet-rehashed); c. stack the candidate can actually demonstrate.
 
 7. PROJECTS — Integrate listed "technologies" naturally. If empty, no inventing.
    KEEP PROVENANCE. When the evidence says an item was a learning exercise, demo, side project, coursework, thesis, bootcamp, freelance or volunteer work, that word is a FACT and it survives into the output ("demo e-commerce application", "personal Flutter app", "university thesis project"). Do not quietly upgrade it into professional delivery by dropping the qualifier — a side project written to read like production work is the most common way a strong-looking résumé collapses, because the recruiter asks one follow-up question and the whole document loses credibility with it. A well-built personal project is genuinely good evidence; it just has to be labelled as what it is. Never move the other way either: real professional work must not be described as though it were a side project.
 
-8. BULLET COUNT — Match signal density: rich (3+ accomplishments) → 4–5 bullets, moderate → 3–4, thin → 2–3. Never pad.
+8. BULLET COUNT — every experience and project item carries a "bulletBudget" ("min-max"), computed from recency and from how much evidence the item has. Emit a count inside that range. It is weighted the way recruiters read: the current / most recent role is where the candidate is strongest and gets the most room; older roles, internships and coursework get less. Never fall under the minimum to look concise — an under-filled current role reads as a candidate with nothing to show — and never pad past the evidence to reach it.
 
 9. SENIORITY ALIGNMENT — Match tone, scope language, and verb choice to the candidate's actual seniority (provided as SENIORITY in the prompt).
-   NEVER STATE THE LEVEL. The SENIORITY line is an instruction to you, not a fact about the candidate to publish. A résumé does not label itself: "Mid-level software engineer with…", "Junior developer…", "Senior-level professional…" are all instant credibility damage — levelling is the employer's call, a candidate who pre-assigns their own is either capping themselves or misreading the market, and no strong résumé in any field does it. Open with the ROLE and the specifics ("Software engineer with 3.5 years building…", "Backend engineer specializing in payment infrastructure"). Bare tenure is fine; the bucket word is not. This applies to the summary and to every bullet. Junior / entry-level: emphasize execution, shipping features, technical foundations, learning velocity, collaboration. Use verbs like Built, Implemented, Shipped, Contributed, Resolved. Avoid claiming architectural ownership or strategy. Mid: emphasize ownership, cross-team collaboration, problem decomposition, architectural contributions. Use Owned, Led, Drove, Designed, Refactored. Senior+: emphasize system design, technical strategy, mentoring, scalability, organizational impact. Use Architected, Established, Scaled, Mentored, Standardized. Never inflate seniority through verb choice. Never DEFLATE evidenced ownership either: when the input or canonicalBullets state the candidate led, owned, or solo-built something, keep that verb regardless of the seniority bucket — the evidence outranks the bucket.`;
+   NEVER STATE THE LEVEL. The SENIORITY line is an instruction to you, not a fact about the candidate to publish. A résumé does not label itself: "Mid-level software engineer with…", "Junior developer…", "Senior-level professional…" are all instant credibility damage — levelling is the employer's call, a candidate who pre-assigns their own is either capping themselves or misreading the market, and no strong résumé in any field does it. Open with the ROLE and the specifics ("Software engineer with 3.5 years building…", "Backend engineer specializing in payment infrastructure"). Bare tenure is fine; the bucket word is not. This applies to the summary and to every bullet. Junior / entry-level: emphasize execution, shipping features, technical foundations, learning velocity, collaboration. Use verbs like Built, Implemented, Shipped, Contributed, Resolved. Avoid claiming architectural ownership or strategy. Mid: emphasize ownership, cross-team collaboration, problem decomposition, architectural contributions. Use Owned, Led, Drove, Designed, Refactored. Senior+: emphasize system design, technical strategy, mentoring, scalability, organizational impact. Use Established, Scaled, Mentored, Standardized — and "Architected" only when the input or facts themselves say the candidate architected it. Never inflate seniority through verb choice. Never DEFLATE evidenced ownership either: when the input or facts state the candidate led, owned, or solo-built something, keep that verb regardless of the seniority bucket — the evidence outranks the bucket.`;
 }
 
 // ────────────────────────────────────────────────
@@ -128,10 +159,103 @@ RULES:
 // alongside the prompt), but OpenAI-compatible providers' JSON mode just
 // guarantees valid JSON, not a particular shape — so the shape must live in
 // the prompt for those.
-export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boolean } = { embedSchemaSpec: false }): string {
+// ────────────────────────────────────────────────
+// 📏 BULLET BUDGETS (recency-weighted, evidence-capped)
+// ────────────────────────────────────────────────
+//
+// RULE 8 used to be a single abstract line ("rich → 4–5, thin → 2–3"), so the
+// model sized each item on its own and nothing stopped the current role coming
+// out thinner than an internship. The budget is now computed here and attached
+// to every item as data — models follow a number on the item far more reliably
+// than a principle in the system prompt — and the post-pipeline reads the same
+// budgets, so the prompt and the trimmer can no longer disagree.
+//
+// The shape follows how recruiters read (and the common guidance: 4–6 bullets
+// for the most recent role, 2–4 for older ones, fewer for internships): the
+// current role is where the candidate is strongest. Every range is capped by the
+// evidence the item actually has, so a thin item is never padded to fit.
+// min/max: what the prompt asks for (capped by the item's evidence).
+// hardMax: the deterministic ceiling — the range's own max, NOT evidence-capped,
+// because the evidence count is an estimate and must never delete a bullet the
+// model grounded in detail the estimate missed.
+export interface BulletBudget { min: number; max: number; hardMax: number; rank: number }
+
+// Internships and apprenticeships — but NOT career-track titles that merely
+// contain the word: "Management Trainee Officer" (a standard full-time entry
+// track at BD banks and MNCs) or "Internship Coordinator".
+function isJuniorRole(role: string): boolean {
+  if (/\bmanagement\s+trainee\b|\b(?:coordinator|manager|officer|recruiter|lead)\b/i.test(role)) return false;
+  return /\b(intern|internship|trainee|apprentice)\b/i.test(role);
+}
+
+// Without polished facts, estimate from the raw text: sentences (incl. the
+// Bangla danda "।") or lines of 2+ words, and never less than ~one fact per 20
+// words — a long Bangla paragraph or terse "Built X\nUsed Y" lines must not
+// collapse the current role's budget to a single bullet.
+function evidenceCount(canonical: string[] | undefined, raw: string | undefined): number {
+  if (canonical?.length) return canonical.length;
+  const text = raw ?? '';
+  const pieces = text.split(/\n+|(?<=[.!?।])\s+/).filter((l) => l.trim().split(/\s+/).length >= 2);
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, pieces.length, Math.ceil(words / 20));
+}
+
+function capRange(min: number, max: number, evidence: number): { min: number; max: number } {
+  const hi = Math.max(1, Math.min(max, evidence));
+  return { min: Math.max(1, Math.min(min, hi)), max: hi };
+}
+
+export function computeBulletBudgets(data: ResumeData): Map<string, BulletBudget> {
+  const master = data.resumeMode === 'master';
+  const budgets = new Map<string, BulletBudget>();
+
+  const byRecency = [...(data.experience ?? [])].sort(compareByRecency);
+  byRecency.forEach((e, rank) => {
+    const n = evidenceCount(e.normalized?.bullets, e.rawDescription);
+    let range: [number, number];
+    // An internship never gets the flagship budget, even as the latest entry.
+    if (isJuniorRole(e.role ?? '')) range = rank === 0 ? [3, 4] : [2, 3];
+    else if (rank === 0) range = master ? [5, 8] : [4, 6];
+    else if (rank === 1) range = [3, 5];
+    else range = [2, 4];
+    budgets.set(e.id, { ...capRange(range[0], range[1], n), hardMax: range[1], rank });
+  });
+
+  for (const p of data.projects ?? []) {
+    const n = evidenceCount(p.normalized?.bullets, p.rawDescription);
+    budgets.set(p.id, { ...capRange(2, 4, n), hardMax: 5, rank: -1 });
+  }
+  for (const x of data.extracurriculars ?? []) {
+    const n = evidenceCount(x.normalized?.bullets, x.description);
+    budgets.set(x.id, { ...capRange(1, 3, n), hardMax: 4, rank: -1 });
+  }
+  return budgets;
+}
+
+const fmtBudget = (b: BulletBudget | undefined) => (b ? (b.min === b.max ? `${b.min}` : `${b.min}-${b.max}`) : undefined);
+
+const TAILORED_PLAN_TASK = `0. plan — WRITE THIS FIRST, BEFORE ANY RÉSUMÉ CONTENT. Do not skip it and do not backfill it to match a résumé you have already written; it exists to decide the résumé, and the quality of everything below depends on it. Keep every entry short — these are working notes, not prose.
+   - jdPriorities: 3–5 entries, ranked most-decisive first. What is this employer ACTUALLY hiring for? Read past the boilerplate: the responsibilities and competencies sections usually say more than the bullet list of technologies. Rank by what would get someone rejected if it were missing.
+   - proofMap: one entry per priority, in the same order — the candidate's single strongest concrete proof of it, naming the item it comes from ("independent delivery of moderate-complexity work → Ecommerce app: owned the checkout rewrite solo"). If nothing in the profile proves a priority, say so plainly ("no proof"). This mapping is what tells you which bullet leads each item.
+   - weakSpots: what this JD wants that the evidence does NOT support. These get de-emphasised — never fabricated, never padded around.
+   - thesis: ONE sentence, ≤30 words. The case: why this candidate, for this job. Everything you write afterwards should be recognisably serving this sentence.
+   - orderPlan: 2–5 short decisions about sequence and why, covering the lead bullet of the strongest item, the order of projects, and what you are cutting or demoting. Name the reader effect, not the mechanic — "leads with the legacy-modernisation work because the JD's #1 is navigating existing systems", not "moved bullet 3 up".`;
+
+const MASTER_PLAN_TASK = `0. plan — WRITE THIS FIRST, BEFORE ANY RÉSUMÉ CONTENT. There is no job description: plan against the candidate's NATURAL NEXT ROLE (see MODE: MASTER RÉSUMÉ). Keep every entry short — these are working notes, not prose.
+   - jdPriorities: first entry names the natural next role ("Target: mobile engineer, iOS + Flutter"); then 2–4 things a hiring manager for that role screens for hardest, ranked.
+   - proofMap: one entry per priority, the candidate's single strongest concrete proof, naming the item and product it comes from.
+   - weakSpots: what that role usually wants that the evidence does not show — de-emphasised, never fabricated.
+   - thesis: ONE sentence, ≤30 words — why this candidate is a strong hire for that role.
+   - orderPlan: 2–5 short decisions — which product leads the current role, how its bulletBudget is split across products, which skills lead.`;
+
+export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boolean; budgets?: Map<string, BulletBudget> } = { embedSchemaSpec: false }): string {
   const totalExperience = calculateTotalExperience(data.experience);
   const isStudent = data.userType === 'student';
   const seniority = inferSeniority(data);
+  const master = data.resumeMode === 'master';
+  // Passed in by the generator so the prompt and the post-pipeline read the
+  // same object.
+  const budgets = opts.budgets ?? computeBulletBudgets(data);
 
   const cleanExperience = data.experience.map(e => ({
     id: e.id,
@@ -140,12 +264,13 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     startDate: e.startDate,
     endDate: e.endDate,
     isCurrent: e.isCurrent,
+    bulletBudget: fmtBudget(budgets.get(e.id)),
     description: e.rawDescription,
     // "Polished profile" (normalized once on profile save): pre-cleaned
     // professional bullets derived from the raw description. When present,
     // the NOTE in the prompt tells the model to use them as primary
     // evidence — stabler output than re-interpreting Banglish per generation.
-    ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
+    ...(e.normalized?.bullets?.length ? { facts: e.normalized.bullets } : {}),
     // Normalizer-surfaced competencies ("Native iOS Development") — the
     // pre-computed platform/domain signal RULE 5 tells the model to use.
     ...(e.normalized?.skills?.length ? { canonicalSkills: e.normalized.skills } : {}),
@@ -154,10 +279,11 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
   const cleanProjects = data.projects.map(p => ({
     id: p.id,
     name: p.name,
+    bulletBudget: fmtBudget(budgets.get(p.id)),
     description: p.rawDescription,
     technologies: p.technologies,
     link: p.link,
-    ...(p.normalized?.bullets?.length ? { canonicalBullets: p.normalized.bullets } : {}),
+    ...(p.normalized?.bullets?.length ? { facts: p.normalized.bullets } : {}),
     ...(p.normalized?.skills?.length ? { canonicalSkills: p.normalized.skills } : {}),
   }));
 
@@ -167,33 +293,43 @@ export function buildUserPrompt(data: ResumeData, opts: { embedSchemaSpec: boole
     organization: e.organization,
     startDate: e.startDate,
     endDate: e.endDate,
+    bulletBudget: fmtBudget(budgets.get(e.id)),
     description: e.description,
-    ...(e.normalized?.bullets?.length ? { canonicalBullets: e.normalized.bullets } : {}),
+    ...(e.normalized?.bullets?.length ? { facts: e.normalized.bullets } : {}),
     ...(e.normalized?.skills?.length ? { canonicalSkills: e.normalized.skills } : {}),
   }));
 
   const hasCanonical =
-    cleanExperience.some(e => 'canonicalBullets' in e) ||
-    cleanProjects.some(p => 'canonicalBullets' in p) ||
-    cleanExtracurriculars.some(e => 'canonicalBullets' in e);
+    cleanExperience.some(e => 'facts' in e) ||
+    cleanProjects.some(p => 'facts' in p) ||
+    cleanExtracurriculars.some(e => 'facts' in e);
 
   const schemaSpec = opts.embedSchemaSpec ? buildSchemaSpec(data) : '';
 
   // Compact JSON (no pretty-printing) saves ~25–30% of the candidate-data
   // tokens. Models read compact JSON just as well as indented JSON.
-  return `TARGET JOB
+  const targetBlock = master
+    ? `MASTER RÉSUMÉ — NO TARGET JOB
+Write the candidate's flagship general résumé, aimed at their natural next role (see MODE: MASTER RÉSUMÉ). Ignore any placeholder job text.
+`
+    : `TARGET JOB
 Title: ${data.targetJob.title || 'N/A'}
 Company: ${data.targetJob.company || 'N/A'}
 Description:
 ${data.targetJob.description}
+`;
+  const selectNote = master
+    ? 'NOTE: items below with "facts" carry the candidate\'s work already extracted into English, one fact per line — the PRIMARY evidence; "description" is their raw text, backup detail only. Neither is wording to keep (RULE 3a). Fill each item\'s bulletBudget: cover every distinct product, module, migration and named technology you have room for, combining two facts about the SAME artifact into one denser bullet where that keeps both specifics — never blend two distinct products or artifacts into one vague line.\n\n'
+    : 'NOTE: items below with "facts" carry the candidate\'s work already extracted into English, one fact per line — often MORE than your bullet budget. They are the PRIMARY evidence; "description" is their raw text, backup detail only. Neither is wording to keep (RULE 3a). Your job is to SELECT: keep the most JD-relevant facts within the item\'s bulletBudget and DROP the off-JD rest — never blend two distinct projects or artifacts into one vague line. You MAY combine two facts about the SAME artifact into one denser bullet when that preserves both specifics. Then write each bullet fresh, for THIS JD.\n\n';
 
+  return `${targetBlock}
 CANDIDATE
 Type: ${isStudent ? 'Student / Entry-level' : 'Experienced Professional'}
 Total experience: ${totalExperience}
 SENIORITY: ${seniority} — INTERNAL CALIBRATION INPUT, NOT RÉSUMÉ CONTENT. It tunes verb choice, ownership claims and scope language (see RULE 9). This bucket label must never appear in any field you emit.
 Skills (input): ${data.skills.join(', ') || '(none)'}
 
-${hasCanonical ? 'NOTE: items below with "canonicalBullets" carry a pre-cleaned professional rendering of their raw description — often MORE bullets than your output budget. Treat canonicalBullets as the PRIMARY evidence and the raw description as backup detail. Your job is to SELECT: keep the most JD-relevant subset within the RULE 8 bullet budget and DROP the off-JD rest — never blend two distinct projects or artifacts into one vague line. You MAY merge two canonical facts about the SAME artifact into one denser bullet when that preserves both specifics. Still reorder, reword, and emphasize for THIS JD.\n\n' : ''}EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
+${hasCanonical ? selectNote : ''}EXPERIENCE (${cleanExperience.length} items — each MUST produce refinedBullets):
 ${JSON.stringify(cleanExperience)}
 
 PROJECTS (${cleanProjects.length} items — each MUST produce refinedBullets):
@@ -208,21 +344,16 @@ ${data.certifications?.length ? `CERTIFICATIONS: ${data.certifications.map(c => 
 
 TASK
 
-0. plan — WRITE THIS FIRST, BEFORE ANY RÉSUMÉ CONTENT. Do not skip it and do not backfill it to match a résumé you have already written; it exists to decide the résumé, and the quality of everything below depends on it. Keep every entry short — these are working notes, not prose.
-   - jdPriorities: 3–5 entries, ranked most-decisive first. What is this employer ACTUALLY hiring for? Read past the boilerplate: the responsibilities and competencies sections usually say more than the bullet list of technologies. Rank by what would get someone rejected if it were missing.
-   - proofMap: one entry per priority, in the same order — the candidate's single strongest concrete proof of it, naming the item it comes from ("independent delivery of moderate-complexity work → Ecommerce app: owned the checkout rewrite solo"). If nothing in the profile proves a priority, say so plainly ("no proof"). This mapping is what tells you which bullet leads each item.
-   - weakSpots: what this JD wants that the evidence does NOT support. These get de-emphasised — never fabricated, never padded around.
-   - thesis: ONE sentence, ≤30 words. The case: why this candidate, for this job. Everything you write afterwards should be recognisably serving this sentence.
-   - orderPlan: 2–5 short decisions about sequence and why, covering the lead bullet of the strongest item, the order of projects, and what you are cutting or demoting. Name the reader effect, not the mechanic — "leads with the legacy-modernisation work because the JD's #1 is navigating existing systems", not "moved bullet 3 up".
+${master ? MASTER_PLAN_TASK : TAILORED_PLAN_TASK}
 
 1. summary — Per the SUMMARY rule. It must read as the thesis, evidenced. SYNTHESIS, not duplication: surface the *pattern* across roles, never restate a single bullet. Aim for differentiation — what about this candidate would make a recruiter (or an LLM ranker) move them past the first cut for THIS specific JD? If the only metric available is a single bullet's number, do NOT use it in the summary; rely on tenure, domain, and stack instead.
 2. skills — Ordered per RULE 5: the JD's own priorities first, in JD casing, then the rest. Apply RULE 2 SKILL HONESTY: name the candidate's described work in industry-standard terms (competency labels), but never infer a specific product/tool/certification they did not name.
 2b. skillEvidence — for each skill whose label is not literally in the candidate's text, {skill, quote} where quote is 5-15 words copied VERBATIM from their description (their language, not translated). Ungrounded skills are deleted.
-3. experience — Build each item's refinedBullets from its canonicalBullets (fall back to "description" when absent): SELECT the most JD-relevant subset, preserve every number. Order the bullets per RULE 4 — the lead bullet is the strongest PROOF of the priority this item is carrying in your proofMap, not the biggest number. Keep the items in the order given (chronology). Strong verbs only.
+3. experience — Build each item's refinedBullets from its facts (fall back to "description" when absent), each bullet freshly written (RULE 3a), with a bullet count inside its bulletBudget: ${master ? 'cover its distinct products and work, strongest first' : 'SELECT the most JD-relevant subset'}, preserve every number. When the item spans several products, follow RULE 3 ONE ROLE, SEVERAL PRODUCTS. Order the bullets per RULE 4 — the lead bullet is the strongest PROOF of the priority this item is carrying in your proofMap, not the biggest number. Keep the items in the order given (chronology). Strong verbs only.
 4. projects — Same rules, but these have no timeline to respect: order the items themselves strongest-case-first per RULE 4.
 5. extracurriculars — Same as projects.
 
-FINAL CHECK before you emit — read back the first bullet of every item plus the first 8 skills, in order, as one list. Does that list alone make the case in your thesis? If a line in it is doing nothing for this application, it is in the wrong place or should not be there.${schemaSpec}`;
+FINAL CHECK before you emit — read back the first bullet of every item plus the first 8 skills, in order, as one list. Does that list alone make the case in your thesis? If a line in it is doing nothing for this application, it is in the wrong place or should not be there. Then check the current role: is its bullet count inside its bulletBudget, does every bullet say what was BUILT (not how many PRs), and is every product it covers named?${schemaSpec}`;
 }
 
 // Used only when the provider's JSON mode does not natively enforce a schema
@@ -291,7 +422,7 @@ Empty arrays ARE allowed when there were zero input items in that section.`;
 // what isn't fine is shipping a banned phrase. Cleanup steps at the end fix
 // double spaces, dangling commas, and lowercase sentence starts caused by
 // deletion.
-const BANNED_CLICHE_PATTERNS: Array<[RegExp, string]> = [
+const BANNED_CLICHE_PATTERNS: RemovalPattern[] = [
   // Most common — drop "of/in/for" connector if present so sentence still flows.
   [/\bproven track record of\s+/gi, ''],
   [/\bproven track record in\s+/gi, ''],
@@ -313,19 +444,82 @@ const BANNED_CLICHE_PATTERNS: Array<[RegExp, string]> = [
   [/\bhighly motivated\s+/gi, ''],
   [/\bdetail-oriented\s+/gi, ''],
   [/\bstrong communication skills\b/gi, 'clear written and spoken communication'],
+  // RULE 6 GENERIC OPENERS / VAGUE HEDGES — the adjective goes, the noun it
+  // modified stays ("Versatile mobile engineer" → "Mobile engineer").
+  // Not before a coordination ("Versatile and pragmatic…" would lose its head).
+  [/^Versatile\s+(?!(?:and|or|but)\b)/, ''], // the summary's opening word ("Versatile mobile engineer…")
+  [prenominal('versatile', 'gi'), ''],
+  [prenominal('extensive', 'gi'), ''],
+  [prenominal('diverse', 'gi'), ''],
 ];
+
+// RULE 3 WRITE LIKE A PERSON, deterministic half. Only removals that cannot
+// change a bullet's meaning: a filler adjective/adverb in front of the word it
+// decorates, and a machine-tell verb with a plain synonym. Trailing clauses
+// (", demonstrating …") are left to the prompt: measured 2026-10-26, stripping
+// them turned "Built a complete iOS app in SwiftUI, demonstrating rapid
+// adaptability by learning the framework independently" into a bare stub and
+// lost the one fact that made the line worth keeping.
+const BULLET_FILLER: RemovalPattern[] = [
+  [prenominal('seamless(?:ly)?', 'gi'), ''],
+  [prenominal('(?:robust|diligent|impactful|meticulous)', 'gi'), ''],
+  // At any sentence start (bullets are one sentence; the summary has several).
+  // Not the finance terms of art ("Leveraged finance", "leveraged buyout").
+  [/(^|[.!?]\s+)(?:Utilized|Leveraged)\b(?!\s+(?:finance|buyouts?|loans?|lending|ETFs?|funds?)\b)/g, '$1Used'],
+  // No "Spearheaded"/"Orchestrated" swaps here: the normalizer swaps
+  // "Spearheaded" only when the user never wrote it (an evidence check this
+  // stage would contradict), and "Orchestrated" is a real technical verb.
+];
+
+function stripFiller(text: string): string {
+  // Shared removal loop (a/an re-picked, repeated until stable).
+  return capitalizeFirst(applyRemovals(text, BULLET_FILLER));
+}
+
+export function stripBulletFiller(parsed: OptimizedResumeData): void {
+  for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
+    for (const item of group ?? []) {
+      if (!Array.isArray(item.refinedBullets)) continue;
+      item.refinedBullets = item.refinedBullets.map(stripFiller);
+    }
+  }
+  // Same words, same tell, in the summary ("robust experience integrating…").
+  if (typeof parsed.summary === 'string' && parsed.summary) parsed.summary = stripFiller(parsed.summary);
+}
+
+// Industry words the summary pads itself with to sound broad. Measured
+// 2026-10-26: "…across fintech, workforce management, and healthcare domains"
+// for a candidate with no payments work at all. Grounded through SKILL_ALIASES,
+// so "fintech" survives for someone whose evidence names bKash or a payment
+// gateway. Repaired in place by repairUnevidencedProse — never a retry.
+// [term as written in the summary, whole-word family that grounds it in the
+// evidence] — "bank" (Sonali Bank) grounds "banking", "e-commerce" grounds
+// "ecommerce", but "endgame"/"game-changing" do not ground "gaming".
+// SKILL_ALIASES still applies on top (bKash grounds fintech).
+const INDUSTRY_TERMS: Array<[string, RegExp]> = [
+  ['fintech', /\bfintech\b/], ['healthtech', /\bhealthtech\b/], ['edtech', /\bedtech\b/], ['proptech', /\bproptech\b/],
+  ['insurtech', /\binsurtech\b/], ['agritech', /\bagritech\b/],
+  ...(['e-commerce', 'ecommerce'] as const).map((t) => [t, /\be-?commerce\b/] as [string, RegExp]),
+  ['banking', /\bbank(?:s|ing|er|ers)?\b|\b(?:bkash|nagad|rocket|upay|mfs|mobile financial)\b/], ['insurance', /\binsur(?:ance|er|ers|ed)\b/],
+  ['logistics', /\blogistics?\b/],
+  ...(['telecom', 'telecommunications'] as const).map((t) => [t, /\btelecom(?:s|munications?)?\b/] as [string, RegExp]),
+  ['gaming', /\bgam(?:e|es|ing)\b(?!-chang)/], ['saas', /\bsaas\b/],
+  ['healthcare', /\b(?:health|healthcare|hospital|hospitals|medical|clinic|clinical|patient|patients|pharma\w*|doctors?|nurses?|nursing|telemedicine|telehealth|physicians?)\b/],
+];
+// Deliberately only SECTOR LABELS a model pads a summary with. Generic words
+// ("retail", "education", "manufacturing") double as ordinary adjectives —
+// "retail credit" is banking — and flagging them replaced correct openers.
 
 export function stripBannedCliches(parsed: OptimizedResumeData): void {
   if (typeof parsed.summary !== 'string' || !parsed.summary) return;
   let s = parsed.summary;
-  for (const [re, repl] of BANNED_CLICHE_PATTERNS) {
-    s = s.replace(re, repl);
-  }
+  s = applyRemovals(s, BANNED_CLICHE_PATTERNS);
   // Cleanup pass — collapse internal double spaces, fix " ." / " ," artifacts,
   // re-capitalize sentence starts that lost their leading word, trim.
   s = s.replace(/\s{2,}/g, ' ')
        .replace(/\s+([.,;:!?])/g, '$1')
-       .replace(/(^|\.\s+)([a-z])/g, (_, pre, ch) => pre + ch.toUpperCase())
+       // Re-capitalise sentence starts — but never a mixed-case name ("iOS", "bKash").
+       .replace(/(^|\.\s+)([a-z])([A-Za-z]*)/g, (m, pre, ch, rest) => (/[A-Z]/.test(rest) ? m : pre + ch.toUpperCase() + rest))
        .trim();
   parsed.summary = s;
 }
@@ -702,14 +896,24 @@ export function filterFabricatedSkills(
   return { kept, fabricated };
 }
 
+/** `term` as a whole word in lowercased text ("excel" not in "excellent"). */
+function hasWord(text: string, term: string): boolean {
+  return new RegExp(`(^|[^a-z0-9])${escapeRe(term)}(?![a-z0-9])`).test(text);
+}
+
 // Substring evidence check + a small set of well-known abbreviation pairs so
 // "JavaScript" matches "JS" in the candidate's input (and vice-versa).
 function skillEvidenced(skill: string, evidence: string): boolean {
   const lc = skill.toLowerCase();
-  if (evidence.includes(lc)) return true;
-  const expansions = SKILL_ALIASES[lc];
+  if (WHOLE_WORD_ALIASES.has(lc) ? hasWord(evidence, lc) : evidence.includes(lc)) return true;
+  const expansions = Object.hasOwn(SKILL_ALIASES, lc) ? SKILL_ALIASES[lc] : undefined;
   if (expansions) {
-    for (const alias of expansions) if (evidence.includes(alias)) return true;
+    // Substring, as the alias table was written for ("payment gateway" matches
+    // "payment gateways", "spark" matches "PySpark") — except the office-suite
+    // words, which are ordinary English inside other words ("excellent").
+    for (const alias of expansions) {
+      if (WHOLE_WORD_ALIASES.has(alias) ? hasWord(evidence, alias) : evidence.includes(alias)) return true;
+    }
   }
   // Leading-phrase fallback for 3+-word skills: an honest longer phrasing of
   // an evidenced fact ("App Store Releases" when the raw text says
@@ -763,6 +967,8 @@ function stemForEvidence(word: string): string {
   return stripped.length >= 4 ? stripped : word;
 }
 
+const WHOLE_WORD_ALIASES = new Set(['excel', 'ms excel', 'ms-excel', 'powerpoint', 'power point']);
+
 const SKILL_ALIASES: Record<string, string[]> = {
   'javascript': ['js'],
   'js': ['javascript'],
@@ -803,6 +1009,16 @@ const SKILL_ALIASES: Record<string, string[]> = {
   'machine learning': ['tensorflow', 'pytorch', 'scikit-learn', 'xgboost', 'keras'],
   'data analysis': ['power bi', 'tableau', 'pandas', 'pivot table'],
   'e-commerce': ['shopify', 'woocommerce', 'daraz', 'magento'],
+  // Office suites as people actually type them. The fabrication dictionary flags
+  // "Microsoft" in any label the candidate did not spell out, so without these a
+  // merchandiser who wrote "excel" and "ms office" lost both skills.
+  'microsoft excel': ['excel', 'ms excel', 'ms-excel'],
+  'ms excel': ['excel'],
+  'microsoft office': ['ms office', 'ms-office', 'office suite'],
+  'microsoft word': ['ms word', 'ms-word'],
+  'microsoft powerpoint': ['powerpoint', 'ms powerpoint', 'power point'],
+  'microsoft teams': ['ms teams'],
+  'microsoft outlook': ['ms outlook', 'outlook mail'],
 };
 
 /**
@@ -824,12 +1040,7 @@ const SKILL_ALIASES: Record<string, string[]> = {
  */
 export function reportFabricatedProse(parsed: OptimizedResumeData, candidate: ResumeData): string[] {
   const evidence = buildEvidenceText(candidate).toLowerCase();
-  const prose = [
-    parsed.summary ?? '',
-    ...(parsed.experience ?? []).flatMap((e) => e.refinedBullets ?? []),
-    ...(parsed.projects ?? []).flatMap((e) => e.refinedBullets ?? []),
-    ...(parsed.extracurriculars ?? []).flatMap((e) => e.refinedBullets ?? []),
-  ].join('\n');
+  const prose = proseOf(parsed);
   return prose.trim() ? detectFabricatedTokens(prose, evidence) : [];
 }
 
@@ -843,7 +1054,7 @@ export function reportFabricatedProse(parsed: OptimizedResumeData, candidate: Re
 // them the same standup/Jira line, in 4 of the 6 runs.
 //
 // The leak was upstream. The normalizer emitted "Participated in daily standup
-// meetings…", and the optimizer is told to treat canonicalBullets as PRIMARY
+// meetings…", and the optimizer is told to treat the polished `facts` as PRIMARY
 // evidence and SELECT from them — so a weak opener produced one stage earlier
 // passes straight through to the résumé. The normalizer prompt now forbids these
 // too, but prompts are probabilistic and this is the recruiter's first impression,
@@ -898,6 +1109,51 @@ export function dropBannedOpenerBullets(parsed: OptimizedResumeData): string[] {
   return dropped;
 }
 
+// ────────────────────────────────────────────────
+// 🔢 ACTIVITY-COUNT BULLETS (deterministic half of RULE 3)
+// ────────────────────────────────────────────────
+//
+// A bullet whose headline is a count of pull requests / commits / story points
+// reports effort, not what was built, and engineering readers discount it.
+// RULE 3 says so, and flash-lite still led a role with "Shipped over 70 merged
+// pull requests on Ditio Core…" in 2 of 3 master runs on 2026-10-26 — copied
+// from a normalizer bullet built around the count. Such a bullet is DEMOTED to
+// the end of its item, never deleted (see demoteActivityCountBullets), and the
+// lead-bullet rescue never promotes it. Tickets are deliberately absent: for a
+// support agent "resolved 50 tickets a day" is real throughput, not vanity.
+// "PRs" only counts with "merged" next to it: "Secured 50+ PR placements" is a
+// public-relations result, not a pull-request count.
+// Removal verbs state an outcome ("Removed 12,000 lines of code by…"), not effort.
+const ACTIVITY_COUNT_LEAD = /^(?!\s*(?:Removed|Deleted|Cut|Reduced|Eliminated|Trimmed)\b)\s*(?:\w+\s+){0,2}(?:over\s+|more than\s+|nearly\s+|about\s+)?\d[\d,]*\+?\s+(?:(?:merged\s+|code\s+)?(?:pull requests?|commits?|story points?|lines of code)\b(?!\s+(?:templates?|bots?|checks?|reviewers?|workflows?|tool(?:s|ing)?))|merged\s+PRs?\b)|^\s*Merged\s+(?:over\s+|more than\s+)?\d[\d,]*\+?\s+PRs?\b/i;
+
+export function demoteActivityCountBullets(parsed: OptimizedResumeData): string[] {
+  // Never deletes: telling a bare count from one that also states real work
+  // took a heuristic that kept misreading ("during", "a scheduling app"), and a
+  // deleted real fact is worse than a weak line at the bottom. The count bullet
+  // just never leads — it moves last, and reorderLeadBulletByJDFit skips it.
+  // The prompts (RULE 3, normalizer rule 8) are what keep counts out of
+  // headlines in the first place.
+  const moved: string[] = [];
+  for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
+    for (const item of group ?? []) {
+      const bullets = item.refinedBullets;
+      if (!Array.isArray(bullets) || bullets.length < 2) continue;
+      const counts = bullets.filter((b) => ACTIVITY_COUNT_LEAD.test(b));
+      if (counts.length === 0 || counts.length === bullets.length) continue;
+      const next = [...bullets.filter((b) => !ACTIVITY_COUNT_LEAD.test(b)), ...counts];
+      // Already last: nothing moved, nothing to report.
+      if (next.every((b, i) => b === bullets[i])) continue;
+      item.refinedBullets = next;
+      moved.push(...counts);
+    }
+  }
+  return moved;
+}
+
+// No longer thrown on the optimizer path (since 2026-10-26 content problems are
+// repaired in place — see repairUnevidencedProse). Kept deliberately: older
+// ai_call_log rows carry this error name, aiTelemetry still classifies it, and
+// ai-probe's selftest checks that mapping.
 export class ResumeFabricationError extends Error {
   constructor(public readonly tokens: string[]) {
     super(
@@ -907,44 +1163,413 @@ export class ResumeFabricationError extends Error {
   }
 }
 
-/**
- * The one fabrication case on the paid path that must NOT ship: a token that
- * `filterFabricatedSkills` DELETED from `skills` and that still appears in a
- * bullet or the summary.
- *
- * Why this specific intersection, and not all of reportFabricatedProse:
- *
- * A prose-only hit is treated as a warning because the dictionary can
- * false-positive on ordinary English (see AMBIGUOUS_WITH_ENGLISH in
- * toolkitContext) and killing a paid generation over one ambiguous word is
- * worse for the user than shipping it. But when the SAME token was independently
- * flagged in the structured skills array — where there is no surrounding prose to
- * make it ambiguous — the false-positive reading collapses. Two independent hits
- * on one token is a real fabrication, not a dictionary artifact.
- *
- * It is also the only case that produces a self-contradicting document. Left
- * unblocked, the pipeline deletes "Kubernetes" from the skills list and keeps
- * "Architected Kafka-backed event pipelines on Kubernetes" in the experience
- * bullet — so the résumé simultaneously claims and disclaims the same tool. That
- * is worse than either shipping or stripping it consistently, and it is the
- * artifact most likely to be caught in an interview.
- *
- * Throwing is the right shape here: `withRetry` rotates to the next model and
- * tries once more (temperature is 0.3, so a different model often does not
- * fabricate), and `api/optimize` refunds the credit if it ultimately fails. That
- * is exactly the treatment the toolkit path already gives its own artifacts.
- */
-export function assertProseMatchesStrippedSkills(
+// Common shorthands a summary uses for tools the profile names in full.
+// Each part is matched as a word prefix in the evidence ("mongo" ⊂ MongoDB).
+const STACK_SHORTHANDS: Record<string, string[]> = {
+  mern: ['mongo', 'express', 'react', 'node'],
+  mean: ['mongo', 'express', 'angular', 'node'],
+  mevn: ['mongo', 'express', 'vue', 'node'],
+  lamp: ['linux', 'apache', 'mysql', 'php'],
+  gcp: ['google cloud'],
+  aws: ['amazon web services'],
+};
+
+// ────────────────────────────────────────────────
+// 🩹 UNEVIDENCED-CLAIM REPAIR (in place — never a retry)
+// ────────────────────────────────────────────────
+//
+// What used to be two throwing guards (a stripped skill surviving in prose; an
+// industry the candidate never worked in) plus two gaps nothing checked (a tool
+// outside the fabrication dictionary, like "CI/CD" or "XCTest"; an inflated
+// adjective like "enterprise" or "production-ready"). Throwing sent the whole
+// generation back through withRetry on another model — up to the 50s deadline,
+// then an error and a refund — over one word in a résumé that was otherwise
+// done. The user saw a long spinner and a failure. Now each bad term is cut out
+// of its list in place (see proseRepair.ts), so generation completes on the
+// first good model response, and the document still never claims what the
+// candidate did not do.
+//
+// What counts as unevidenced:
+//   • every label filterFabricatedSkills stripped from `skills` (it already
+//     decided these are assets the candidate never named);
+//   • an industry from INDUSTRY_TERMS not grounded by the evidence;
+//   • in the SUMMARY only, a tool-shaped token (symbol-joined, mixedCase,
+//     acronym) absent from the evidence — the toolkit dictionary only knows a
+//     fixed list of names. Heuristic, so it is cut out of a list, or costs a
+//     LATER summary sentence; it never replaces the opener and never touches a
+//     bullet. A bullet is dropped only for a dictionary-confirmed stripped skill.
+// Inflation: opening verbs (Architected…) are swapped back by
+// repairInflatedOpeners; inflated adjectives (enterprise, production-ready…)
+// are repaired in the normalizer only — a deterministic adjective cut on free
+// model prose kept garbling fixed phrases.
+export function repairUnevidencedProse(
   parsed: OptimizedResumeData,
   candidate: ResumeData,
   strippedSkills: string[],
-): void {
-  if (strippedSkills.length === 0) return;
-  const inProse = reportFabricatedProse(parsed, candidate);
-  if (inProse.length === 0) return;
-  const stripped = new Set(strippedSkills.map((s) => s.toLowerCase()));
-  const both = inProse.filter((t) => stripped.has(t.toLowerCase()));
-  if (both.length > 0) throw new ResumeFabricationError(both);
+  budgets: Map<string, BulletBudget> = computeBulletBudgets(candidate),
+): string[] {
+  const evidence = buildEvidenceText(candidate).toLowerCase();
+  // The target company may be named in a tailored summary ("…for BRAC Bank").
+  // Only its own words are allowed — never the JD title's tools, which are
+  // exactly what the summary must not claim unproven.
+  const companyWords = new Set((candidate.targetJob?.company ?? '').split(/\s+/).map((w) => w.toLowerCase().replace(/[^a-z0-9]+/g, '')).filter(Boolean));
+  // Per-WORD compact forms ("node.js," -> "nodejs", "ph.d" -> "phd"). Matching
+  // whole words, not a substring of one long squashed string, so "AWS" is not
+  // "evidenced" by "labor laws".
+  const evidenceWords = new Set(evidence.split(/\s+/).map(alnum).filter(Boolean));
+  // A stripped label's dictionary tokens ("Apache Kafka" -> ["Kafka"]).
+  const labelTokenCache = new Map<string, string[]>();
+  const labelTokens = (label: string): string[] => {
+    let toks = labelTokenCache.get(label);
+    if (!toks) { toks = detectFabricatedTokens(label, evidence); labelTokenCache.set(label, toks); }
+    return toks;
+  };
+  // The target employer's own sector may be named ("…digital banking at BRAC
+  // Bank"): its name grounds the sector it is in.
+  const companyLc = (candidate.targetJob?.company ?? '').toLowerCase();
+  // "BRAC Bank PLC" is written "BRAC Bank" in prose.
+  const companyCore = companyLc.replace(/\b(?:plc|ltd|limited|inc|llc|pvt|co)\b\.?/g, '').replace(/[.,]+$/, '').trim() || companyLc;
+  // The candidate's own evidence grounds a sector anywhere. The TARGET
+  // company's name grounds it only in a summary sentence that names that
+  // company ("…digital banking at BRAC Bank") — never "building banking
+  // apps" for a candidate who never worked in banking, never in a bullet.
+  const companyGrounds = (term: string, family: RegExp, text: string, inSummary: boolean): boolean =>
+    inSummary && !!companyLc && (family.test(companyLc) || skillEvidenced(term, companyLc))
+    && sentencesOf(text).filter((x) => new RegExp(`(^|[^a-z])${term}(?![a-z])`).test(x.toLowerCase()))
+      .every((x) => x.toLowerCase().includes(companyCore));
+  const industryEvidenced = (term: string, family: RegExp): boolean =>
+    family.test(evidence) || skillEvidenced(term, evidence);
+  const removed = new Set<string>();
+
+  // A tool-shaped token is evidenced when the candidate's text has it ignoring
+  // punctuation ("Ph.D"/"PhD", "Node.js"/"nodejs"), as a plural/singular, or —
+  // for "Swift/SwiftUI", "iOS/Android" — when every part is evidenced.
+  // Word-bounded, never a raw substring (skillEvidenced's includes() would let
+  // "laws" vouch for "AWS"). Aliases still apply ("k8s" for Kubernetes).
+  const inEvidence = (term: string): boolean => {
+    const lc = term.toLowerCase().trim();
+    const forms = [lc, ...(Object.hasOwn(SKILL_ALIASES, lc) ? SKILL_ALIASES[lc] : [])];
+    return forms.some((f) => hasWord(evidence, f));
+  };
+  // Acronyms of the candidate's own names: "BUET" for "Bangladesh University of
+  // Engineering and Technology", "CSE" for "Computer Science and Engineering".
+  // Profiles store the long form; a summary naturally uses the short one.
+  const initials = new Set<string>();
+  const names = [
+    ...(candidate.education ?? []).flatMap((e) => [e.school, e.degree, e.field]),
+    ...(candidate.experience ?? []).map((e) => e.company),
+    ...(candidate.certifications ?? []).flatMap((c) => [c.name, c.issuer]),
+    ...(candidate.awards ?? []).flatMap((a) => [a.title, a.issuer]),
+    ...(candidate.affiliations ?? []).map((a) => a.organization),
+  ];
+  for (const n of names) {
+    const words = (n ?? '').split(/[\s&/-]+/).filter(Boolean);
+    if (words.length < 2) continue;
+    initials.add(words.filter((w) => /^[A-Z]/.test(w)).map((w) => w[0]).join('').toLowerCase());
+    initials.add(words.map((w) => w[0]).join('').toLowerCase());
+  }
+  const tokenEvidenced = (tok: string): boolean => {
+    if (companyWords.has(alnum(tok)) || inEvidence(tok)) return true;
+    if (/^[A-Z]{2,}s?$/.test(tok) && initials.has(tok.replace(/s$/, '').toLowerCase())) return true;
+    const a = alnum(tok);
+    if (a && (evidenceWords.has(a) || evidenceWords.has(a.replace(/s$/, '')))) return true;
+    // Shorthand for tools the candidate spelled out: "MERN" for MongoDB +
+    // Express + React + Node, "GCP" for Google Cloud.
+    const parts0 = Object.hasOwn(STACK_SHORTHANDS, a) ? STACK_SHORTHANDS[a] : undefined;
+    if (parts0 && parts0.every((p) => new RegExp(`(^|[^a-z0-9])${p}`).test(evidence))) return true;
+    // "React.js" / "Vue.js" / "Next.js" for a candidate who wrote "react".
+    if (/\.js$/i.test(tok) && evidenceWords.has(alnum(tok.replace(/\.js$/i, '')))) return true;
+    const parts = tok.split('/').filter(Boolean);
+    return parts.length > 1 && parts.every((p) => inEvidence(p) || evidenceWords.has(alnum(p)));
+  };
+
+  // High-confidence terms (droppable) may cost a sentence/bullet when no list
+  // repair is possible. softDroppable — heuristic tool tokens — may cost a
+  // LATER summary sentence (no real work lost) but never replace the opener:
+  // a false positive there would throw away a good positioning line.
+  const collect = (text: string, inSummary: boolean): { terms: string[]; droppable: Set<string>; softDroppable: Set<string>; exactCase: Set<string> } => {
+    const softDroppable = new Set<string>();
+    // Only the original guard's high-confidence signal may cost a whole
+    // sentence/bullet: a stripped skill that the fabrication DICTIONARY also
+    // flags in this text. Everything else (structural strips like "Agile",
+    // over-caught competencies like "License Management") is only cut out of a
+    // list or its phrase — never deleted with the work around it.
+    const stripped = strippedSkills.filter((t) => t.trim());
+    // A stripped label is "confirmed here" when one of ITS dictionary tokens
+    // is flagged in this text — "Apache Kafka" is confirmed by "Kafka" — and
+    // that token (the word actually in the text) is what gets cut.
+    const flagged = new Set(detectFabricatedTokens(text, evidence).map((t) => t.toLowerCase()));
+    const confirmedHere = stripped.flatMap((label) => labelTokens(label).filter((tok) => flagged.has(tok.toLowerCase())));
+    const droppable = new Set<string>(confirmedHere);
+    // BULLETS are the candidate's own polished facts: only dictionary-confirmed
+    // tools are cut from them (a stripped competency like "License Management"
+    // is the skills filter over-catching, and its list item is real work).
+    // In the SUMMARY every single-word stripped label counts too ("Kafka" from
+    // the structural test): dropping a later sentence or replacing the opener
+    // with the positioning line costs no real work. Matched as the label is
+    // written, so the adjective in "agile teams" is not the claim "Agile".
+    const summaryOnly = inSummary
+      ? stripped.filter((t) => !/\s/.test(t.trim()) && !confirmedHere.some((c) => c.toLowerCase() === t.trim().toLowerCase())
+        && new RegExp(`(^|[^A-Za-z0-9])${escapeRe(t.trim())}(?![A-Za-z0-9])`).test(text))
+      : [];
+    summaryOnly.forEach((t) => droppable.add(t));
+    const terms = new Set<string>([...confirmedHere, ...summaryOnly]);
+    const lc = text.toLowerCase();
+    // Industries: cut out of a list; in the summary a later sentence that still
+    // claims one is dropped, and the opener is replaced (see below) — never
+    // deleted outright.
+    for (const [term, family] of INDUSTRY_TERMS) {
+      if (new RegExp(`(^|[^a-z])${term}(?![a-z])`).test(lc) && !industryEvidenced(term, family) && !companyGrounds(term, family, text, inSummary)) {
+        terms.add(term);
+        if (inSummary) droppable.add(term);
+      }
+    }
+    // Summary only: that is where the model invents stack ("CI/CD pipelines"
+    // for a candidate who never named CI/CD). Bullets are composed from the
+    // candidate's own polished facts, and a heuristic that can misread a
+    // legitimate term must not edit the most valuable lines on the page.
+    if (inSummary) {
+      for (const tok of toolShapedTokens(text)) {
+        if (!tokenEvidenced(tok)) { terms.add(tok); softDroppable.add(tok); }
+      }
+    }
+    return { terms: [...terms], droppable, softDroppable, exactCase: new Set(summaryOnly) };
+  };
+
+  if (typeof parsed.summary === 'string' && parsed.summary) {
+    const { terms, droppable, softDroppable, exactCase } = collect(parsed.summary, true);
+    // Stripped skill LABELS match only as written ("Agile", not the adjective
+    // in "agile teams"); scrubText matches case-insensitively, so they skip it
+    // and a later sentence naming one exactly is dropped here instead.
+    const exactRe = (t: string) => new RegExp(`(^|[^A-Za-z0-9])${escapeRe(t.trim())}(?![A-Za-z0-9])`);
+    const scrubTerms = terms.filter((t) => !exactCase.has(t));
+    const fixed = scrubTerms.length ? scrubText(parsed.summary, scrubTerms, new Set([...droppable, ...softDroppable]), { protectFirst: true }) : { text: parsed.summary, removed: [] as string[] };
+    fixed.removed.forEach((t) => removed.add(t));
+    parsed.summary = fixed.text;
+    if (exactCase.size) {
+      const [head, ...tail] = sentencesOf(parsed.summary);
+      const keptTail = tail.filter((x) => {
+        const hit = [...exactCase].filter((t) => exactRe(t).test(x));
+        hit.forEach((t) => removed.add(t));
+        return hit.length === 0;
+      });
+      if (head && keptTail.length !== tail.length) parsed.summary = [head, ...keptTail].join(' ');
+    }
+    // The opener (role + tenure) is never dropped. If it still makes an
+    // unproven claim no list edit could remove, replace it with a positioning
+    // line built from the profile itself — grammatical by construction.
+    const [first, ...rest] = sentencesOf(parsed.summary);
+    // A stripped skill LABEL claims the opener only as written ("Agile", not
+    // the adjective in "agile teams").
+    const claims1 = (t: string) => (exactCase.has(t) ? exactRe(t).test(first) : termRegex(t).test(first));
+    const claimed = first ? [...droppable].filter(claims1) : [];
+    if (claimed.length) {
+      const replacement = replaceOpener(candidate, rest);
+      if (replacement) {
+        parsed.summary = replacement;
+        claimed.forEach((t) => removed.add(t));
+        console.warn(`[optimizer] summary opener replaced (unproven: ${claimed.join(', ')})`);
+      }
+    }
+  }
+  for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
+    for (const item of group ?? []) {
+      if (!Array.isArray(item.refinedBullets) || item.refinedBullets.length === 0) continue;
+      const { terms, droppable } = collect(item.refinedBullets.join('\n'), false);
+      const fixed = terms.length
+        ? scrubBullets(item.refinedBullets, terms, budgets.get(item.id)?.min ?? 1, droppable)
+        : { bullets: item.refinedBullets, removed: [] as string[] };
+      fixed.removed.forEach((t) => removed.add(t));
+      item.refinedBullets = fixed.bullets;
+    }
+  }
+
+  // Final guarantee for the one self-contradiction that must not ship: a skill
+  // the skills list just disclaimed, still claimed in a bullet (the old throwing
+  // guard's job). If the list repair could not remove it — not in a list, item
+  // already at its budget minimum — the bullet goes as long as the item keeps
+  // one. A sole bullet is replaced by the item's own polished fact, else
+  // trimmed to its other sentences, else a plain line from the item's title.
+  // Dictionary-confirmed tools only (Kubernetes, XCTest…) — the old guard's
+  // own signal, matched with the DETECTOR (detectFabricatedTokens), so its case
+  // rules decide, including names that are also English words ("React
+  // dashboards…" at a sentence start). A structural strip ("Agile") or an
+  // over-caught competency ("License Management") never deletes the bullet
+  // around it.
+  const confirmed = strippedSkills.filter((t) => t.trim() && labelTokens(t).length > 0);
+  // One detector pass per text, however many confirmed skills are checked. A
+  // label claims a text when any of its own dictionary tokens is flagged there.
+  const tokenCache = new Map<string, Set<string>>();
+  const claims = (text: string, skill: string) => {
+    let toks = tokenCache.get(text);
+    if (!toks) { toks = new Set(detectFabricatedTokens(text, evidence).map((t) => t.toLowerCase())); tokenCache.set(text, toks); }
+    return labelTokens(skill).some((tok) => toks!.has(tok.toLowerCase()));
+  };
+  const factsById = new Map<string, string[]>(
+    [...(candidate.experience ?? []), ...(candidate.projects ?? []), ...(candidate.extracurriculars ?? [])]
+      .map((x) => [x.id, x.normalized?.bullets ?? []] as [string, string[]]),
+  );
+  // Last-resort lines, phrased to pass BANNED_BULLET_OPENERS ("Worked on…"
+  // is an instant reject, and dropBannedOpenerBullets has already run).
+  const plainLineById = new Map<string, string>([
+    ...(candidate.experience ?? []).filter((e) => e.role?.trim()).map((e) => [e.id, `Served as ${e.role.trim()}${e.company?.trim() ? ` at ${e.company.trim()}` : ''}.`] as [string, string]),
+    ...(candidate.projects ?? []).filter((p) => p.name?.trim()).map((p) => [p.id, `Created ${p.name.trim()}.`] as [string, string]),
+    ...(candidate.extracurriculars ?? []).filter((x) => x.title?.trim()).map((x) => [x.id, `Served as ${x.title.trim()}${x.organization?.trim() ? ` with ${x.organization.trim()}` : ''}.`] as [string, string]),
+  ]);
+  // A bullet with the claim removed as a whole unit, or null: its other
+  // sentences, or the head before a trailing participle clause that holds the
+  // claim ("Built Ditio Core, deploying it on Kubernetes." -> "Built Ditio
+  // Core."). The head must stand alone: 3+ words and claim-free.
+  const withoutClaim = (b: string, skill: string): string | null => {
+    const sentences = sentencesOf(b);
+    const kept = sentences.filter((x) => !claims(x, skill));
+    if (kept.length && kept.length < sentences.length) return kept.join(' ');
+    if (sentences.length !== 1) return null;
+    const m = /^(.*\S),\s+(?:and\s+|while\s+|by\s+)?[a-z]+ing\b[^,]*[.!?]?$/.exec(b.trim());
+    if (!m || !claims(b.slice(m[1].length), skill) || claims(m[1], skill) || m[1].split(/\s+/).length < 3) return null;
+    return `${m[1]}.`;
+  };
+  // The same guarantee for the SUMMARY, matched with the detector (whose case
+  // rules catch "Docker containers…" at a sentence start, where termRegex
+  // deliberately does not): a later sentence naming the tool goes; an opener
+  // naming it is replaced as above.
+  if (typeof parsed.summary === 'string' && parsed.summary) {
+    const named = (x: string) => confirmed.filter((sk) => claims(x, sk));
+    const [head, ...tail] = sentencesOf(parsed.summary);
+    const keptTail = tail.filter((x) => { const n = named(x); n.forEach((t) => removed.add(t)); return n.length === 0; });
+    let next = head && keptTail.length !== tail.length ? [head, ...keptTail].join(' ') : parsed.summary;
+    if (head && named(head).length) {
+      named(head).forEach((t) => removed.add(t));
+      next = replaceOpener(candidate, keptTail) || next;
+    }
+    parsed.summary = next;
+  }
+  for (const skill of confirmed) {
+    for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
+      for (const item of group ?? []) {
+        if (!(item.refinedBullets ?? []).some((b) => claims(b, skill))) continue;
+        // Smallest whole unit first, so the real work around the tool stays:
+        // the bullet's other sentences, or its head before a trailing
+        // ", deploying it on Kubernetes" clause.
+        item.refinedBullets = item.refinedBullets.map((b) => (claims(b, skill) ? withoutClaim(b, skill) ?? b : b));
+        if (!item.refinedBullets.some((b) => claims(b, skill))) { removed.add(skill); continue; }
+        // Then the whole bullet, as long as the item keeps one — even below
+        // its budget minimum: a tool the skills list disclaims must not ship.
+        const rest = item.refinedBullets.filter((b) => !claims(b, skill));
+        if (rest.length > 0) { item.refinedBullets = rest; removed.add(skill); continue; }
+        // The only bullet: the item's own first polished fact that does not
+        // name the tool, else a plain line from its title. Never an empty
+        // item (validation would re-run the model).
+        const fact = factsById.get(item.id)?.find((f) => f.trim() && !claims(f, skill) && !hasBannedOpener(f));
+        const raw = fact?.trim() || plainLineById.get(item.id);
+        // Same shape as every other bullet: one terminal mark.
+        const replacement = raw && (/[.!?]$/.test(raw) ? raw : `${raw}.`);
+        if (replacement) { item.refinedBullets = [replacement]; removed.add(skill); }
+        else console.warn(`[optimizer] stripped skill "${skill}" survives in the only bullet of ${item.id}`);
+      }
+    }
+  }
+  return [...removed];
+}
+
+const DEFLATED_ALTERNATES: Record<string, string> = { designed: 'Built', built: 'Developed', learned: 'Studied', drove: 'Delivered' };
+
+/** Opening-verb inflation (Architected / Mastered / Spearheaded) in the
+ *  composed bullets, swapped back only when the item's own text — role,
+ *  employer, raw description and polished facts — never used the word. The
+ *  normalizer already fixed the facts; this stops the optimizer, which writes
+ *  every line fresh, from re-inflating them. Returns how many changed. */
+export function repairInflatedOpeners(parsed: OptimizedResumeData, candidate: ResumeData): number {
+  const sources = new Map<string, string>();
+  // Polished facts count only from rules v2+, whose own inflation repair
+  // already ran: a v1 fact's "Architected" may be the model's, not the user's.
+  const facts = (n?: NormalizedItemContent) => ((n?.rulesVersion ?? 1) >= 2 ? n?.bullets ?? [] : []);
+  for (const e of candidate.experience ?? []) sources.set(e.id, [e.role, e.company, e.rawDescription, ...facts(e.normalized)].join(' '));
+  for (const p of candidate.projects ?? []) sources.set(p.id, [p.name, p.technologies, p.rawDescription, ...facts(p.normalized)].join(' '));
+  for (const x of candidate.extracurriculars ?? []) sources.set(x.id, [x.title, x.organization, x.description, ...facts(x.normalized)].join(' '));
+  let changed = 0;
+  for (const group of [parsed.experience, parsed.projects, parsed.extracurriculars]) {
+    for (const item of group ?? []) {
+      if (!Array.isArray(item.refinedBullets)) continue;
+      const before = item.refinedBullets;
+      const fixed = repairInflatedVerbs(before, sources.get(item.id) ?? '');
+      // Only the opening VERB counts as a swap (repairWith also normalizes
+      // case/space). Swaps apply one at a time, so a second swap sees the
+      // first: it must not repeat another bullet's opener (RULE 3), and takes
+      // the alternate plain verb instead ("Designed" taken -> "Built").
+      const opener = (b: string) => b.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+      const out = [...before];
+      for (let i = 0; i < before.length; i++) {
+        if (opener(fixed[i]) === opener(before[i])) continue;
+        const taken = new Set(out.filter((_, j) => j !== i).map(opener));
+        const alt = DEFLATED_ALTERNATES[opener(fixed[i])];
+        out[i] = taken.has(opener(fixed[i])) && alt && !taken.has(alt.toLowerCase()) ? fixed[i].replace(/^\S+/, alt) : fixed[i];
+        changed++;
+      }
+      item.refinedBullets = out;
+    }
+  }
+  return changed;
+}
+
+const TITLE_FILLER = new Set(['senior', 'junior', 'lead', 'head', 'associate', 'assistant', 'principal', 'staff', 'chief', 'deputy', 'executive',
+  'engineer', 'developer', 'programmer', 'manager', 'officer', 'analyst', 'specialist', 'consultant', 'coordinator', 'intern', 'trainee']);
+
+/** "<latest role> with <N>+ years of experience." (or the degree for a
+ *  student) — the summary opener used when the model's opener can't be
+ *  cleanly repaired. Built only from profile facts. */
+function positioningLine(c: ResumeData): string {
+  // The latest real role, not a side internship: "Data Science Intern with 4+
+  // years" would misstate both. All-intern profiles still use the latest one.
+  const sorted = [...(c.experience ?? [])].sort(compareByRecency);
+  const latest = sorted.find((e) => !isJuniorRole(e.role ?? '')) ?? sorted[0];
+  // Tenure in THIS line of work only: roles sharing a SPECIFIC title word with
+  // the latest one ("credit", "software", "marketing"). Generic role nouns
+  // (engineer, manager, officer…) do not count — "Civil Engineer" years are
+  // not "Software Engineer" years. Undercounting is the safe direction.
+  const words = (r: string) => new Set((r.toLowerCase().match(/[a-z]{4,}/g) ?? [])
+    .filter((w) => !TITLE_FILLER.has(w)));
+  const own = latest ? words(latest.role ?? '') : new Set<string>();
+  const months = totalMonths((c.experience ?? []).filter((e) => e === latest || (!isJuniorRole(e.role ?? '') && [...words(e.role ?? '')].some((w) => own.has(w)))));
+  const role = latest?.role?.trim();
+  if (role) {
+    const years = Math.floor(months / 12);
+    // No tenure claim when the dates do not give one — never invent "1 month",
+    // and never a bare "<role>." fragment as the opener (see bareRoleLine).
+    if (months < 1) return '';
+    const tenure = years >= 1 ? `${years}+ year${years > 1 ? 's' : ''}` : `${months} month${months > 1 ? 's' : ''}`;
+    return `${role} with ${tenure} of experience.`;
+  }
+  const edu = c.education?.[0];
+  return edu?.field ? `${edu.degree ? `${edu.degree} in ` : ''}${edu.field}${edu.school ? `, ${edu.school}` : ''}.` : '';
+}
+
+/** The summary with its opener replaced: the positioning line (with tenure)
+ *  before the later sentences; else the later sentences alone; else, with
+ *  nothing else to stand on, a bare "<role> at <company>." headline. */
+function replaceOpener(c: ResumeData, rest: string[]): string {
+  const line = positioningLine(c);
+  return line ? [line, ...rest].join(' ') : rest.length ? rest.join(' ') : bareRoleLine(c);
+}
+
+/** Last resort when no positioning line and no other sentence exists. */
+function bareRoleLine(c: ResumeData): string {
+  const latest = [...(c.experience ?? [])].sort(compareByRecency).find((e) => e.role?.trim());
+  if (!latest) return '';
+  return `${latest.role.trim()}${latest.company?.trim() ? ` at ${latest.company.trim()}` : ''}.`;
+}
+
+function alnum(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\u0980-\u09ff]+/g, '');
+}
+
+function proseOf(parsed: OptimizedResumeData): string {
+  return [
+    parsed.summary ?? '',
+    ...(parsed.experience ?? []).flatMap((e) => e.refinedBullets ?? []),
+    ...(parsed.projects ?? []).flatMap((e) => e.refinedBullets ?? []),
+    ...(parsed.extracurriculars ?? []).flatMap((e) => e.refinedBullets ?? []),
+  ].join('\n');
 }
 
 /**
@@ -955,7 +1580,7 @@ function buildEvidenceText(c: ResumeData): string {
   // Polished-profile bullets/skills count as evidence too — they are
   // AI-verified renderings of the raw text (e.g. "PostgreSQL" where the
   // Banglish raw says "postgres diye"); without them, canonical-cased terms
-  // the model echoes from canonicalBullets would be false-flagged.
+  // the model echoes from the polished `facts` would be false-flagged.
   for (const e of c.experience ?? []) {
     parts.push(e.role ?? '', e.company ?? '', e.rawDescription ?? '');
     if (e.normalized) parts.push(...e.normalized.bullets, ...e.normalized.skills);
@@ -1023,6 +1648,8 @@ function promoteLead(bullets: string[] | undefined, jdVocab: Set<string>): void 
   let bestIdx = 0;
   let bestScore = 0;
   for (let i = 1; i < bullets.length; i++) {
+    // demoteActivityCountBullets put any count bullet last on purpose.
+    if (ACTIVITY_COUNT_LEAD.test(bullets[i])) continue;
     const score = bulletScore(bullets[i], jdVocab);
     if (score > bestScore) {
       bestScore = score;
@@ -1097,30 +1724,52 @@ function itemScore(bullets: string[] | undefined, jdVocab: Set<string>): number 
 // ✂️ BULLET-DENSITY ENFORCEMENT
 // ────────────────────────────────────────────────
 //
-// The system prompt asks the model to match signal density (rich → 4–5,
-// thin → 2–3). In practice models pad weak items to look "complete". This
-// post-step enforces it: items whose JD-fit score is below the median across
-// the resume's items get trimmed to their top 2 bullets. Items at or above
-// median keep up to 5. Pure deletion — never adds bullets — and preserves
-// the lead bullet (which was already promoted by reorderLeadBulletByJDFit).
+// Two jobs, both driven by computeBulletBudgets() so this step and the prompt
+// read the same numbers:
+//   1. Cap every item at its budget hardMax (the model occasionally over-fills;
+//      its bullets are already strongest-first, so the tail is what goes).
+//   2. TAILORED only: trim padding off items that are both relatively and
+//      absolutely weak against the JD — but never below the item's budget min,
+//      and never on the two most recent roles.
 //
-// Skip when: fewer than 2 items in the array (no median to compute, no
-// padding to detect), or no JD vocabulary.
+// Why the floor and the exemption exist: this used to trim any below-median
+// item to 2 bullets on JD-vocabulary overlap alone. JD-token overlap is not
+// relevance — measured 2026-10-26, the master résumé's placeholder "JD"
+// ("general-purpose… transferable skills…") scored a current role holding two
+// shipped products at 0, and this step cut the model's 6 bullets to 2. The most
+// recent roles are where the candidate is strongest; a keyword counter does not
+// get to empty them. Master mode skips step 2 entirely — there is no JD.
 export function enforceBulletDensity(
   parsed: OptimizedResumeData,
-  jdText: string
+  candidate: ResumeData,
+  budgets: Map<string, BulletBudget> = computeBulletBudgets(candidate),
 ): void {
-  const jdVocab = jdVocabulary(jdText);
-  if (jdVocab.size === 0) return;
+  const groups = [parsed.experience, parsed.projects, parsed.extracurriculars];
+  for (const group of groups) {
+    for (const item of group ?? []) {
+      // Every item keeps its own recency hardMax (master's current role is
+      // already 8); an item with no budget (an id the model altered) is still
+      // capped. Tailored never cuts below the old flat 5: an older role the
+      // model filled with JD-relevant work keeps it (the weak trim below
+      // handles the irrelevant ones).
+      const own = budgets.get(item.id)?.hardMax ?? 5;
+      const max = candidate.resumeMode === 'master' ? own : Math.max(own, 5);
+      if (max && item.refinedBullets?.length > max) item.refinedBullets = item.refinedBullets.slice(0, max);
+    }
+  }
 
-  trimGroup(parsed.experience, jdVocab);
-  trimGroup(parsed.projects, jdVocab);
-  trimGroup(parsed.extracurriculars, jdVocab);
+  if (candidate.resumeMode === 'master') return;
+  const jdVocab = jdVocabulary(candidate.targetJob.description);
+  if (jdVocab.size === 0) return;
+  trimGroup(parsed.experience, jdVocab, budgets);
+  trimGroup(parsed.projects, jdVocab, budgets);
+  trimGroup(parsed.extracurriculars, jdVocab, budgets);
 }
 
 function trimGroup(
   items: { id: string; refinedBullets: string[] }[] | undefined,
-  jdVocab: Set<string>
+  jdVocab: Set<string>,
+  budgets: Map<string, BulletBudget>,
 ): void {
   if (!items || items.length < 2) return;
 
@@ -1132,18 +1781,16 @@ function trimGroup(
     : sortedScores[mid];
 
   items.forEach((item, idx) => {
-    if (!item.refinedBullets || item.refinedBullets.length <= 2) return;
-    // Trim to 2 only when the item is BOTH relatively weak (below the
-    // resume's median JD fit) AND absolutely weak (≤1 JD-vocab hits across
-    // all its bullets). Relative rank alone guaranteed that with two items
-    // of unequal scores the lower one ALWAYS lost bullets 3+ — deleting
-    // honest, JD-relevant evidence the normalizer was built to preserve
-    // and orphaning summary claims the deleted bullets supported.
+    const budget = budgets.get(item.id);
+    // The two most recent roles (rank 0/1) are exempt — see header.
+    if (budget && budget.rank >= 0 && budget.rank <= 1) return;
+    const floor = Math.max(2, budget?.min ?? 2);
+    if (!item.refinedBullets || item.refinedBullets.length <= floor) return;
+    // Trim only when the item is BOTH relatively weak (below the résumé's
+    // median JD fit) AND absolutely weak (≤1 JD-vocab hits across all its
+    // bullets) — relative rank alone always cost the lower of two items.
     const isWeak = scores[idx] < median && scores[idx] <= 1;
-    const cap = isWeak ? 2 : 5;
-    if (item.refinedBullets.length > cap) {
-      item.refinedBullets = item.refinedBullets.slice(0, cap);
-    }
+    if (isWeak) item.refinedBullets = item.refinedBullets.slice(0, floor);
   });
 }
 

@@ -338,6 +338,11 @@ export interface GeminiRequest {
   maxOutputTokens?: number;
   /** Defaults to MINIMAL. Never omit on a 3.6-class model — see header. */
   thinkingLevel?: ThinkingLevel;
+  /** Cap on the FIRST model's share of the budget. Without it the first model
+   *  gets all the remaining time and a timeout ends the chain, so a slow
+   *  premium lead (the normalizer's 3.6-flash) never lets its fallbacks run.
+   *  With it, a lead-model timeout advances to the next model instead. */
+  firstModelTimeoutMs?: number;
 }
 
 export interface GeminiResult {
@@ -381,13 +386,21 @@ export class GeminiClient {
     const attempts: GeminiAttempt[] = [];
     let lastErr: GeminiError | undefined;
 
-    for (const model of req.models) {
+    for (const [index, model] of req.models.entries()) {
       const remaining = timeoutMs - (Date.now() - started);
       if (remaining < MIN_ATTEMPT_MS) break;
+      // Only when the cap binds AND leaves a fallback room for a real attempt —
+      // otherwise the lead keeps the whole budget and a timeout is a genuine
+      // deadline timeout (GeminiTimeoutError).
+      const capped = index === 0 && req.firstModelTimeoutMs !== undefined && req.models.length > 1
+        // + 2s slack: the abort lands a little after the timer, and the
+        // fallback must still find MIN_ATTEMPT_MS left.
+        && req.firstModelTimeoutMs + MIN_ATTEMPT_MS + 2_000 <= remaining;
+      const budget = capped ? Math.min(remaining, req.firstModelTimeoutMs as number) : remaining;
 
       const t0 = Date.now();
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), remaining);
+      const timer = setTimeout(() => ctrl.abort(), budget);
 
       try {
         const res = await this.ai.models.generateContent({
@@ -434,6 +447,9 @@ export class GeminiClient {
         const message = (err instanceof Error ? err.message : String(err)).slice(0, 300);
         attempts.push({ model, ok: false, ms: Date.now() - t0, code, status, message });
 
+        // A capped lead model timing out is the case the cap exists for: move
+        // on to the next model rather than ending the chain.
+        if (code === 'timeout' && capped) { lastErr = new GeminiError(code, status, `${model}: ${message}`, attempts); continue; }
         if (code === 'timeout') throw new GeminiTimeoutError(timeoutMs, attempts);
         lastErr = new GeminiError(code, status, `${model}: ${message}`, attempts, retryDelayMs);
         if (STOP_CHAIN.has(code)) throw lastErr;

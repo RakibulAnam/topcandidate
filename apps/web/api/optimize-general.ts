@@ -56,6 +56,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
+  // Validated BEFORE reserving: a malformed request must not spend one of the
+  // user's daily master-resume slots.
+  const data = req.body?.data as ResumeData | undefined;
+  // Every list the prompt builder maps over must be an array. experience and
+  // education are required; the optional lists default to empty.
+  if (!data || typeof data !== 'object' || !Array.isArray(data.experience) || !Array.isArray(data.education)) {
+    res.status(400).json({ error: 'Missing resume data' });
+    return;
+  }
+  for (const k of ['projects', 'extracurriculars', 'skills'] as const) {
+    if (data[k] == null) data[k] = [];
+    else if (!Array.isArray(data[k])) { res.status(400).json({ error: `Invalid ${k}` }); return; }
+  }
+
   // Reserved BEFORE the provider call so a parallel burst cannot overshoot the
   // daily caps; null means reservation was unavailable and we failed open.
   let reservation: string | null = null;
@@ -69,15 +83,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     throw err;
   }
 
-  const data = req.body?.data as ResumeData | undefined;
-  if (!data) {
-    res.status(400).json({ error: 'Missing resume data' });
-    return;
-  }
-  if (data.targetJob?.description && data.targetJob.description.length > 20_000) {
-    res.status(413).json({ error: 'Job description is too long (max 20,000 characters).', code: 'jd_too_long' });
-    return;
-  }
+  // This endpoint only ever builds the master resume. Forced here rather than
+  // trusted from the client so the master prompt and post-pipeline can never be
+  // skipped by a stale bundle that still sends a placeholder "JD".
+  data.resumeMode = 'master';
+  // The client still sends a placeholder "JD" (the use case requires one).
+  // Blank it here so no step — present or future — can score the master
+  // résumé against it; that placeholder is what gutted it before. (So there is
+  // no JD length to check on this endpoint.)
+  data.targetJob = { ...data.targetJob, description: '' };
 
   // C5 (audit): one ai_call_log row per attempt past the rate-limit gate so
   // failed calls still count toward the daily cap. Logged at each terminal
@@ -91,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth.userId,
       auth.jwt,
       'optimize_general',
-      buildCallMeta({ usage, latencyMs, fallbackInputText: data.targetJob?.description, fallbackOutputText: optimized.summary }),
+      buildCallMeta({ usage, latencyMs, fallbackInputText: JSON.stringify(data), fallbackOutputText: optimized.summary }),
       reservation,
     );
     res.status(200).json({ optimized });
@@ -102,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       auth.userId,
       auth.jwt,
       'optimize_general',
-      buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: data.targetJob?.description }),
+      buildCallMeta({ usage, latencyMs, error: err, fallbackInputText: JSON.stringify(data) }),
       reservation,
     );
     res.status(502).json(publicAiError(err));

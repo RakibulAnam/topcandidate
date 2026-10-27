@@ -43,7 +43,8 @@ import {
   OUTREACH_SCHEMA,
   stripEmailChrome,
 } from './prompts/toolkitPrompts.js';
-import { assertNoFabricatedTools, assertOutreachSpecificity, classifyFitMode } from './prompts/toolkitContext.js';
+import { repairAgainst, repairSubject } from './prompts/proseRepair.js';
+import { assertNoFabricatedTools, assertOutreachSpecificity, classifyFitMode, guardEvidence } from './prompts/toolkitContext.js';
 
 const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
 
@@ -97,8 +98,11 @@ export class GeminiOutreachEmailGenerator implements IOutreachEmailGenerator {
         if (!parsed.subject || !parsed.body) {
           throw new Error('Outreach email response missing required fields');
         }
-        const subject = parsed.subject.trim();
-        const body = stripEmailChrome(parsed.body, data.personalInfo?.fullName);
+        // Shared by the subject and body repairs (the gate builds its own).
+        const evidence = guardEvidence(data, { allowJD: fit.mode === 'stretch' });
+        const subject = repairSubject(parsed.subject.trim(), data, evidence);
+        // Repair in place first (ADR-0007); the gate still runs after.
+        const body = repairAgainst(stripEmailChrome(parsed.body, data.personalInfo?.fullName), evidence);
         if (!body) throw new Error('Outreach email is empty after stripping greeting/signoff');
 
         assertNoFabricatedTools(`${subject}\n${body}`, data, { allowJD: fit.mode === 'stretch' });

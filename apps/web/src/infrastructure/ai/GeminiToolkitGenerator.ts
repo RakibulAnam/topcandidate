@@ -48,6 +48,7 @@ import {
 } from '../../domain/entities/Resume.js';
 import { IToolkitGenerator } from '../../domain/usecases/GenerateToolkitUseCase.js';
 import { resetUsageAttempt, type UsageSink } from './usage.js';
+import { repairAgainst, repairSubject } from './prompts/proseRepair.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS, withRetry, rotateModels } from './GeminiClient.js';
 import {
   buildToolkitSystemInstruction,
@@ -60,7 +61,7 @@ import {
   TOOLKIT_SCHEMA,
 } from './prompts/toolkitPrompts.js';
 import {
-  buildToolkitEvidenceCorpus,
+  guardEvidence,
   detectFabricatedTokens,
   ToolkitFabricationError,
   ToolkitSpecificityError,
@@ -210,14 +211,9 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
     console.info(`[gemini-toolkit-gen] parsed after ${Date.now() - t0}ms`);
 
     // Per-artifact validation — identical contract to OpenRouterToolkitGenerator.
-    const evidence = buildToolkitEvidenceCorpus(data);
-    const baseEvidence = data.targetJob.company
-      ? `${evidence} ${data.targetJob.company.toLowerCase()}`
-      : evidence;
-    const jdText = (data.targetJob.description ?? '').toLowerCase();
-    const pitchEvidence = fit.mode === 'stretch'
-      ? `${baseEvidence} ${jdText}`
-      : baseEvidence;
+    // Same corpus the single-item regenerators gate on (guardEvidence): the
+    // candidate's evidence + the target company, + the JD for a stretch pitch.
+    const pitchEvidence = guardEvidence(data, { allowJD: fit.mode === 'stretch' });
     const outreachSpecificityMode: 'both' | 'either' = fit.mode === 'stretch' ? 'either' : 'both';
 
     const errors: ToolkitErrors = {};
@@ -225,8 +221,9 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
 
     // ── Cover letter ────────────────────────────────────────────────────────
     try {
-      const coverLetter = (parsed.coverLetter ?? '').trim();
+      let coverLetter = (parsed.coverLetter ?? '').trim();
       if (!coverLetter) throw new Error('Cover letter is empty');
+      coverLetter = this.repairFabricated(coverLetter, pitchEvidence, 'coverLetter');
       const fabricated = detectFabricatedTokens(coverLetter, pitchEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
       out.coverLetter = coverLetter;
@@ -237,9 +234,11 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
 
     // ── Outreach email ──────────────────────────────────────────────────────
     try {
-      const subject = (parsed.outreachEmail?.subject ?? '').trim();
-      const body = stripEmailChrome(parsed.outreachEmail?.body ?? '', data.personalInfo?.fullName);
+      let subject = (parsed.outreachEmail?.subject ?? '').trim();
+      let body = stripEmailChrome(parsed.outreachEmail?.body ?? '', data.personalInfo?.fullName);
       if (!subject || !body) throw new Error('Outreach email is empty');
+      body = this.repairFabricated(body, pitchEvidence, 'outreachEmail');
+      subject = repairSubject(subject, data, pitchEvidence);
       const fabricated = detectFabricatedTokens(`${subject}\n${body}`, pitchEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
       assertOutreachSpecificity(`${subject}\n${body}`, data, outreachSpecificityMode);
@@ -282,7 +281,7 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
         .replace(/\*+$/, '')
         .trim();
       if (!linkedInMessage) throw new Error('LinkedIn note is empty');
-      linkedInMessage = trimToLinkedInLimit(linkedInMessage);
+      linkedInMessage = trimToLinkedInLimit(this.repairFabricated(linkedInMessage, pitchEvidence, 'linkedInMessage'));
       const fabricated = detectFabricatedTokens(linkedInMessage, pitchEvidence);
       if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
       assertOutreachSpecificity(linkedInMessage, data, 'either');
@@ -351,6 +350,21 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
   }
 
   /**
+   * Cut invented tools / employers out of an artifact IN PLACE before the
+   * fabrication gate looks at it. The gate used to discard the whole artifact
+   * over one word — a 300-word cover letter thrown away and a retry button
+   * shown because one sentence named a tool the candidate never used. Removing
+   * the term from its list keeps the rest; the gate still runs afterwards, so
+   * anything this cannot repair is discarded exactly as before.
+   */
+  private repairFabricated(text: string, evidence: string, slot: string): string {
+    // Shared with the single-item regenerators (proseRepair.repairFabricatedTools).
+    const fixed = repairAgainst(text, evidence);
+    if (fixed !== text) console.warn(`[gemini-toolkit-gen] ${slot}: removed unevidenced term(s) in place`);
+    return fixed;
+  }
+
+  /**
    * Re-ask for the outreach email alone, using the single-artifact prompt.
    *
    * Same guards as the combined path — a repaired email that fabricates a tool
@@ -381,9 +395,10 @@ export class GeminiToolkitGenerator implements IToolkitGenerator {
       subject?: string;
       body?: string;
     };
-    const subject = (parsed.subject ?? '').trim();
-    const body = stripEmailChrome(parsed.body ?? '', data.personalInfo?.fullName);
+    let subject = (parsed.subject ?? '').trim();
+    const body = this.repairFabricated(stripEmailChrome(parsed.body ?? '', data.personalInfo?.fullName), pitchEvidence, 'outreachEmail(repair)');
     if (!subject || !body) throw new Error('Outreach email is empty');
+    subject = repairSubject(subject, data, pitchEvidence);
     const fabricated = detectFabricatedTokens(`${subject}\n${body}`, pitchEvidence);
     if (fabricated.length > 0) throw new ToolkitFabricationError(fabricated);
     assertOutreachSpecificity(`${subject}\n${body}`, data, specificityMode);

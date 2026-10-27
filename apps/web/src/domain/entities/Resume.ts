@@ -30,6 +30,11 @@ export interface NormalizedItemContent {
   bullets: string[];
   skills: string[];
   gaps: string[];
+  // Which normalizer-prompt rules produced this (stamped server-side; absent =
+  // v1). Lets a rules change be rolled out to existing profiles by
+  // scripts/repolish-outdated.ts without changing the source-hash format the
+  // editors compare against (see ADR-0008).
+  rulesVersion?: number;
 }
 
 // Guided Mode: how a description-bearing item was filled in.
@@ -333,6 +338,23 @@ export interface ResumeData {
   // for the General Resume to detect whether the profile changed since (and
   // thus whether to offer a regenerate). See application/validation/profileHash.
   sourceProfileHash?: string;
+  // 'master' = the JD-less General Resume: complete, recency-weighted, written
+  // for the candidate's natural next role. Absent/'tailored' = written against
+  // targetJob. /api/optimize-general forces 'master' server-side.
+  resumeMode?: ResumeMode;
+}
+
+export type ResumeMode = 'tailored' | 'master';
+
+/** Most recent role first: current roles, then latest end date, then latest
+ *  start date. ("YYYY-MM" strings compare correctly as text.) Used by the
+ *  bullet budgets. */
+export function compareByRecency(a: Pick<WorkExperience, 'isCurrent' | 'startDate' | 'endDate'>, b: Pick<WorkExperience, 'isCurrent' | 'startDate' | 'endDate'>): number {
+  if (!!a.isCurrent !== !!b.isCurrent) return a.isCurrent ? -1 : 1;
+  const ae = a.isCurrent ? '9999' : (a.endDate || a.startDate || '');
+  const be = b.isCurrent ? '9999' : (b.endDate || b.startDate || '');
+  if (ae !== be) return be.localeCompare(ae);
+  return (b.startDate || '').localeCompare(a.startDate || '');
 }
 
 // All variants are single-column, real-text, no icons / no tables — i.e.

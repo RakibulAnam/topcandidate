@@ -862,7 +862,7 @@ const FABRICATION_SAFELIST = new Set<string>([
  * Every entry is verified present in FABRICATION_TOKEN_DICTIONARY — listing a
  * token that isn't in it would be dead configuration that reads like protection.
  */
-const AMBIGUOUS_WITH_ENGLISH = new Set<string>([
+export const AMBIGUOUS_WITH_ENGLISH = new Set<string>([
   'react',     // "react to a delay"
   'docker',    // a dock worker — plausible in a shipping or garments CV
   'angular',   // adjective
@@ -952,7 +952,7 @@ const TECH_TOKEN_ALIASES: Record<string, string[]> = {
 };
 
 /** Regex-escape a token while preserving its original case. */
-function escapeExact(token: string): string {
+export function escapeExact(token: string): string {
   return token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
@@ -1004,11 +1004,10 @@ export interface FabricationGuardOptions {
   allowJD?: boolean;
 }
 
-export function assertNoFabricatedTools(
-  output: string,
-  data: ResumeData,
-  options: FabricationGuardOptions = {}
-): void {
+/** The evidence the toolkit fabrication gate checks against — ONE definition,
+ *  shared by the gate and the in-place repair (proseRepair.repairFabricatedTools)
+ *  so the two can never disagree about what counts. */
+export function guardEvidence(data: ResumeData, options: FabricationGuardOptions = {}): string {
   const evidence = buildToolkitEvidenceCorpus(data);
   // Always allow the target company name in output even if the candidate
   // never worked there — outreach to a target IS the whole point.
@@ -1018,7 +1017,15 @@ export function assertNoFabricatedTools(
   if (options.allowJD && data.targetJob.description) {
     augmented = `${augmented} ${data.targetJob.description.toLowerCase()}`;
   }
-  const fabricated = detectFabricatedTokens(output, augmented);
+  return augmented;
+}
+
+export function assertNoFabricatedTools(
+  output: string,
+  data: ResumeData,
+  options: FabricationGuardOptions = {}
+): void {
+  const fabricated = detectFabricatedTokens(output, guardEvidence(data, options));
   if (fabricated.length > 0) {
     throw new ToolkitFabricationError(fabricated);
   }

@@ -75,7 +75,7 @@ So there are **two apps and one database**, and the two apps never talk directly
 | **Supabase Postgres** | Stores everything; enforces Row-Level Security; runs credit logic inside `SECURITY DEFINER` functions | — |
 | **Supabase Auth** | Email/password login, issues JWTs (email confirmation **off**) | — |
 | **Flutter watcher** | Reads bKash SMS, signs and POSTs confirmations | `BKASH_WEBHOOK_SECRET` (operator types it in) |
-| **Google Gemini API** | The actual AI text generation — all eight generators on one key, each walking its own ordered model chain **client-side** (`gemini-3.5-flash-lite` → `gemini-3.6-flash` → `gemini-3.1-flash-lite`; extractor + normalizer skip `3.6-flash`). The key **must be on a paid tier** — Google's free tier trains on submitted prompts and allows human review; bound spend with a Cloud Console **spend cap** budget scoped to the Gemini API | — |
+| **Google Gemini API** | The actual AI text generation — all eight generators on one key, each walking its own ordered model chain **client-side** (`gemini-3.5-flash-lite` → `gemini-3.6-flash` → `gemini-3.1-flash-lite`; the extractor skips `3.6-flash`; the normalizer leads with `gemini-3.6-flash` → `3.5-flash-lite` → `3.1-flash-lite`, since 2026-10-26, for writing quality). The key **must be on a paid tier** — Google's free tier trains on submitted prompts and allows human review; bound spend with a Cloud Console **spend cap** budget scoped to the Gemini API | — |
 
 ### How components communicate
 - **Browser → Vercel:** HTTPS + Supabase JWT bearer.
