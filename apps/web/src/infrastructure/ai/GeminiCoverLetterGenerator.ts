@@ -40,6 +40,7 @@ import { ICoverLetterGenerator } from '../../domain/usecases/GenerateCoverLetter
 import type { UsageSink } from './usage.js';
 import { GeminiClient, GeminiError, GEMINI_MODELS } from './GeminiClient.js';
 import { COVER_LETTER_SYSTEM_INSTRUCTION, buildCoverLetterUserPrompt } from './prompts/toolkitPrompts.js';
+import { repairFabricatedTools } from './prompts/proseRepair.js';
 import { assertNoFabricatedTools, classifyFitMode } from './prompts/toolkitContext.js';
 
 const MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
@@ -78,8 +79,10 @@ export class GeminiCoverLetterGenerator implements ICoverLetterGenerator {
       const responseText = result.text;
       if (!responseText) throw new Error('No response from AI');
 
-      const cleaned = this.cleanResponse(responseText.trim(), data);
-      assertNoFabricatedTools(cleaned, data, { allowJD: fit.mode === 'stretch' });
+      const guard = { allowJD: fit.mode === 'stretch' };
+      // Repair in place first (ADR-0007); the gate still runs after.
+      const cleaned = repairFabricatedTools(this.cleanResponse(responseText.trim(), data), data, guard);
+      assertNoFabricatedTools(cleaned, data, guard);
       return cleaned;
     } catch (error) {
       // Preserve the attempt chain on failure too, so ai_call_log can show

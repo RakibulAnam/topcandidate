@@ -54,15 +54,19 @@ import {
   normalizeSkills,
   filterFabricatedSkills,
   reportFabricatedProse,
-  assertProseMatchesStrippedSkills,
+  repairUnevidencedProse,
+  repairInflatedOpeners,
   dropBannedOpenerBullets,
+  demoteActivityCountBullets,
   takeOptimizerPlan,
   reorderLeadBulletByJDFit,
   reorderProjectsByJDFit,
   enforceBulletDensity,
   stripBannedCliches,
+  stripBulletFiller,
   safeJsonParse,
   OPTIMIZER_SCHEMA,
+  computeBulletBudgets,
 } from './prompts/resumeOptimizerPrompts.js';
 
 const OPTIMIZER_MODELS = [GEMINI_MODELS.FLASH_LITE_35, GEMINI_MODELS.FLASH_36, GEMINI_MODELS.FLASH_LITE_31];
@@ -92,11 +96,13 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
   }
 
   async optimize(data: ResumeData, usage?: UsageSink): Promise<OptimizedResumeData> {
-    const systemInstruction = buildSystemInstruction();
+    const systemInstruction = buildSystemInstruction(data.resumeMode ?? 'tailored');
     // responseJsonSchema enforces the shape, but can't express "echo back
     // exactly these input IDs" → embed the shape spec in the prompt too (see
     // header).
-    const userPrompt = buildUserPrompt(data, { embedSchemaSpec: true });
+    // One budget map for the prompt AND every post-step.
+    const budgets = computeBulletBudgets(data);
+    const userPrompt = buildUserPrompt(data, { embedSchemaSpec: true, budgets });
 
     try {
       return await withRetry(async (remainingMs, attempt) => {
@@ -160,22 +166,42 @@ export class GeminiResumeOptimizer implements IResumeOptimizer {
           if (proseFab.length) {
             console.warn(`[gemini] UNVERIFIED token(s) in résumé prose (not blocked):`, proseFab.join(', '));
           }
-          // ...but a token stripped from `skills` that survives in a bullet is a
-          // self-contradicting document, and that one does throw. See
-          // assertProseMatchesStrippedSkills for why the intersection is the
-          // confident signal and a prose-only hit is not.
-          assertProseMatchesStrippedSkills(parsed, data, fabResult.fabricated);
-
           // Before the lead-bullet choice, so a banned-opener line can never be
           // promoted into the recruiter's highest-attention slot.
           const droppedOpeners = dropBannedOpenerBullets(parsed);
           if (droppedOpeners.length) {
             console.warn(`[gemini] dropped ${droppedOpeners.length} bullet(s) with a RULE 3 banned opener:`, droppedOpeners.map((b) => b.slice(0, 60)).join(' | '));
           }
-          reorderLeadBulletByJDFit(parsed, data.targetJob.description);
-          reorderProjectsByJDFit(parsed, data.targetJob.description);
-          enforceBulletDensity(parsed, data.targetJob.description);
+          // The two JD-vocabulary rescues have nothing to score against in
+          // master mode — the "JD" there is a placeholder sentence, and scoring
+          // real work against it is what used to reshuffle and gut the master
+          // résumé. The model's own order stands.
+          if (data.resumeMode !== 'master') {
+            reorderLeadBulletByJDFit(parsed, data.targetJob.description);
+            reorderProjectsByJDFit(parsed, data.targetJob.description);
+          }
+          enforceBulletDensity(parsed, data, budgets);
+          // AFTER the density trim: demoting first would put a count bullet (and
+          // the work it may describe) at the tail the trim cuts from.
+          const movedCounts = demoteActivityCountBullets(parsed);
+          if (movedCounts.length) {
+            console.info(`[gemini] moved ${movedCounts.length} activity-count bullet(s) last:`, movedCounts.map((b) => b.slice(0, 60)).join(' | '));
+            // A demoted LEAD leaves the model's second bullet on top; give the
+            // JD rescue another look at the new lead (tailored only).
+            if (data.resumeMode !== 'master') reorderLeadBulletByJDFit(parsed, data.targetJob.description);
+          }
+          stripBulletFiller(parsed);
           stripBannedCliches(parsed);
+          const deflated = repairInflatedOpeners(parsed, data);
+          if (deflated) console.info(`[gemini] swapped ${deflated} inflated opening verb(s) the candidate never used`);
+          // Last content step, so it sees the final bullets. Cuts unevidenced
+          // tools / industries out IN PLACE — content problems never
+          // throw (a throw here meant a model re-run and, at worst, a failed
+          // generation over a single word). See repairUnevidencedProse.
+          const repaired = repairUnevidencedProse(parsed, data, fabResult.fabricated, budgets);
+          if (repaired.length) {
+            console.warn(`[gemini] removed unevidenced term(s) from résumé prose:`, repaired.join(', '));
+          }
           validateOptimizedResponse(data, parsed);
 
           return parsed;

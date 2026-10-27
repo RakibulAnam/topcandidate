@@ -88,6 +88,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Missing or invalid resume data' });
     return;
   }
+  // The paid path is always tailored. Forced server-side (the mode is never
+  // trusted from the client) so a request can never run the JD-less master
+  // prompt against a real JD.
+  data.resumeMode = 'tailored';
   // Server-side payload cap (M4 from the 2026-05-30 audit). Gemini's context
   // window can handle far more, but we cap to keep AI cost bounded and to
   // refuse pathological inputs early. 20k chars ≈ 5k tokens, far past the

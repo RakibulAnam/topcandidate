@@ -426,7 +426,9 @@ export class ResumeService {
     // optimizer's own retry recovers from), so retry a few times before giving
     // up. We NEVER fall back to the raw text — empty bullets beat unpolished,
     // possibly non-English input in a résumé.
-    const MAX_ATTEMPTS = 3;
+    // 2, not 3: the normalizer already retries inside its own 46s server
+    // deadline (3.6-flash), so a third client round only stretches the spinner.
+    const MAX_ATTEMPTS = 2;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         const normalized = await this.normalizeItemUseCase.execute(text, context);
