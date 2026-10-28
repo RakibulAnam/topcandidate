@@ -17,6 +17,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
 
 const DAY_MS = 24 * 3600_000;
 
@@ -32,16 +33,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const [completedRes, profilesRes, resumesRes, optimizeRes, eventsRes, aiRes] = await Promise.all([
     // Completed purchases (for lifetime value + paying segments).
-    supabase.from('purchases').select('user_id, amount_taka, credits_granted').eq('status', 'completed').limit(50000),
+    fetchAll(supabase.from('purchases').select('user_id, amount_taka, credits_granted').eq('status', 'completed').eq('is_test', false).order('id')),
     // Profiles snapshot.
-    supabase.from('profiles').select('id, email, toolkit_credits, last_active_at, created_at').limit(50000),
+    fetchAll(supabase.from('profiles').select('id, email, toolkit_credits, last_active_at, created_at').order('id')),
     // Generated resumes (for warm leads: has >=1 resume).
-    supabase.from('generated_resumes').select('user_id, created_at').limit(50000),
+    fetchAll(supabase.from('generated_resumes').select('user_id, created_at').order('id')),
     // 'optimize' calls in last 7d (fast burners).
-    supabase.from('ai_call_log').select('user_id').eq('kind', 'optimize').gte('created_at', sevenAgoIso).limit(50000),
+    fetchAll(supabase.from('ai_call_log').select('user_id').eq('kind', 'optimize').gte('created_at', sevenAgoIso).order('id')),
     // Recent activity signals (bounded — used to refine lastActive for at-risk payers).
-    supabase.from('analytics_events').select('user_id, created_at').not('user_id', 'is', null).order('created_at', { ascending: false }).limit(50000),
-    supabase.from('ai_call_log').select('user_id, created_at').order('created_at', { ascending: false }).limit(50000),
+    fetchAll(supabase.from('analytics_events').select('user_id, created_at').not('user_id', 'is', null).order('created_at', { ascending: false }).order('id')),
+    fetchAll(supabase.from('ai_call_log').select('user_id, created_at').order('created_at', { ascending: false }).order('id')),
   ]);
 
   const firstErr = completedRes.error || profilesRes.error || resumesRes.error || optimizeRes.error || aiRes.error;

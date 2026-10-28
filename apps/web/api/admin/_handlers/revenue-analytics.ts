@@ -8,6 +8,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
+import { dhakaDay } from '../_lib/dhaka.js';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
@@ -38,18 +40,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sinceMs = since?.getTime() ?? 0;
 
   // All purchases in range (bounded) — we tally status/amounts/users in JS.
-  let purchasesQ = supabase.from('purchases').select('user_id, amount_taka, credits_granted, status, created_at');
+  let purchasesQ = supabase.from('purchases').select('user_id, amount_taka, credits_granted, status, created_at').eq('is_test', false);
   if (sinceIso) purchasesQ = purchasesQ.gte('created_at', sinceIso);
-  purchasesQ = purchasesQ.limit(20000);
+  purchasesQ = purchasesQ.order('id');
 
   // Completed rows over the last 30 calendar days for the sparkline.
   const thirtyAgo = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
   const dailyQ = supabase
     .from('purchases')
     .select('amount_taka, created_at')
-    .eq('status', 'completed')
+    .eq('status', 'completed').eq('is_test', false)
     .gte('created_at', thirtyAgo)
-    .limit(20000);
+    .order('id');
 
   // Credit liability view (single row).
   const liabilityQ = supabase
@@ -57,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('outstanding_credits, negative_balance_users')
     .maybeSingle();
 
-  const [purchases, daily, liability] = await Promise.all([purchasesQ, dailyQ, liabilityQ]);
+  const [purchases, daily, liability] = await Promise.all([fetchAll(purchasesQ), fetchAll(dailyQ), liabilityQ]);
 
   const firstErr = purchases.error || daily.error || liability.error;
   if (firstErr) {
@@ -70,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let grossTaka = 0;
   let refundsTaka = 0;
   let creditsSold = 0;
-  let orders = 0; // completed orders
+  let orders = 0; // completed + refunded orders
   const payingUsers = new Set<string>();
   const statusMap: Record<string, { count: number; taka: number }> = {};
   let failureCount = 0;
@@ -83,10 +85,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     statusMap[status].count += 1;
     statusMap[status].taka += amt;
 
-    if (status === 'completed') {
+    // A refund flips the row completed → refunded, so gross (money taken in)
+    // counts both and net takes the refunds back out once.
+    if (status === 'completed' || status === 'refunded') {
       grossTaka += amt;
-      creditsSold += r.credits_granted ?? 0;
       orders += 1;
+    }
+    if (status === 'completed') {
+      creditsSold += r.credits_granted ?? 0;
       if (r.user_id) payingUsers.add(r.user_id);
     } else if (status === 'refunded') {
       refundsTaka += amt;
@@ -96,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const netTaka = grossTaka - refundsTaka;
   const aovTaka = orders > 0 ? Math.round(grossTaka / orders) : 0;
-  const arppuTaka = payingUsers.size > 0 ? Math.round(grossTaka / payingUsers.size) : 0;
+  const arppuTaka = payingUsers.size > 0 ? Math.round(netTaka / payingUsers.size) : 0;
   const refundRatePct = grossTaka > 0 ? +((refundsTaka / grossTaka) * 100).toFixed(2) : 0;
   const failureRatePct = totalInRange > 0 ? +((failureCount / totalInRange) * 100).toFixed(2) : 0;
 
@@ -107,11 +113,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 30-day zero-filled sparkline.
   const dayBuckets: Record<string, { revenue_taka: number; orders: number }> = {};
   for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 24 * 3600_000).toISOString().slice(0, 10);
+    const d = dhakaDay(Date.now() - i * 24 * 3600_000);
     dayBuckets[d] = { revenue_taka: 0, orders: 0 };
   }
   for (const r of daily.data ?? []) {
-    const d = new Date(r.created_at).toISOString().slice(0, 10);
+    const d = dhakaDay(r.created_at);
     if (dayBuckets[d]) {
       dayBuckets[d].revenue_taka += r.amount_taka ?? 0;
       dayBuckets[d].orders += 1;

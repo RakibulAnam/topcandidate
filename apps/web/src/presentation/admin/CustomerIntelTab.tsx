@@ -9,10 +9,10 @@ import {
   Button, Card, ContentGrid, DataTable, ErrorState, PageHeader, Section, Skeleton, TimeCell,
 } from './ui';
 
-interface CustomerRow { userId: string; email: string; lifetimeTaka: number; purchases: number; credits: number }
-interface WarmLead { userId: string; email: string; resumes: number; joined: string }
-interface AtRisk { userId: string; email: string; lifetimeTaka: number; lastActive: string }
-interface NegBal { userId: string; email: string; credits: number }
+interface CustomerRow { userId: string; email: string | null; lifetimeTaka: number; purchases: number; credits: number }
+interface WarmLead { userId: string; email: string | null; resumes: number; joined: string }
+interface AtRisk { userId: string; email: string | null; lifetimeTaka: number; lastActive: string | null }
+interface NegBal { userId: string; email: string | null; credits: number }
 
 interface IntelData {
   segments: { warmLeads: number; whales: number; dormantPayers: number; neverPurchased: number; negativeBalance: number; fastBurners: number };
@@ -30,6 +30,9 @@ const SEGMENTS: { key: keyof IntelData['segments']; label: string; bad?: boolean
   { key: 'negativeBalance', label: 'Negative balance', bad: true },
   { key: 'fastBurners', label: 'Fast burners' },
 ];
+
+const EmailCell: React.FC<{ email: string | null }> = ({ email }) =>
+  email ? <span className="font-mono text-[12px] break-all">{email}</span> : <span className="text-[12px] text-charcoal-400">no email</span>;
 
 export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: string) => void }> = ({ api, onOpenUser }) => {
   const [data, setData] = useState<IntelData | null>(null);
@@ -63,7 +66,7 @@ export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: strin
       {err && <ErrorState error={err} onRetry={refresh} />}
 
       <Section title="Segments">
-        {!data ? (
+        {err ? <p className="text-[12px] text-charcoal-500">Unavailable — see the error above.</p> : !data ? (
           <ContentGrid cols={3}>{Array.from({ length: 6 }).map((_, i) => <Card key={i}><Skeleton className="h-12 w-full" /></Card>)}</ContentGrid>
         ) : (
           <ContentGrid cols={3}>
@@ -84,7 +87,7 @@ export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: strin
         <Section title="Top customers" description="Highest lifetime value.">
           <DataTable<CustomerRow>
             columns={[
-              { key: 'email', header: 'Email', render: (r) => <span className="font-mono text-[12px] break-all">{r.email}</span> },
+              { key: 'email', header: 'Email', render: (r) => <EmailCell email={r.email} /> },
               { key: 'lifetime', header: 'Lifetime', align: 'right', render: (r) => <span className="font-semibold text-brand-700">{taka(r.lifetimeTaka)}</span> },
               { key: 'purchases', header: 'Purchases', width: 'w-28', align: 'right', render: (r) => r.purchases },
               { key: 'credits', header: 'Credits', width: 'w-24', align: 'right', render: (r) => <span className={r.credits < 0 ? 'text-red-700 font-semibold' : ''}>{r.credits}</span> },
@@ -92,6 +95,8 @@ export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: strin
             ]}
             rows={data?.topCustomers ?? null}
             loading={loading}
+            error={err}
+            onRetry={refresh}
             keyForRow={(r) => r.userId}
             empty={{ title: 'No paying customers yet' }}
           />
@@ -102,13 +107,15 @@ export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: strin
         <Section title="Warm leads" description="Generated resumes but haven't purchased.">
           <DataTable<WarmLead>
             columns={[
-              { key: 'email', header: 'Email', render: (r) => <span className="font-mono text-[12px] break-all">{r.email}</span> },
+              { key: 'email', header: 'Email', render: (r) => <EmailCell email={r.email} /> },
               { key: 'resumes', header: 'Resumes', width: 'w-28', align: 'right', render: (r) => r.resumes },
               { key: 'joined', header: 'Joined', width: 'w-44', render: (r) => <TimeCell iso={r.joined} /> },
               ...viewCol,
             ]}
             rows={data?.warmLeads ?? null}
             loading={loading}
+            error={err}
+            onRetry={refresh}
             keyForRow={(r) => r.userId}
             empty={{ title: 'No warm leads', description: 'Users who generate without buying will appear here.' }}
           />
@@ -119,13 +126,15 @@ export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: strin
         <Section title="At-risk payers" description="Past payers who have gone quiet.">
           <DataTable<AtRisk>
             columns={[
-              { key: 'email', header: 'Email', render: (r) => <span className="font-mono text-[12px] break-all">{r.email}</span> },
+              { key: 'email', header: 'Email', render: (r) => <EmailCell email={r.email} /> },
               { key: 'lifetime', header: 'Lifetime', align: 'right', render: (r) => taka(r.lifetimeTaka) },
-              { key: 'lastActive', header: 'Last active', width: 'w-32', align: 'right', render: (r) => <span className="text-charcoal-600">{ageMin(r.lastActive)} ago</span> },
+              { key: 'lastActive', header: 'Last active', width: 'w-32', align: 'right', render: (r) => <span className="text-charcoal-600">{r.lastActive ? `${ageMin(r.lastActive)} ago` : <span className="text-charcoal-400">never</span>}</span> },
               ...viewCol,
             ]}
             rows={data?.atRisk ?? null}
             loading={loading}
+            error={err}
+            onRetry={refresh}
             keyForRow={(r) => r.userId}
             empty={{ title: 'No at-risk payers' }}
           />
@@ -136,12 +145,14 @@ export const CustomerIntelTab: React.FC<{ api: AdminApi; onOpenUser?: (id: strin
         <Section title="Negative balance" description="Users whose credit balance has gone negative.">
           <DataTable<NegBal>
             columns={[
-              { key: 'email', header: 'Email', render: (r) => <span className="font-mono text-[12px] break-all">{r.email}</span> },
+              { key: 'email', header: 'Email', render: (r) => <EmailCell email={r.email} /> },
               { key: 'credits', header: 'Credits', width: 'w-24', align: 'right', render: (r) => <span className="text-red-700 font-semibold">{r.credits}</span> },
               ...viewCol,
             ]}
             rows={data?.negativeBalanceUsers ?? null}
             loading={loading}
+            error={err}
+            onRetry={refresh}
             keyForRow={(r) => r.userId}
             empty={{ title: 'No negative balances', description: 'Nothing to reconcile.' }}
           />

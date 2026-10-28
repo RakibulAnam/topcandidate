@@ -8,6 +8,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
+import { dhakaDay } from '../_lib/dhaka.js';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
@@ -31,11 +33,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sinceIso = sinceFor(range)?.toISOString();
 
   // AI call log in range — drives generation counts, cost, latency, error rate.
-  let aiQ = supabase.from('ai_call_log').select('kind, provider, cost_usd, status, latency_ms, created_at').limit(50000);
+  let aiQ = supabase.from('ai_call_log').select('kind, provider, cost_usd, status, latency_ms, created_at').order('id');
   if (sinceIso) aiQ = aiQ.gte('created_at', sinceIso);
 
   // Completed purchases in range (credits sold + revenue for margin).
-  let soldQ = supabase.from('purchases').select('credits_granted, amount_taka, created_at').eq('status', 'completed').limit(20000);
+  let soldQ = supabase.from('purchases').select('credits_granted, amount_taka, created_at').eq('status', 'completed').eq('is_test', false).order('id');
   if (sinceIso) soldQ = soldQ.gte('created_at', sinceIso);
 
   // Traffic. page_view carries the screen in props and the URL in `path`;
@@ -45,10 +47,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('session_id, event, path, props, created_at')
     .in('event', ['page_view', 'signup_completed'])
     .order('created_at', { ascending: true })
-    .limit(50000);
+    .order('id');
   if (sinceIso) trafficQ = trafficQ.gte('created_at', sinceIso);
 
-  const [aiRes, soldRes, trafficRes] = await Promise.all([aiQ, soldQ, trafficQ]);
+  const [aiRes, soldRes, trafficRes] = await Promise.all([fetchAll(aiQ), fetchAll(soldQ), fetchAll(trafficQ)]);
   const firstErr = aiRes.error || soldRes.error;
   // Traffic is additive: a failure here must not blank the whole tab.
   if (trafficRes.error) console.error('[admin/product-analytics] traffic query failed (tolerated):', trafficRes.error.message);
@@ -65,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 30-day sparkline of optimize + optimize_general.
   const dayBuckets: Record<string, number> = {};
   for (let i = 29; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 24 * 3600_000).toISOString().slice(0, 10);
+    const d = dhakaDay(Date.now() - i * 24 * 3600_000);
     dayBuckets[d] = 0;
   }
 
@@ -85,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     else if (kind === 'extract_resume') generations.extracts += 1;
 
     if (kind === 'optimize' || kind === 'optimize_general') {
-      const d = new Date(r.created_at).toISOString().slice(0, 10);
+      const d = dhakaDay(r.created_at);
       if (dayBuckets[d] !== undefined) dayBuckets[d] += 1;
     }
 

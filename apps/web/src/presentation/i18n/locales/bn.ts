@@ -73,6 +73,8 @@ export const bn: Dictionary = {
     masterEyebrow: 'মাস্টার রেজুমে',
     masterPrice: '৳৯৯',
     masterPriceLegacy: '৳৫০',
+    masterPriceCustom: '৳{price}',
+    numberLocale: 'bn-BD',
     masterWasPrice: '৳২০০',
     masterName: 'আপনার মাস্টার রেজুমে',
     masterPerUnit: 'একবারই · আপনার প্রোফাইল থেকে তৈরি',

@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import {
-  Button, Card, EmptyState, ErrorState, PageHeader, Skeleton, TimeCell, withToast,
+  Button, Card, EmptyState, ErrorState, PageHeader, Skeleton, TimeCell, toastOk,
 } from './ui';
 
 interface ParserRow { id: string; payment_reference: string; sender_msisdn: string | null; raw_body: string | null; sms_timestamp: string; created_at: string; reviewed_at: string | null }
@@ -44,7 +44,8 @@ export const ParserFailuresTab: React.FC<{ api: AdminApi }> = ({ api }) => {
     if (selected.size === 0) return;
     setBusy(true);
     try {
-      await withToast(api.call('parser-mark-reviewed', { method: 'POST', body: { ids: Array.from(selected) } }), { success: `${selected.size} marked reviewed.` });
+      const ok = await toastOk(api.call('parser-mark-reviewed', { method: 'POST', body: { ids: Array.from(selected) } }), { success: `${selected.size} marked reviewed.` });
+      if (!ok) return;
       setSelected(new Set());
       refresh();
     } finally {
@@ -52,13 +53,7 @@ export const ParserFailuresTab: React.FC<{ api: AdminApi }> = ({ api }) => {
     }
   };
 
-  const download = async () => {
-    try {
-      await api.download('parser-export');
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
-  };
+  const download = () => void toastOk(api.download('parser-export'), { success: 'Export downloaded.', failure: 'Export failed' });
 
   return (
     <div>

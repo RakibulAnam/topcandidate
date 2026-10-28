@@ -38,8 +38,8 @@ interface ShellCtx {
    *  as masterUnlocked since the master-resume package (migration 033, ৳99
    *  since 034) — every "never bought a pack" decision keys on this. */
   boughtPack: boolean | null;
-  /** Account existed before migration 034 (৳50 master resume). Null while loading. */
-  legacyPricing: boolean | null;
+  /** Master-resume price for this account (CreditStatus.masterPriceTaka). Null while loading. */
+  masterPrice: number | null;
   /** The only credit left is the free welcome one (never bought a pack). */
   onFreeCredit: boolean;
   /** Open the bKash sheet. `pkg` preselects a package (default: the pack). */
@@ -101,7 +101,7 @@ export const DashboardShell: React.FC<Props> = ({
   const [loadingShell, setLoadingShell] = useState(true);
   const [masterUnlocked, setMasterUnlocked] = useState<boolean | null>(null);
   const [boughtPack, setBoughtPack] = useState<boolean | null>(null);
-  const [legacyPricing, setLegacyPricing] = useState<boolean | null>(null);
+  const [masterPrice, setMasterPrice] = useState<number | null>(null);
   const [newPricing, setNewPricing] = useState<boolean | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchaseSource, setPurchaseSource] = useState<PurchaseSource>('other');
@@ -159,7 +159,7 @@ export const DashboardShell: React.FC<Props> = ({
       setCredits(status.credits);
       setMasterUnlocked(status.masterUnlocked);
       setBoughtPack(status.boughtPack);
-      setLegacyPricing(status.legacyPricing);
+      setMasterPrice(status.masterPriceTaka);
       setNewPricing(status.newPricing);
       if (status.masterUnlocked) void autoBuildMaster();
       return status;
@@ -206,7 +206,7 @@ export const DashboardShell: React.FC<Props> = ({
       setCredits(balance);
       setMasterUnlocked(status.masterUnlocked);
       setBoughtPack(status.boughtPack);
-      setLegacyPricing(status.legacyPricing);
+      setMasterPrice(status.masterPriceTaka);
       setNewPricing(status.newPricing);
       if (status.masterUnlocked && !existing) void autoBuildMaster();
     }).finally(() => { if (!cancelled) setLoadingShell(false); });
@@ -269,9 +269,9 @@ export const DashboardShell: React.FC<Props> = ({
   // known, not assumed: offering before the read answers made an empty
   // profile flash the preview and the priced tab. Pre-032 accounts that kept
   // a master resume while locked aren't offered one.
-  // `legacyPricing !== null`: never show a price (৳50 / ৳99) before this
+  // `masterPrice !== null`: never show a price (৳50 / ৳99) before this
   // account's price is known — the sheet won't sell it until then either.
-  const offerCandidate = masterUnlocked === false && !loadingShell && !generalResume && legacyPricing !== null;
+  const offerCandidate = masterUnlocked === false && !loadingShell && !generalResume && masterPrice !== null;
   const masterOffer = offerCandidate && preview !== null && !preview.empty;
   const masterOfferPending = offerCandidate && preview === null;
   // The priced nav tab additionally steps aside while a payment is in flight
@@ -311,7 +311,7 @@ export const DashboardShell: React.FC<Props> = ({
     >
       {opts.Icon && <opts.Icon size={14} />}
       {label}
-      <span className="rounded-md bg-brand-700 px-1.5 py-0.5 text-[11px] font-bold text-accent-300">{masterPriceLabel(t, legacyPricing)}</span>
+      <span className="rounded-md bg-brand-700 px-1.5 py-0.5 text-[11px] font-bold text-accent-300">{masterPriceLabel(t, masterPrice)}</span>
       <span className="absolute -right-1 -top-1 h-2.5 w-2.5" aria-hidden>
         <span className="mo-ping absolute inset-0 rounded-full bg-accent-500" />
         <span className="absolute inset-0 rounded-full bg-accent-600 ring-2 ring-[#F6F4EE]" />
@@ -358,7 +358,7 @@ export const DashboardShell: React.FC<Props> = ({
     { key: 'purchases', icon: Receipt, label: t('dashboard.navPurchases'), tabLabel: t('dashboard.navPurchases'), on: () => onNavigate('PURCHASES'), isActive: active === 'purchases' },
   ];
 
-  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, boughtPack, legacyPricing, onFreeCredit, openPurchase, masterOffer, masterOfferPending, openMasterPurchase, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
+  const ctx: ShellCtx = { credits, refreshCredits, masterUnlocked, boughtPack, masterPrice, onFreeCredit, openPurchase, masterOffer, masterOfferPending, openMasterPurchase, openSearch, generalResume, buildingMaster, buildMaster, loadingShell };
 
   return (
     <Ctx.Provider value={ctx}>
@@ -487,7 +487,7 @@ export const DashboardShell: React.FC<Props> = ({
             >
               <span className="relative flex h-[30px] items-center gap-1 rounded-full bg-accent-400 px-2.5 text-brand-800 shadow-[0_6px_14px_-6px_rgba(201,93,39,0.9)]">
                 <Icon size={16} strokeWidth={2.4} />
-                <span className="text-[11px] font-extrabold leading-none">{masterPriceLabel(t, legacyPricing)}</span>
+                <span className="text-[11px] font-extrabold leading-none">{masterPriceLabel(t, masterPrice)}</span>
                 <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5" aria-hidden>
                   <span className="mo-ping absolute inset-0 rounded-full bg-accent-500" />
                   <span className="absolute inset-0 rounded-full bg-accent-600 ring-2 ring-[#F6F4EE]" />
@@ -543,7 +543,7 @@ export const DashboardShell: React.FC<Props> = ({
         // that can't be made (the dashboard asks them to fix it instead).
         masterOffer={masterOffer && !offerUnbuildable}
         initialPackage={purchasePkg}
-        legacyPricing={legacyPricing}
+        masterPrice={masterPrice}
         newPricing={newPricing}
         freeCredit={onFreeCredit && !purchaseSkipGift}
         onUseFreeCredit={() => {

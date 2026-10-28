@@ -1,6 +1,6 @@
 // Audit log — append-only feed of every operator action with diffs.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import {
   Button, Card, EmptyState, ErrorState, FilterChip, JsonDiff, PageHeader, SearchInput, Skeleton, TimeCell, useDebounced,
@@ -33,21 +33,25 @@ const TARGET_KINDS: { value: string; label: string }[] = [
 export const AuditLogTab: React.FC<{ api: AdminApi }> = ({ api }) => {
   const [data, setData] = useState<AuditResp | null>(null);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(0);
   const [action, setAction] = useState('');
   const debouncedAction = useDebounced(action, 250);
   const [targetKind, setTargetKind] = useState('');
   const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => { setPage(0); }, [debouncedAction, targetKind]);
+  // Page is keyed to the filters so a filter change lands on page 0 in the same render (no stale-page fetch).
+  const filterKey = `${debouncedAction}|${targetKind}`;
+  const [pageState, setPageState] = useState({ key: filterKey, page: 0 });
+  const page = pageState.key === filterKey ? pageState.page : 0;
+  const setPage = (p: number) => setPageState({ key: filterKey, page: p });
+  const reqId = useRef(0);
 
   const refresh = useCallback(() => {
+    const id = ++reqId.current;
     setLoading(true);
     setErr(null);
     api.call<AuditResp>('audit-log', { query: { page, action: debouncedAction, targetKind } })
-      .then(setData)
-      .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+      .then((r) => { if (id === reqId.current) setData(r); })
+      .catch((e: unknown) => { if (id === reqId.current) setErr(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (id === reqId.current) setLoading(false); });
   }, [api, page, debouncedAction, targetKind]);
 
   useEffect(() => { refresh(); }, [refresh]);

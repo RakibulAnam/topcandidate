@@ -403,7 +403,7 @@ const CommandPalette: React.FC<{ onPick: (o: PaletteOption) => void; onClose: ()
   const [q, setQ] = useState('');
   const trimmed = q.trim();
   const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed);
-  const looksLikeTrxId = !looksLikeUuid && /^[A-Z0-9]{6,}$/i.test(trimmed);
+  const looksLikeTrxId = !looksLikeUuid && /^[A-Z0-9]{6,}$/i.test(trimmed) && /\d/.test(trimmed);
   const [highlight, setHighlight] = useState(0);
 
   const options: PaletteOption[] = useMemo(() => {

@@ -47,10 +47,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(404).json({ error: 'Orphan SMS not found.' });
     return;
   }
-  if (sms.matched_to_purchase_id) {
+  // Claim the SMS first, conditionally, so a double-submit (or two tabs) can't
+  // apply the same money twice. Released again if the top-up fails.
+  const { data: claimed, error: claimErr } = await supabase
+    .from('unmatched_inbound_sms')
+    .update({ matched_to_purchase_id: purchaseId })
+    .eq('id', smsId)
+    .is('matched_to_purchase_id', null)
+    .select('id');
+  if (claimErr?.code === '23503') {
+    res.status(404).json({ error: 'Target purchase not found.', code: 'purchase_not_found' });
+    return;
+  }
+  if (claimErr) {
+    console.error('[admin/match-orphan] claim failed:', claimErr.message);
+    res.status(500).json({ error: 'Match failed. See server logs.' });
+    return;
+  }
+  if (sms.matched_to_purchase_id || !claimed || claimed.length === 0) {
     res.status(409).json({ error: 'This SMS has already been matched.', code: 'already_matched' });
     return;
   }
+  const release = () => supabase
+    .from('unmatched_inbound_sms')
+    .update({ matched_to_purchase_id: null })
+    .eq('id', smsId)
+    .eq('matched_to_purchase_id', purchaseId);
 
   const { data, error } = await supabase.rpc('apply_purchase_topup', {
     p_purchase_id: purchaseId,
@@ -62,6 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   if (error) {
+    await release();
     const msg = error.message ?? '';
     if (msg.includes('purchase_not_found')) {
       res.status(404).json({ error: 'Target purchase not found.', code: 'purchase_not_found' });
@@ -78,12 +101,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(500).json({ error: 'Match failed. See server logs.' });
     return;
   }
-
-  // Mark the SMS as matched so it disappears from the orphan list.
-  await supabase
-    .from('unmatched_inbound_sms')
-    .update({ matched_to_purchase_id: purchaseId })
-    .eq('id', smsId);
 
   const row = Array.isArray(data) ? data[0] : data;
   await recordAuditAction(supabase, {

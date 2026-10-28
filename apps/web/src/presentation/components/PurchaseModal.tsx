@@ -102,7 +102,7 @@ import { refreshOpenPurchase, useOpenPurchase } from '../hooks/useOpenPurchase';
 import { setOpenPurchaseVerdict } from '../../infrastructure/api/openPurchaseStore';
 import { track } from '../../infrastructure/analytics/track';
 import { CONTACT_EMAIL, CONTACT_FACEBOOK_URL, contactMailto } from '../support';
-import { masterPriceLabel, masterPriceTaka, packPriceLabel, packPriceTaka } from '../pricing';
+import { masterPriceLabel, masterPriceTaka, packPriceLabel, packPriceTaka, showMasterAnchor } from '../pricing';
 
 /** Which surface opened the modal — sent with `purchase_modal_opened` so the
  *  admin funnel can tell which nudges actually lead to a purchase. */
@@ -138,16 +138,16 @@ interface Props {
   masterOffer?: boolean;
   /** Package selected when the sheet opens (default: the pack). */
   initialPackage?: PackageId;
-  /** Account existed before migration 034: the master resume is ৳50, not ৳99. */
-  legacyPricing?: boolean | null;
+  /** Master-resume price for this account (CreditStatus.masterPriceTaka). Null while loading. */
+  masterPrice?: number | null;
   /** Migration 034 is live: the pack is ৳199 (৳200 before it). */
   newPricing?: boolean | null;
 }
 
 // Mirrors the hardcoded mapping in initiate_purchase (migration 033). The
 // server is the authority; this is only what the sheet displays.
-const packagePriceTaka = (pkg: PackageId, legacyPricing: boolean | null | undefined, newPricing: boolean | null | undefined): number =>
-  pkg === 'master-resume' ? masterPriceTaka(legacyPricing) : packPriceTaka(newPricing);
+const packagePriceTaka = (pkg: PackageId, masterPrice: number | null | undefined, newPricing: boolean | null | undefined): number =>
+  pkg === 'master-resume' ? masterPriceTaka(masterPrice) : packPriceTaka(newPricing);
 
 // Direct `import.meta.env.X` so Vite's AST-based static substitution kicks in.
 const OWNER_BKASH_NUMBER = import.meta.env.VITE_BKASH_PAYMENT_NUMBER || '01XXXXXXXXX';
@@ -191,13 +191,13 @@ type Phase = 'idle' | 'submitting' | 'verifying' | 'confirmed' | 'problem';
 
 export const PurchaseModal: React.FC<Props> = ({
   isOpen, onClose, onSuccess, source = 'other', masterBonus = false, freeCredit = false, onUseFreeCredit,
-  masterOffer: masterOfferProp = false, initialPackage = 'five-pack', legacyPricing = null, newPricing = null,
+  masterOffer: masterOfferProp = false, initialPackage = 'five-pack', masterPrice = null, newPricing = null,
 }) => {
   // The master resume is only sold once this account's price is known: ৳50
   // for accounts from before migration 034, ৳99 after. Guessing while the
   // status read is missing could show ৳99 to someone the server charges ৳50.
   // Until then the sheet is pack-only.
-  const masterOffer = masterOfferProp && legacyPricing !== null;
+  const masterOffer = masterOfferProp && masterPrice !== null;
   const t = useT();
   const { locale } = useLocale();
   const [phase, setPhase] = useState<Phase>('idle');
@@ -282,9 +282,9 @@ export const PurchaseModal: React.FC<Props> = ({
     && (!trackedPkg || trackedPkg === inFlightPkg)
     ? openPurchase.amountTaka
     : null;
-  const legacyAmount = rowAmount !== null && rowAmount !== packagePriceTaka(pkg, legacyPricing, newPricing) ? rowAmount : null;
-  const priceTaka = legacyAmount ?? packagePriceTaka(pkg, legacyPricing, newPricing);
-  const masterPrice = masterPriceLabel(t, legacyPricing);
+  const legacyAmount = rowAmount !== null && rowAmount !== packagePriceTaka(pkg, masterPrice, newPricing) ? rowAmount : null;
+  const priceTaka = legacyAmount ?? packagePriceTaka(pkg, masterPrice, newPricing);
+  const masterPriceText = masterPriceLabel(t, masterPrice);
   const packPrice = packPriceLabel(t, newPricing);
   // Both packages are offered whenever the master resume is for sale, except
   // from the dashboard resume preview: that tap was already the choice.
@@ -649,7 +649,7 @@ export const PurchaseModal: React.FC<Props> = ({
                     <p className={`text-[11px] font-bold text-accent-700 ${locale === 'bn' ? '' : 'uppercase tracking-[0.14em]'}`}>
                       {t('purchaseModal.giftMasterEyebrow')}
                     </p>
-                    <p className="mt-0.5 text-[16px] font-bold leading-snug text-[#0F1B2D]">{t('purchaseModal.giftMasterTitle', { price: masterPrice })}</p>
+                    <p className="mt-0.5 text-[16px] font-bold leading-snug text-[#0F1B2D]">{t('purchaseModal.giftMasterTitle', { price: masterPriceText })}</p>
                     <p className="mt-1 text-[13px] leading-relaxed text-[#4A4639]">{t('purchaseModal.giftMasterBody')}</p>
                   </div>
                 </div>
@@ -662,7 +662,7 @@ export const PurchaseModal: React.FC<Props> = ({
                   }}
                   className="mo-nudge mt-3.5 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-accent-400 px-5 text-[15px] font-bold text-brand-800 shadow-[0_10px_22px_-12px_rgba(201,93,39,0.8)] transition-colors hover:bg-accent-300"
                 >
-                  {t('purchaseModal.giftMasterCta', { price: masterPrice })}
+                  {t('purchaseModal.giftMasterCta', { price: masterPriceText })}
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -884,12 +884,12 @@ export const PurchaseModal: React.FC<Props> = ({
   const pkgEyebrow = isMasterPkg ? t('purchaseModal.masterEyebrow') : t('purchaseModal.packEyebrow');
   const pkgPrice = legacyAmount !== null
     ? `৳${legacyAmount.toLocaleString(locale === 'bn' ? 'bn-BD' : 'en-US')}`
-    : isMasterPkg ? masterPrice : packPrice;
+    : isMasterPkg ? masterPriceText : packPrice;
   // Struck-through anchors (owner's call): the master resume against ৳200,
   // the pack against ৳500.
   const pkgWasPrice = legacyAmount !== null
     ? null
-    : isMasterPkg ? t('purchaseModal.masterWasPrice') : t('purchaseModal.packWasPrice');
+    : isMasterPkg ? (showMasterAnchor(masterPrice) ? t('purchaseModal.masterWasPrice') : null) : t('purchaseModal.packWasPrice');
 
   // ৳199 pack vs ৳99 master resume. Two radio cards above the payment steps;
   // switching re-prices the whole sheet in place. Hidden once a TrxID is on
@@ -902,7 +902,7 @@ export const PurchaseModal: React.FC<Props> = ({
       <div className="mt-3.5 grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('purchaseModal.planPickerLabel')}>
         {([
           { id: 'five-pack', title: t('purchaseModal.planPackTitle'), sub: t('purchaseModal.planPackSub'), was: t('purchaseModal.packWasPrice'), price: packPrice },
-          { id: 'master-resume', title: t('purchaseModal.planMasterTitle'), sub: t('purchaseModal.planMasterSub'), was: t('purchaseModal.masterWasPrice'), price: masterPrice },
+          { id: 'master-resume', title: t('purchaseModal.planMasterTitle'), sub: t('purchaseModal.planMasterSub'), was: showMasterAnchor(masterPrice) ? t('purchaseModal.masterWasPrice') : null, price: masterPriceText },
         ] as const).map((o) => {
           const on = pkg === o.id;
           return (
@@ -928,7 +928,7 @@ export const PurchaseModal: React.FC<Props> = ({
               </span>
               <span className="mt-0.5 text-[11.5px] leading-snug text-[#6B6759]">{o.sub}</span>
               <span className="mt-1.5 flex items-baseline gap-1.5">
-                <s className="text-[13px] font-semibold text-[#9F998A]">{o.was}</s>
+                {o.was && <s className="text-[13px] font-semibold text-[#9F998A]">{o.was}</s>}
                 <span className="font-display text-[22px] font-bold leading-none text-[#0F1B2D]">{o.price}</span>
               </span>
             </button>

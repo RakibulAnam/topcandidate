@@ -27,12 +27,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const q = String((Array.isArray(req.query.q) ? req.query.q[0] : req.query.q) ?? '').trim();
-  const page = Math.max(0, Number((Array.isArray(req.query.page) ? req.query.page[0] : req.query.page) ?? 0));
-  const pageSize = Math.min(100, Math.max(10, Number((Array.isArray(req.query.pageSize) ? req.query.pageSize[0] : req.query.pageSize) ?? 50)));
+  const page = Math.max(0, Math.floor(Number((Array.isArray(req.query.page) ? req.query.page[0] : req.query.page) ?? 0)) || 0);
+  const pageSize = Math.min(100, Math.max(10, Math.floor(Number((Array.isArray(req.query.pageSize) ? req.query.pageSize[0] : req.query.pageSize) ?? 50)) || 50));
 
   const STAGES = ['signed_up', 'profile_started', 'profile_complete', 'general_resume', 'tailored', 'paid'] as const;
   const stageParam = String((Array.isArray(req.query.stage) ? req.query.stage[0] : req.query.stage) ?? '');
   const stage = (STAGES as readonly string[]).includes(stageParam) ? stageParam : null;
+  // Master-resume offer (migration 035): legacy ৳50, standard ৳99, or an
+  // operator-set custom price; 'unlocked' = already has the master resume.
+  const OFFERS = ['legacy', 'standard', 'custom', 'unlocked'] as const;
+  type Offer = typeof OFFERS[number];
+  const offerParam = String((Array.isArray(req.query.offer) ? req.query.offer[0] : req.query.offer) ?? '');
+  const offer = (OFFERS as readonly string[]).includes(offerParam) ? (offerParam as Offer) : null;
+  // `any`: the postgrest builder's generics blow the type checker's depth limit here.
+  const byOffer = <Q,>(builder: Q, o: Offer): Q => {
+    const q = builder as any;
+    if (o === 'unlocked') return q.not('master_resume_unlocked_at', 'is', null) as Q;
+    const locked = q.is('master_resume_unlocked_at', null);
+    if (o === 'custom') return locked.not('master_price_taka', 'is', null) as Q;
+    return locked.is('master_price_taka', null).eq('legacy_pricing', o === 'legacy') as Q;
+  };
 
   // Strict full-UUID v4 shape. Partial hex strings (e.g. "deadbeef")
   // previously slipped through and triggered Postgres "invalid input syntax
@@ -42,9 +56,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let query = supabase
     .from('v_admin_user_funnel')
-    .select('id, email, full_name, toolkit_credits, flagged_at, created_at, onboarding_complete, user_type, utm_source, signup_referrer, headline_role, headline_company, experience_count, education_count, skill_count, project_count, general_at, tailored_count, paid_count, last_active_at, stage', { count: 'exact' });
+    .select('id, email, full_name, toolkit_credits, flagged_at, created_at, onboarding_complete, user_type, utm_source, signup_referrer, headline_role, headline_company, experience_count, education_count, skill_count, project_count, general_at, tailored_count, paid_count, last_active_at, stage, legacy_pricing, master_price_taka, master_offer_taka, master_resume_unlocked_at', { count: 'exact' });
 
   if (stage) query = query.eq('stage', stage);
+  if (offer) query = byOffer(query, offer);
 
   if (q.length > 0) {
     const safe = q.replace(/[%_]/g, '');
@@ -64,6 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [{ data, error, count }, ...stageCounts] = await Promise.all([
     query.order('created_at', { ascending: false }).range(page * pageSize, page * pageSize + pageSize - 1),
     ...STAGES.map((s) => supabase.from('v_admin_user_funnel').select('id', { count: 'exact', head: true }).eq('stage', s)),
+    ...OFFERS.map((o) => byOffer(supabase.from('v_admin_user_funnel').select('id', { count: 'exact', head: true }), o)),
   ]);
 
   if (error) {
@@ -82,6 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Funnel strip: users who REACHED each step (a paid user also counts as
   // signed up, profile complete, …), so the numbers read as a funnel.
   const atStage: Record<string, number> = Object.fromEntries(STAGES.map((s, i) => [s, stageCounts[i].count ?? 0]));
+  const offers: Record<string, number> = Object.fromEntries(OFFERS.map((o, i) => [o, stageCounts[STAGES.length + i].count ?? 0]));
   const reached: Record<string, number> = {};
   let running = 0;
   for (let i = STAGES.length - 1; i >= 0; i--) { running += atStage[STAGES[i]]; reached[STAGES[i]] = running; }
@@ -105,5 +122,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
   });
 
-  res.status(200).json({ rows: enriched, total: count ?? 0, page, pageSize, funnel: { reached, atStage } });
+  res.status(200).json({ rows: enriched, total: count ?? 0, page, pageSize, funnel: { reached, atStage }, offers });
 }

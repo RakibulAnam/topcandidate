@@ -11,14 +11,14 @@
 //
 // UserDetail renders inline (no router); back is setState.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDistanceToNowStrict } from 'date-fns';
 import type { AdminApi } from './adminApi';
 import { taka } from './adminApi';
 import {
   Button, Card, ContentGrid, DataTable, EmptyState, ErrorState, FilterChip,
   JsonDiff, KeyValue, PageHeader, ReasonModal, SearchInput, Section, Skeleton,
-  StatusPill, TimeCell, focusRing, toastSuccess, useDebounced, withToast,
+  StatusPill, TimeCell, focusRing, toastOk, toastSuccess, useDebounced,
 } from './ui';
 
 interface UserRow {
@@ -45,7 +45,26 @@ interface UserRow {
   paid_count: number;
   last_active_at: string | null;
   stage: Stage;
+  legacy_pricing?: boolean;
+  master_price_taka?: number | null;
+  master_offer_taka?: number;
+  master_resume_unlocked_at?: string | null;
 }
+
+type Offer = 'legacy' | 'standard' | 'custom' | 'unlocked';
+
+const OFFERS: { key: Offer; label: string }[] = [
+  { key: 'legacy', label: '৳50 (legacy account)' },
+  { key: 'standard', label: '৳99 (standard)' },
+  { key: 'custom', label: 'Custom price' },
+  { key: 'unlocked', label: 'Already unlocked' },
+];
+
+/** Master-resume price for a locked account and where it comes from. */
+const offerOf = (p: { legacy_pricing?: boolean; master_price_taka?: number | null }): { taka: number; source: string } =>
+  p.master_price_taka != null
+    ? { taka: p.master_price_taka, source: 'custom' }
+    : p.legacy_pricing ? { taka: 50, source: 'legacy' } : { taka: 99, source: 'standard' };
 
 type Stage = 'signed_up' | 'profile_started' | 'profile_complete' | 'general_resume' | 'tailored' | 'paid';
 
@@ -94,28 +113,34 @@ interface UsersResp {
   page: number;
   pageSize: number;
   funnel?: { reached: Record<Stage, number>; atStage: Record<Stage, number> };
+  offers?: Record<Offer, number>;
 }
 
 export const UsersTab: React.FC<{ api: AdminApi; initialUserId?: string | null; onClearInitial?: () => void }> = ({ api, initialUserId, onClearInitial }) => {
   const [q, setQ] = useState('');
   const [stage, setStage] = useState<Stage | null>(null);
+  const [offer, setOffer] = useState<Offer | null>(null);
   const debouncedQ = useDebounced(q, 250);
-  const [page, setPage] = useState(0);
+  // Page is keyed to the filter so a filter change lands on page 0 in the same render (no stale-page fetch).
+  const filterKey = `${debouncedQ}|${stage ?? ''}|${offer ?? ''}`;
+  const [pageState, setPageState] = useState({ key: filterKey, page: 0 });
+  const page = pageState.key === filterKey ? pageState.page : 0;
+  const setPage = (p: number) => setPageState({ key: filterKey, page: p });
   const [data, setData] = useState<UsersResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(initialUserId ?? null);
-
-  useEffect(() => { setPage(0); }, [debouncedQ, stage]);
+  const reqId = useRef(0);
 
   const refresh = useCallback(() => {
+    const id = ++reqId.current;
     setLoading(true);
     setErr(null);
-    api.call<UsersResp>('users', { query: { q: debouncedQ, page, ...(stage ? { stage } : {}) } })
-      .then((r) => setData(r))
-      .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, [api, debouncedQ, page, stage]);
+    api.call<UsersResp>('users', { query: { q: debouncedQ, page, ...(stage ? { stage } : {}), ...(offer ? { offer } : {}) } })
+      .then((r) => { if (id === reqId.current) setData(r); })
+      .catch((e: unknown) => { if (id === reqId.current) setErr(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (id === reqId.current) setLoading(false); });
+  }, [api, debouncedQ, page, stage, offer]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -127,7 +152,7 @@ export const UsersTab: React.FC<{ api: AdminApi; initialUserId?: string | null; 
   }, [initialUserId, onClearInitial]);
 
   if (selected) {
-    return <UserDetail api={api} userId={selected} onBack={() => setSelected(null)} />;
+    return <UserDetail api={api} userId={selected} onBack={() => { setSelected(null); refresh(); }} onDeleted={() => { setSelected(null); refresh(); }} />;
   }
 
   return (
@@ -139,6 +164,17 @@ export const UsersTab: React.FC<{ api: AdminApi; initialUserId?: string | null; 
       />
 
       {data?.funnel && <FunnelStrip funnel={data.funnel} active={stage} onPick={(s) => setStage((cur) => (cur === s ? null : s))} />}
+
+      {data?.offers && (
+        <div className="mb-4 flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10.5px] uppercase tracking-[0.14em] font-bold text-charcoal-500 mr-1">Master resume offer</span>
+          {OFFERS.map((o) => (
+            <FilterChip key={o.key} active={offer === o.key} onClick={() => setOffer((cur) => (cur === o.key ? null : o.key))}>
+              {o.label} · {data.offers![o.key] ?? 0}
+            </FilterChip>
+          ))}
+        </div>
+      )}
 
       <div className="mb-4 max-w-md">
         <SearchInput
@@ -180,6 +216,12 @@ export const UsersTab: React.FC<{ api: AdminApi; initialUserId?: string | null; 
               <div className={u.tailored_count > 0 ? 'text-brand-700' : 'text-charcoal-400'}>{u.tailored_count} tailored</div>
             </div>
           ) },
+          { key: 'offer', header: 'Master offer', width: 'w-28', render: (u) => {
+            if (u.master_resume_unlocked_at) return <span className="text-[12px] text-emerald-700 font-semibold">Unlocked</span>;
+            if (u.legacy_pricing === undefined) return <span className="text-charcoal-400">—</span>;
+            const o = offerOf(u);
+            return <span className="text-[12px]"><span className="font-semibold text-brand-700">{taka(o.taka)}</span> <span className="text-charcoal-500">{o.source}</span></span>;
+          } },
           { key: 'credits', header: 'Credits', width: 'w-20', align: 'right', render: (u) => <span className={u.toolkit_credits < 0 ? 'text-red-700 font-semibold' : ''}>{u.toolkit_credits}</span> },
           { key: 'source', header: 'Source', width: 'w-28', render: (u) => <span className="text-[12px] text-charcoal-600 break-all">{sourceOf(u.utm_source, u.signup_referrer)}</span> },
           { key: 'active', header: 'Last active', width: 'w-32', render: (u) => <span className="text-[12px]"><Ago iso={u.last_active_at} /></span> },
@@ -285,7 +327,8 @@ interface UserDetailResp {
   profile: {
     id: string; email: string; full_name: string | null; phone: string | null; location: string | null;
     linkedin: string | null; github: string | null; website: string | null; user_type: string | null;
-    toolkit_credits: number; flagged_at: string | null; created_at: string;
+    toolkit_credits: number; flagged_at: string | null; master_resume_unlocked_at: string | null; created_at: string;
+    legacy_pricing?: boolean; master_price_taka?: number | null;
   };
   background?: {
     experiences: Array<{ id: string; role: string | null; company: string | null; start_date: string | null; end_date: string | null; is_current: boolean | null }>;
@@ -296,7 +339,7 @@ interface UserDetailResp {
   loginEmail: string | null;
   emailMismatch: boolean;
   lifetimePaid: number;
-  purchases: Array<{ id: string; payment_reference: string; amount_taka: number; observed_amount_taka: number | null; status: string; credits_granted: number; created_at: string }>;
+  purchases: Array<{ id: string; payment_reference: string; amount_taka: number; observed_amount_taka: number | null; status: string; credits_granted: number; is_test: boolean; created_at: string }>;
   resumes: Array<{ id: string; title: string; company: string | null; job_title: string | null; created_at: string }>;
   aiCalls30d: number;
   funnel: null | {
@@ -313,12 +356,18 @@ interface UserDetailResp {
 
 type DetailTab = 'activity' | 'purchases' | 'resumes' | 'audit' | 'notes';
 
-const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }> = ({ api, userId, onBack }) => {
+type UserModal =
+  | { kind: 'grant' | 'deduct'; amount: number }
+  | { kind: 'flag' | 'unflag' | 'note' | 'master' | 'delete' }
+  | { kind: 'test'; purchaseId: string; isTest: boolean }
+  | { kind: 'price'; price: number | null };
+
+const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void; onDeleted: () => void }> = ({ api, userId, onBack, onDeleted }) => {
   const [data, setData] = useState<UserDetailResp | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<DetailTab>('activity');
-  const [modal, setModal] = useState<null | { kind: 'grant' | 'deduct'; amount: number } | { kind: 'flag' | 'unflag' } | { kind: 'note' }>(null);
+  const [modal, setModal] = useState<UserModal | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(() => {
@@ -332,19 +381,38 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  const deleteEmail = data ? data.loginEmail ?? data.profile.email : '';
+  // Same rule as admin_delete_user: any non-test purchase that involved (or may involve) real money.
+  const MONEY_STATUSES = ['completed', 'refunded', 'underpaid', 'msisdn_mismatch_review', 'pending'];
+  const realPaid = data ? data.purchases.filter((p) => MONEY_STATUSES.includes(p.status) && !p.is_test).length : 0;
+
   const submit = async (reason: string) => {
     if (!modal) return;
     setBusy(true);
     try {
+      let ok = false;
       if (modal.kind === 'grant') {
-        await withToast(api.call('grant-credits', { method: 'POST', body: { userId, amount: modal.amount, reason } }), { success: `Granted ${modal.amount} credit(s).` });
+        ok = await toastOk(api.call('grant-credits', { method: 'POST', body: { userId, amount: modal.amount, reason } }), { success: `Granted ${modal.amount} credit(s).` });
       } else if (modal.kind === 'deduct') {
-        await withToast(api.call('deduct-credits', { method: 'POST', body: { userId, amount: modal.amount, reason } }), { success: `Deducted ${modal.amount} credit(s).` });
+        ok = await toastOk(api.call('deduct-credits', { method: 'POST', body: { userId, amount: modal.amount, reason } }), { success: `Deducted ${modal.amount} credit(s).` });
       } else if (modal.kind === 'flag' || modal.kind === 'unflag') {
-        await withToast(api.call('flag-user', { method: 'POST', body: { userId, flagged: modal.kind === 'flag', reason } }), { success: modal.kind === 'flag' ? 'User flagged.' : 'User unflagged.' });
+        ok = await toastOk(api.call('flag-user', { method: 'POST', body: { userId, flagged: modal.kind === 'flag', reason } }), { success: modal.kind === 'flag' ? 'User flagged.' : 'User unflagged.' });
       } else if (modal.kind === 'note') {
-        await withToast(api.call('user-note', { method: 'POST', body: { userId, note: reason } }), { success: 'Note added.' });
+        ok = await toastOk(api.call('user-note', { method: 'POST', body: { userId, note: reason } }), { success: 'Note added.' });
+      } else if (modal.kind === 'master') {
+        ok = await toastOk(api.call('grant-master-resume', { method: 'POST', body: { userId, reason } }), { success: 'Master resume unlocked.' });
+      } else if (modal.kind === 'price') {
+        ok = await toastOk(api.call('set-master-price', { method: 'POST', body: { userId, priceTaka: modal.price, reason } }), { success: modal.price == null ? 'Price back to the default.' : `Master resume price set to ৳${modal.price}.` });
+      } else if (modal.kind === 'test') {
+        ok = await toastOk(api.call('mark-test-purchase', { method: 'POST', body: { purchaseId: modal.purchaseId, isTest: modal.isTest, reason } }), { success: modal.isTest ? 'Marked as test payment.' : 'Counted as a real payment again.' });
+      } else if (modal.kind === 'delete') {
+        if (await toastOk(api.call('delete-user', { method: 'POST', body: { userId, confirmEmail: deleteEmail, reason } }), { success: 'User deleted.', failure: 'Delete failed' })) {
+          setModal(null);
+          onDeleted();
+        }
+        return;
       }
+      if (!ok) return;
       setModal(null);
       refresh();
     } finally {
@@ -399,6 +467,27 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
                 {data.funnel?.utm_campaign && <span className="block text-[11px] text-charcoal-500">{[data.funnel.utm_medium, data.funnel.utm_campaign].filter(Boolean).join(' · ')}</span>}
               </KeyValue>
               <KeyValue label="Flagged">{data.profile.flagged_at ? <StatusPill status="flagged" tone="danger" label="flagged" /> : <span className="text-charcoal-400">—</span>}</KeyValue>
+              <KeyValue label="Master resume">
+                {data.profile.master_resume_unlocked_at
+                  ? <span className="text-emerald-700 font-semibold" title={new Date(data.profile.master_resume_unlocked_at).toLocaleString()}>Unlocked</span>
+                  : <span className="text-charcoal-500">Locked</span>}
+              </KeyValue>
+              <KeyValue label="Master resume price">
+                {data.profile.legacy_pricing === undefined ? <span className="text-charcoal-400">—</span> : (() => {
+                  const o = offerOf(data.profile);
+                  return (
+                    <div>
+                      <span className="font-semibold text-brand-700">{taka(o.taka)}</span> <span className="text-[11px] text-charcoal-500">{o.source}</span>
+                      <div className="mt-1 flex items-center gap-1 flex-wrap">
+                        <PriceSetter onSubmit={(n) => setModal({ kind: 'price', price: n })} />
+                        {data.profile.master_price_taka != null && (
+                          <Button size="sm" variant="ghost" onClick={() => setModal({ kind: 'price', price: null })}>Reset</Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </KeyValue>
             </div>
           </div>
           <div className="text-right shrink-0 min-w-[160px]">
@@ -417,7 +506,22 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
           ) : (
             <Button variant="secondary" size="sm" onClick={() => setModal({ kind: 'flag' })}>Flag user</Button>
           )}
+          {!data.profile.master_resume_unlocked_at && (
+            <Button variant="secondary" size="sm" onClick={() => setModal({ kind: 'master' })}>Unlock master resume</Button>
+          )}
           <a href={`mailto:${data.loginEmail ?? data.profile.email}`} className={['inline-flex items-center h-7 px-2.5 rounded-full text-[11px] font-semibold border bg-white hover:bg-charcoal-50 text-brand-700 border-charcoal-300', focusRing].join(' ')}>Email customer</a>
+          <span className="ml-auto flex items-center gap-2">
+            {realPaid > 0 && (
+              <span className="text-[11px] text-charcoal-500">Mark its {realPaid} real purchase{realPaid === 1 ? '' : 's'} as test to delete</span>
+            )}
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={realPaid > 0}
+              title={realPaid > 0 ? `Has ${realPaid} purchase${realPaid === 1 ? '' : 's'} with real money (paid, refunded, underpaid or pending). Mark them as test (Purchases tab below) before deleting.` : 'Permanently delete this account and all its data'}
+              onClick={() => setModal({ kind: 'delete' })}
+            >Delete user</Button>
+          </span>
         </div>
       </Card>
 
@@ -437,7 +541,7 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
 
       <Card padded={false}>
         {tab === 'activity' && <ActivityList rows={data.events} />}
-        {tab === 'purchases' && <PurchaseTable rows={data.purchases} />}
+        {tab === 'purchases' && <PurchaseTable rows={data.purchases} onToggleTest={(p) => setModal({ kind: 'test', purchaseId: p.id, isTest: !p.is_test })} />}
         {tab === 'resumes' && <ResumeTable rows={data.resumes} />}
         {tab === 'audit' && <AuditList rows={data.audit} />}
         {tab === 'notes' && <NotesList rows={data.notes} />}
@@ -450,10 +554,22 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void }
           modal?.kind === 'deduct' ? `Deduct ${modal.amount} credit${modal.amount === 1 ? '' : 's'}` :
           modal?.kind === 'flag' ? 'Flag user' :
           modal?.kind === 'unflag' ? 'Unflag user' :
-          modal?.kind === 'note' ? 'Add note' : ''
+          modal?.kind === 'note' ? 'Add note' :
+          modal?.kind === 'master' ? 'Unlock master resume' :
+          modal?.kind === 'price' ? (modal.price == null ? 'Reset master resume price' : `Set master resume price to ৳${modal.price}`) :
+          modal?.kind === 'test' ? (modal.isTest ? 'Mark as test payment' : 'Count as real payment') :
+          modal?.kind === 'delete' ? 'Delete user permanently' : ''
         }
-        subtitle={modal?.kind === 'note' ? 'Note is private to the admin panel and also serves as an audit entry.' : undefined}
-        confirmVariant={modal?.kind === 'deduct' || modal?.kind === 'flag' ? 'danger' : 'primary'}
+        subtitle={
+          modal?.kind === 'note' ? 'Note is private to the admin panel and also serves as an audit entry.' :
+          modal?.kind === 'master' ? 'Lets this account build and download the master resume, same as a purchase would.' :
+          modal?.kind === 'price' ? (modal.price == null ? `Back to the default: ৳${data.profile.legacy_pricing ? 50 : 99}.` : 'The user sees and pays this price from their next purchase. A payment already submitted keeps its amount.') :
+          modal?.kind === 'test' ? (modal.isTest ? 'The payment still works for the user, but is left out of revenue and paying-user numbers.' : 'The payment counts in revenue and paying-user numbers again.') :
+          modal?.kind === 'delete' ? 'Removes the login, profile, resumes, purchases, events and AI-call history. This cannot be undone.' : undefined
+        }
+        confirmLabel={modal?.kind === 'delete' ? 'Delete forever' : undefined}
+        confirmText={modal?.kind === 'delete' ? deleteEmail : undefined}
+        confirmVariant={modal?.kind === 'deduct' || modal?.kind === 'flag' || modal?.kind === 'delete' ? 'danger' : 'primary'}
         busy={busy}
         onConfirm={submit}
         onClose={() => setModal(null)}
@@ -728,7 +844,7 @@ const ActivityList: React.FC<{ rows: UserDetailResp['events'] }> = ({ rows }) =>
 };
 
 
-const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases'] }> = ({ rows }) => {
+const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases']; onToggleTest: (p: UserDetailResp['purchases'][number]) => void }> = ({ rows, onToggleTest }) => {
   if (rows.length === 0) return <EmptyState title="No purchases yet" description="When the customer pays via bKash, their purchases will appear here." />;
   return (
     <div className="overflow-x-auto">
@@ -740,16 +856,20 @@ const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases'] }> = ({ rows }
             <th className="text-right px-4 py-3">Amount</th>
             <th className="text-right px-4 py-3">Credits</th>
             <th className="text-left px-4 py-3">Created</th>
+            <th className="px-4 py-3"><span className="sr-only">Test payment</span></th>
           </tr>
         </thead>
         <tbody>
           {rows.map((p) => (
             <tr key={p.id} className="border-t border-charcoal-100">
               <td className="px-4 py-2.5 font-mono text-[12px] break-all">{p.payment_reference}</td>
-              <td className="px-4 py-2.5"><StatusPill status={p.status} /></td>
+              <td className="px-4 py-2.5"><StatusPill status={p.status} />{p.is_test && <span className="ml-1.5"><StatusPill status="test" tone="pending" label="test" /></span>}</td>
               <td className="px-4 py-2.5 text-right whitespace-nowrap">{taka(p.amount_taka)}{p.observed_amount_taka != null && p.observed_amount_taka !== p.amount_taka && <span className="block text-[11px] text-accent-600">obs {taka(p.observed_amount_taka)}</span>}</td>
               <td className="px-4 py-2.5 text-right">{p.credits_granted}</td>
               <td className="px-4 py-2.5"><TimeCell iso={p.created_at} /></td>
+              <td className="px-4 py-2.5 text-right">
+                <Button size="sm" variant="ghost" onClick={() => onToggleTest(p)}>{p.is_test ? 'Count as real' : 'Mark as test'}</Button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -818,6 +938,8 @@ const NotesList: React.FC<{ rows: UserDetailResp['notes'] }> = ({ rows }) => {
 const CreditAdjuster: React.FC<{ label: string; variant: 'primary' | 'danger'; onSubmit: (n: number) => void }> = ({ label, variant, onSubmit }) => {
   const [open, setOpen] = useState(false);
   const [val, setVal] = useState('');
+  const n = Number(val);
+  const valid = val.trim() !== '' && Number.isInteger(n) && n > 0;
   if (!open) {
     return <Button size="sm" variant={variant === 'primary' ? 'subtle' : 'secondary'} onClick={() => setOpen(true)}>{label}</Button>;
   }
@@ -828,11 +950,46 @@ const CreditAdjuster: React.FC<{ label: string; variant: 'primary' | 'danger'; o
         min={1}
         value={val}
         onChange={(e) => setVal(e.target.value)}
+        step={1}
         placeholder="N"
-        className={['w-16 h-7 px-2 rounded-md border border-charcoal-300 text-sm', focusRing, 'focus:border-accent-500'].join(' ')}
+        aria-label={`Credits to ${label.toLowerCase()}`}
+        aria-invalid={val !== '' && !valid}
+        title={val !== '' && !valid ? 'Enter a whole number of 1 or more' : undefined}
+        className={['w-16 h-7 px-2 rounded-md border text-sm', val !== '' && !valid ? 'border-red-400' : 'border-charcoal-300', focusRing, 'focus:border-accent-500'].join(' ')}
         autoFocus
       />
-      <Button size="sm" variant={variant} onClick={() => { const n = Math.max(1, Math.floor(Number(val) || 0)); if (n > 0) { onSubmit(n); setOpen(false); setVal(''); } }}>{label}</Button>
+      <Button size="sm" variant={variant} disabled={!valid} title={valid ? undefined : 'Enter a whole number of 1 or more'} onClick={() => { if (!valid) return; onSubmit(n); setOpen(false); setVal(''); }}>{label}</Button>
+      <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setVal(''); }}>×</Button>
+    </div>
+  );
+};
+
+// ─── master-resume price setter ─────────────────────────────────────────
+
+const PriceSetter: React.FC<{ onSubmit: (n: number) => void }> = ({ onSubmit }) => {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  const n = Number(val);
+  const valid = val.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 100000;
+  if (!open) {
+    return <Button size="sm" variant="secondary" onClick={() => setOpen(true)}>Set price</Button>;
+  }
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-[12px] text-charcoal-500">৳</span>
+      <input
+        type="number"
+        min={1}
+        step={1}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        placeholder="99"
+        aria-label="Master resume price in taka"
+        aria-invalid={val !== '' && !valid}
+        className={['w-20 h-7 px-2 rounded-md border text-sm', val !== '' && !valid ? 'border-red-400' : 'border-charcoal-300', focusRing, 'focus:border-accent-500'].join(' ')}
+        autoFocus
+      />
+      <Button size="sm" variant="primary" disabled={!valid} title={valid ? undefined : 'Enter a whole number of taka (1 or more)'} onClick={() => { if (!valid) return; onSubmit(n); setOpen(false); setVal(''); }}>Set</Button>
       <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setVal(''); }}>×</Button>
     </div>
   );

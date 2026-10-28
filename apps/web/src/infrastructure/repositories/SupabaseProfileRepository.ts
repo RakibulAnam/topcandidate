@@ -176,6 +176,7 @@ export class SupabaseProfileRepository implements IProfileRepository {
             // migration 033 every unlocked account had bought a pack).
             boughtPack: packs.error ? masterUnlocked : (packs.count ?? 0) > 0,
             legacyPricing,
+            masterPriceTaka: (data?.master_price_taka as number | null | undefined) ?? (legacyPricing ? 50 : 99),
             newPricing,
             welcomePending: legacyPricing && !data?.welcome_credit_at && !!data?.onboarding_complete,
         };

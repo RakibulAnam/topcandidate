@@ -29,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('id, actor, action, target_kind, target_id, before_state, after_state, reason, created_at', { count: 'exact' })
     .order('created_at', { ascending: false });
 
-  if (action) query = query.eq('action', action);
+  if (action) query = query.ilike('action', `%${action.replace(/[%\\]/g, '')}%`);
   if (targetKind) query = query.eq('target_kind', targetKind);
   if (from) query = query.gte('created_at', from);
   if (to) query = query.lte('created_at', to);

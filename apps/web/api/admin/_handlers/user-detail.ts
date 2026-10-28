@@ -36,8 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const since30d = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
 
   const [profile, purchases, resumes, aiCalls, notes, audit, funnel, events, experiences, educations, skills, projects] = await Promise.all([
-    supabase.from('profiles').select('id, email, full_name, phone, location, linkedin, github, website, user_type, toolkit_credits, flagged_at, created_at').eq('id', id).maybeSingle(),
-    supabase.from('purchases').select('id, payment_reference, amount_taka, observed_amount_taka, status, credits_granted, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
+    supabase.from('profiles').select('id, email, full_name, phone, location, linkedin, github, website, user_type, toolkit_credits, flagged_at, master_resume_unlocked_at, legacy_pricing, master_price_taka, created_at').eq('id', id).maybeSingle(),
+    supabase.from('purchases').select('id, payment_reference, amount_taka, observed_amount_taka, status, credits_granted, is_test, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
     supabase.from('generated_resumes').select('id, title, company, job_title:data->targetJob->>title, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(20),
     supabase.from('ai_call_log').select('id', { count: 'exact', head: true }).eq('user_id', id).gte('created_at', since30d),
     supabase.from('profile_notes').select('id, note, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
@@ -62,15 +62,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
+  // The rest of the screen is built from these; showing them empty on a
+  // failed read would read as "no purchases / no resumes".
+  const coreErr = purchases.error || resumes.error || aiCalls.error || notes.error || audit.error;
+  if (coreErr) {
+    res.status(500).json({ error: `Supabase: ${coreErr.message}`, code: coreErr.code, hint: coreErr.hint });
+    return;
+  }
 
-  // Lifetime paid sum (completed only)
+  // Operator actions on this user's purchases (e.g. mark-as-test) belong in
+  // the user's audit trail too.
+  const purchaseIds = (purchases.data ?? []).map((p) => p.id);
+  const { data: purchaseAudit } = purchaseIds.length
+    ? await supabase.from('admin_audit_log').select('id, action, target_kind, target_id, before_state, after_state, reason, created_at').eq('target_kind', 'purchase').in('target_id', purchaseIds).order('created_at', { ascending: false }).limit(50)
+    : { data: [] };
+  const allAudit = [...(audit.data ?? []), ...(purchaseAudit ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+
+  // Lifetime paid sum (completed, test payments excluded)
   const lifetimePaid = (purchases.data ?? [])
-    .filter((p) => p.status === 'completed')
+    .filter((p) => p.status === 'completed' && !p.is_test)
     .reduce((sum, p) => sum + (p.amount_taka ?? 0), 0);
 
   // True login email from auth.users (profiles.email can drift).
   let loginEmail: string | null = null;
-  const { data: emails } = await supabase.rpc('admin_auth_emails', { p_ids: [id] });
+  const { data: emails, error: emailErr } = await supabase.rpc('admin_auth_emails', { p_ids: [id] });
+  if (emailErr) console.warn('[admin/user-detail] auth-email lookup failed:', emailErr.message);
   if (Array.isArray(emails) && emails[0]) loginEmail = (emails[0] as { email: string }).email;
   const emailMismatch = Boolean(loginEmail && profile.data.email && loginEmail.toLowerCase() !== String(profile.data.email).toLowerCase());
 
@@ -93,6 +109,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       projects: (projects.data ?? []).map((pr) => ({ ...pr, technologies: toList(pr.technologies) })),
     },
     notes: notes.data ?? [],
-    audit: audit.data ?? [],
+    audit: allAudit,
   });
 }

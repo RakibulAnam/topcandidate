@@ -30,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const q = String(param('q') ?? '').trim();
   const age = String(param('age') ?? '30d').trim();
-  const page = Math.max(0, Number(param('page') ?? 0));
+  const page = Math.max(0, Math.floor(Number(param('page') ?? 0)) || 0);
   const pageSize = 50;
 
   let cutoff: string | null = null;
@@ -40,13 +40,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let query = supabase
     .from('purchases')
-    .select('id, user_id, payment_reference, amount_taka, observed_amount_taka, sender_msisdn, status, credits_granted, created_at', { count: 'exact' })
+    .select('id, user_id, payment_reference, amount_taka, observed_amount_taka, sender_msisdn, status, credits_granted, is_test, created_at', { count: 'exact' })
     .in('status', statuses)
     .order('created_at', { ascending: false });
 
   if (cutoff) query = query.gte('created_at', cutoff);
   if (q.length > 0) {
-    const safe = q.replace(/[%_]/g, '');
+    // PostgREST or() syntax: strip characters that would break the filter.
+    const safe = q.replace(/[%_,()*"\\]/g, '').trim();
     // Email substring search needs a profiles join — Supabase JS doesn't
     // expose joined-table .ilike() filters cleanly, so do a 2-step:
     // resolve matching user ids first, then OR with payment_reference ilike.

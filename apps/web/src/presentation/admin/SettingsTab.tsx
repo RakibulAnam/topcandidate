@@ -6,7 +6,7 @@ import type { AdminApi } from './adminApi';
 import { ADMIN_TOKEN_STORAGE } from './adminApi';
 import {
   Button, Card, ContentGrid, EmptyState, ErrorState, KeyValue, PageHeader,
-  ReasonModal, Section, Skeleton, StatusPill, TimeCell, withToast,
+  ReasonModal, Section, Skeleton, StatusPill, TimeCell, toastOk,
 } from './ui';
 
 interface SettingsResp {
@@ -35,14 +35,14 @@ export const SettingsTab: React.FC<{ api: AdminApi; onLock: () => void }> = ({ a
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const runExpiry = async () => {
+  const runExpiry = async (reason: string) => {
     setBusy(true);
     try {
-      const r = await withToast(
-        api.call<{ expiredCount: number }>('settings', { method: 'POST', body: { op: 'run-expiry' } }),
+      const ok = await toastOk(
+        api.call<{ expiredCount: number }>('settings', { method: 'POST', body: { op: 'run-expiry', reason } }),
         { success: 'Pending-expiry triggered.' }
       );
-      if (r) { /* expiredCount surfaced via the toast description below */ }
+      if (!ok) return;
       setConfirmExpiry(false);
       refresh();
     } finally {
@@ -147,7 +147,7 @@ export const SettingsTab: React.FC<{ api: AdminApi; onLock: () => void }> = ({ a
         subtitle="Manually fires expire_stale_pending_purchases(). Type a brief reason for the audit log."
         confirmVariant="primary"
         busy={busy}
-        onConfirm={() => void runExpiry()}
+        onConfirm={(reason) => void runExpiry(reason)}
         onClose={() => setConfirmExpiry(false)}
       />
     </div>

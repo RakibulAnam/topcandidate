@@ -311,7 +311,13 @@ export function DataTable<T>({ columns, rows, loading, error, onRetry, empty, on
               <tr
                 key={keyForRow(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={['border-t border-charcoal-100 align-middle', onRowClick ? 'cursor-pointer hover:bg-charcoal-50' : ''].join(' ')}
+                tabIndex={onRowClick ? 0 : undefined}
+                onKeyDown={onRowClick ? (e) => {
+                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
+                  onRowClick(row);
+                } : undefined}
+                className={['border-t border-charcoal-100 align-middle', onRowClick ? `cursor-pointer hover:bg-charcoal-50 focus-visible:bg-charcoal-50 ${focusRing}` : ''].join(' ')}
               >
                 {columns.map((c) => (
                   <td key={c.key} className={['px-3 py-2.5', c.align === 'right' ? 'text-right' : c.align === 'center' ? 'text-center' : 'text-left'].join(' ')}>
@@ -371,28 +377,45 @@ export const ReasonModal: React.FC<{
   confirmLabel?: string;
   confirmVariant?: ButtonVariant;
   busy?: boolean;
+  /** When set, the operator must also type this exact text (case-insensitive) to enable confirm — for irreversible actions. */
+  confirmText?: string;
   onConfirm: (reason: string) => void;
   onClose: () => void;
-}> = ({ open, title, subtitle, confirmLabel = 'Confirm', confirmVariant = 'primary', busy, onConfirm, onClose }) => {
+}> = ({ open, title, subtitle, confirmLabel = 'Confirm', confirmVariant = 'primary', busy, confirmText, onConfirm, onClose }) => {
   const [reason, setReason] = useState('');
+  const [typed, setTyped] = useState('');
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const typedId = useId();
+  const close = useCallback(() => { if (!busy) onClose(); }, [busy, onClose]);
   useEffect(() => {
-    if (!open) setReason('');
+    if (!open) { setReason(''); setTyped(''); }
     else setTimeout(() => taRef.current?.focus(), 50);
   }, [open]);
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { close(); return; }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      // Focus trap: cycle Tab / Shift+Tab within the dialog.
+      const items = Array.from(panelRef.current.querySelectorAll('button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')) as HTMLElement[];
+      if (items.length === 0) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      const inside = panelRef.current.contains(document.activeElement);
+      if (e.shiftKey && (document.activeElement === first || !inside)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (document.activeElement === last || !inside)) { e.preventDefault(); first.focus(); }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open, close]);
 
   if (!open) return null;
-  const ok = reason.trim().length > 0 && !busy;
+  const typedOk = !confirmText || typed.trim().toLowerCase() === confirmText.trim().toLowerCase();
+  const ok = reason.trim().length > 0 && typedOk && !busy;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="reason-title">
-      <div className="absolute inset-0 bg-brand-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-white rounded-2xl p-5 shadow-xl">
+      <div className="absolute inset-0 bg-brand-900/60 backdrop-blur-sm" onClick={close} />
+      <div ref={panelRef} className="relative w-full max-w-md bg-white rounded-2xl p-5 shadow-xl">
         <h3 id="reason-title" className="font-display text-base font-semibold text-brand-700">{title}</h3>
         <p className="mt-1 text-[12px] text-charcoal-500">{subtitle ?? 'A reason is required for the audit log.'}</p>
         <textarea
@@ -404,6 +427,21 @@ export const ReasonModal: React.FC<{
           className={['mt-3 block w-full px-3 py-2 rounded-xl border border-charcoal-300 text-sm', focusRing, 'focus:border-accent-500'].join(' ')}
           placeholder="Why are you doing this? (⌘↵ to submit)"
         />
+        {confirmText && (
+          <div className="mt-3">
+            <label htmlFor={typedId} className="block text-[12px] text-charcoal-600">
+              Type <span className="font-mono font-semibold text-brand-700 break-all">{confirmText}</span> to confirm
+            </label>
+            <input
+              id={typedId}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              className={['mt-1 block w-full h-9 px-3 rounded-xl border border-charcoal-300 text-sm font-mono', focusRing, 'focus:border-accent-500'].join(' ')}
+            />
+          </div>
+        )}
         <div className="mt-4 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button variant={confirmVariant} disabled={!ok} loading={busy} onClick={() => onConfirm(reason.trim())}>{confirmLabel}</Button>
@@ -449,6 +487,13 @@ export async function withToast<T>(p: Promise<T>, opts: { success: string; failu
     toastError(opts.failure ?? 'Action failed', msg);
     return null;
   }
+}
+
+/** withToast for callers that only need to know whether it worked (a null/void body is still success). */
+export async function toastOk(p: Promise<unknown>, opts: { success: string; failure?: string }): Promise<boolean> {
+  let ok = false;
+  await withToast(p.then(() => { ok = true; }), opts);
+  return ok;
 }
 
 // Re-export the focusRing token for screens that need to style inputs.
