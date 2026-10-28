@@ -19,7 +19,7 @@
 //
 // Blur steps, not a fade: a fade needs a gradient, which the brand forbids.
 import React, { useEffect, useState } from 'react';
-import { ArrowRight, Check, Loader2, Lock } from 'lucide-react';
+import { ArrowRight, Check, Loader2, Lock, Mail, MapPin, Phone } from 'lucide-react';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { useLocale, useT } from '../../i18n/LocaleContext';
 import { track } from '../../../infrastructure/analytics/track';
@@ -53,7 +53,11 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
   const summary = useResumeOfferSummary(user?.id);
   const eyebrowCase = locale === 'bn' ? '' : 'uppercase tracking-[0.12em]';
   const name = profile?.name || (user?.user_metadata?.full_name as string | undefined) || '';
-  const contact = [profile?.email, profile?.phone, profile?.location].filter(Boolean).join('  ·  ');
+  const contactItems = ([
+    [Mail, profile?.email],
+    [Phone, profile?.phone],
+    [MapPin, profile?.location],
+  ] as const).filter(([, text]) => !!text).map(([Icon, text]) => ({ Icon, text: text as string }));
 
   // One "shown" per browser session, so the funnel counts people, not renders.
   useEffect(() => {
@@ -75,7 +79,10 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
 
   // Each line after the summary takes the next blur step.
   let band = 0;
-  const sectionHeading = 'mt-6 border-b border-brand-700/70 pb-1 text-[11px] font-bold uppercase tracking-[0.16em]';
+  // Bangla has no case, and letter-spacing pulls its conjuncts apart.
+  const sectionHeading = `mt-5 border-b border-brand-700/70 pb-1 text-[11px] font-bold sm:mt-6 ${
+    locale === 'bn' ? '' : 'uppercase tracking-[0.12em] sm:tracking-[0.16em]'
+  }`;
 
   return (
     <section aria-labelledby="resume-offer-title" className="wb-enter">
@@ -119,24 +126,41 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
         </div>
       </div>
 
-      {/* The page itself. A tap anywhere on it buys; keyboard and screen
-          readers use the pill button inside, which does the same. */}
+      {/* The page itself: a sheet of paper (a second one peeks out behind it),
+          not a card. A tap anywhere on it buys; keyboard and screen readers use
+          the pill button inside, which does the same. */}
+      <div className="relative mx-auto max-w-[760px] pb-2 sm:px-2">
+        <div
+          aria-hidden="true"
+          className="absolute inset-x-3 bottom-0 top-3 rotate-[1.4deg] rounded-[4px] border border-charcoal-200 bg-charcoal-50 sm:inset-x-6"
+        />
       <div
         onClick={() => get('page')}
-        className="group relative cursor-pointer overflow-hidden rounded-[6px] border border-charcoal-200 bg-white shadow-[0_28px_60px_-28px_rgba(15,27,45,0.45)] transition-transform duration-200 hover:-translate-y-0.5"
+        className="group relative cursor-pointer overflow-hidden rounded-[4px] border border-charcoal-200 bg-white shadow-[0_24px_50px_-28px_rgba(15,27,45,0.5)] transition-transform duration-200 hover:-translate-y-0.5"
       >
-        <article className="mx-auto max-h-[min(860px,150vw)] max-w-[760px] select-none px-[clamp(20px,6vw,56px)] pb-16 pt-[clamp(24px,5vw,48px)] font-display text-brand-700">
+        <article className="select-none px-[clamp(18px,6vw,56px)] pb-[clamp(18px,4vw,32px)] pt-[clamp(22px,5vw,48px)] font-display text-brand-700">
           {/* Header — legible */}
-          <p className="text-center font-display text-[clamp(22px,4vw,30px)] font-semibold leading-tight">{name}</p>
+          <p className="text-center font-display text-[clamp(21px,4vw,30px)] font-semibold leading-tight">{name}</p>
           {profile?.roles[0]?.role && (
-            <p className="mt-1 text-center text-[13px] font-semibold text-accent-700">{profile.roles[0].role}</p>
+            <p className="mt-1 text-center text-[12.5px] font-semibold text-accent-700 sm:text-[13px]">{profile.roles[0].role}</p>
           )}
-          {contact && <p className="mt-1.5 text-center text-[11.5px] text-charcoal-500">{contact}</p>}
+          {/* One item per piece, each with its icon, so a narrow screen wraps
+              between items instead of leaving a stray "·" at a line end. */}
+          {contactItems.length > 0 && (
+            <ul className="mt-2 flex flex-wrap justify-center gap-x-3.5 gap-y-1 font-sans text-[11px] text-charcoal-500 sm:text-[11.5px]">
+              {contactItems.map(({ Icon, text }) => (
+                <li key={text} className="inline-flex min-w-0 max-w-full items-center gap-1">
+                  <Icon size={11} className="shrink-0 text-charcoal-400" aria-hidden="true" />
+                  <span className="truncate">{text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {/* Summary — legible: the real one their resume will open with */}
           <h3 className={sectionHeading}>{t('resumeOffer.summaryHeading')}</h3>
           {summary.status === 'ready' ? (
-            <p className="mt-2.5 text-[14px] leading-relaxed text-charcoal-700">{summary.text}</p>
+            <p className="mt-2.5 text-[13.5px] leading-[1.65] text-charcoal-700 sm:text-[14px]">{summary.text}</p>
           ) : summary.status === 'loading' ? (
             <div className="mt-2.5">
               <span aria-hidden="true" className="flex flex-col gap-2">
@@ -158,9 +182,10 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
           )}
 
           {/* Everything after the summary: blurred a step further per line,
-              with the ask on it. min-h keeps room for the pill on a thin
-              profile. */}
-          <div className="relative min-h-[200px]">
+              with the ask on it. A fixed-height window, so the page always
+              ends on its own bottom margin (never a flat cut through a line)
+              and a thin profile still has room for the pill. */}
+          <div className="relative h-[clamp(250px,62vw,340px)] overflow-hidden">
             <div aria-hidden="true">
               {profile && profile.roles.length > 0 && (
                 <>
@@ -201,14 +226,14 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
               )}
             </div>
 
-            {/* The ask, on the blur — a fixed step below the summary, so it can
-                never cover it and never slides past the page's clipped bottom
-                however long the profile is. */}
-            <div className="absolute inset-x-0 top-14 flex justify-center px-2">
+            {/* The ask, centred in the blurred window — below the first role's
+                title line (the last thing that still reads), so it never covers
+                anything legible. */}
+            <div className="absolute inset-x-0 top-[58%] flex -translate-y-1/2 justify-center px-2">
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); get('page'); }}
-                className="inline-flex items-center gap-2 rounded-full bg-brand-700 px-5 py-3 text-center font-sans text-[14.5px] font-bold text-charcoal-50 shadow-[0_16px_32px_-12px_rgba(15,27,45,0.7)] transition-transform group-hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2"
+                className="inline-flex items-center gap-2 rounded-full bg-brand-700 px-5 py-3 text-center font-sans text-[14px] font-bold text-charcoal-50 shadow-[0_16px_32px_-12px_rgba(15,27,45,0.7)] transition-transform group-hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 sm:text-[14.5px]"
               >
                 <Lock size={15} strokeWidth={2.6} className="shrink-0 text-accent-300" />
                 {unbuildable ? t('resumeOffer.fixCta') : t('resumeOffer.overlay')}
@@ -216,6 +241,7 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
             </div>
           </div>
         </article>
+      </div>
       </div>
     </section>
   );
@@ -228,6 +254,8 @@ export const ResumeOfferSkeleton: React.FC = () => (
   <section aria-hidden="true">
     {/* Header: eyebrow, title, body, then the price + button row, centred. */}
     <div className="mx-auto mb-6 h-[220px] max-w-[520px] animate-pulse rounded-xl bg-charcoal-100 sm:h-[200px]" />
-    <div className="h-[min(760px,140vw)] rounded-[6px] border border-charcoal-200 bg-white" />
+    {/* The sheet: same width cap as the real one, and its measured height
+        (~615px on a 375px phone, ~655px on desktop). */}
+    <div className="mx-auto h-[min(650px,165vw)] max-w-[760px] rounded-[4px] border border-charcoal-200 bg-white" />
   </section>
 );
