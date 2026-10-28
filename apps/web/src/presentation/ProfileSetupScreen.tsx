@@ -54,6 +54,7 @@ import {
     Star,
 } from 'lucide-react';
 import { ResumeUploadStep } from './components/profile/ResumeUploadStep';
+import { LiveSheet, sheetPercent, SheetFill, SheetSection } from './components/profile/LiveSheet';
 import { TutorialVideoCard } from './components/profile/TutorialVideo';
 import { ExtractedProfileData } from '../domain/usecases/ExtractResumeUseCase';
 import { isGibberish } from '../application/validation/gibberishDetector';
@@ -295,12 +296,19 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
             if (langs.length > 0) setLanguages(langs);
             if (refs.length > 0) setReferences(refs);
 
-            // Returning users who already have contact details skip the import
-            // splash and resume at the form; everyone else starts at import.
+            // Returning users skip the first screen and resume at the form;
+            // everyone else starts there. Name + email alone do not make a
+            // returning user: the sign-up trigger seeds both from the auth
+            // metadata (Google always supplies a name), so testing only those
+            // sent nearly every brand-new account past the first screen. It
+            // takes something the user entered themselves — a phone number or
+            // any section row.
             // Only on the first load. A retry fired mid-wizard must not yank
             // the user back to the start of the form.
             if (opts?.resetStep) {
-                const nextStep = (profile?.fullName && profile?.email)
+                const enteredSomething = !!profile?.phone?.trim()
+                    || [exps, projs, edus, skls, extras, awds, certs, affs, pubs, langs, refs].some(rows => rows.length > 0);
+                const nextStep = (profile?.fullName && profile?.email && enteredSomething)
                     ? SetupStep.PERSONAL_INFO
                     : SetupStep.IMPORT_RESUME;
                 setCurrentStep(nextStep);
@@ -677,7 +685,14 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     const renderCurrentStep = () => {
         switch (currentStep) {
             case SetupStep.IMPORT_RESUME:
-                return <ResumeUploadStep onExtracted={handleExtracted} onSkip={handleSkipImport} />;
+                return (
+                    <ResumeUploadStep
+                        onExtracted={handleExtracted}
+                        onSkip={handleSkipImport}
+                        fullName={personalInfo.fullName}
+                        percent={sheetPct}
+                    />
+                );
             case SetupStep.PERSONAL_INFO:
                 return (
                     <PersonalInfoStep
@@ -722,9 +737,28 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     const progressIndex = currentStep === SetupStep.IMPORT_RESUME
         ? 0
         : progressSteps.indexOf(currentStep) + 1;
-    const progressPercent = progressSteps.length > 0
-        ? (progressIndex / progressSteps.length) * 100
-        : 0;
+
+    // The live resume sheet: what the profile holds, not which step is open.
+    const sheetFill: SheetFill = {
+        name: personalInfo.fullName || '',
+        hasEmail: !!(personalInfo.email || '').trim(),
+        hasPhone: !!(personalInfo.phone || '').trim(),
+        experience: experiences.length,
+        education: education.length,
+        projects: projects.length,
+        skills: skills.length,
+        extras: extracurriculars.length + awards.length + certifications.length + affiliations.length
+            + publications.length + languages.length + references.length,
+    };
+    const sheetPct = sheetPercent(sheetFill);
+    const sheetSection: SheetSection | null =
+        currentStep === SetupStep.PERSONAL_INFO ? 'contact'
+            : currentStep === SetupStep.EXPERIENCE ? 'experience'
+                : currentStep === SetupStep.EDUCATION ? 'education'
+                    : currentStep === SetupStep.PROJECTS ? 'projects'
+                        : currentStep === SetupStep.SKILLS ? 'skills'
+                            : currentStep === SetupStep.IMPORT_RESUME ? null
+                                : 'extras';
 
     // Phase rail structure
     const phaseGroups: { title: string; steps: SetupStep[] }[] = [];
@@ -1038,20 +1072,24 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
 
                 {/* Mobile progress bar */}
                 {!isFirstStep && (
-                    <div className="lg:hidden px-4 py-3 border-t border-charcoal-100">
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-[11px] uppercase tracking-[0.18em] text-accent-600 font-semibold">
-                                {stepCopy(currentStep).phase}
-                            </span>
-                            <span className="text-xs font-medium text-charcoal-500 tabular-nums">
-                                {t('profileSetup.progressShort', { n: progressIndex, total: progressSteps.length })}
-                            </span>
-                        </div>
-                        <div className="w-full h-1 bg-charcoal-200 rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-accent-500 transition-[width] duration-300 ease-out"
-                                style={{ width: `${progressPercent}%` }}
-                            />
+                    <div className="lg:hidden px-4 py-2.5 border-t border-charcoal-100 flex items-center gap-3">
+                        <LiveSheet fill={sheetFill} current={sheetSection} size="mini" className="w-8 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-2 gap-3">
+                                <span className="text-[11px] uppercase tracking-[0.18em] text-accent-600 font-semibold truncate">
+                                    {stepCopy(currentStep).phase}
+                                </span>
+                                <span className="text-xs font-semibold text-brand-700 tabular-nums shrink-0">
+                                    {t('profileSetup.sheetPercent', { pct: sheetPct })}
+                                    <span className="font-medium text-charcoal-500"> · {t('profileSetup.progressShort', { n: progressIndex, total: progressSteps.length })}</span>
+                                </span>
+                            </div>
+                            <div className="w-full h-1 bg-charcoal-200 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-accent-500 transition-[width] duration-500 ease-out"
+                                    style={{ width: `${sheetPct}%` }}
+                                />
+                            </div>
                         </div>
                     </div>
                 )}
@@ -1074,12 +1112,25 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             <p className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold mb-2">
                                 {t('profileSetup.railEyebrow')}
                             </p>
-                            <h1 className="font-display text-2xl font-semibold text-brand-700 leading-tight mb-6">
-                                {t('profileSetup.railTitle')}
-                            </h1>
-                            <p className="text-sm text-brand-500 leading-relaxed mb-6">
-                                {t('profileSetup.railBody')}
-                            </p>
+                            <h1 className="sr-only">{t('profileSetup.railTitle')}</h1>
+                            {/* The resume this wizard is writing. On the first screen the
+                                desk animation already shows it, so the rail stays quiet. */}
+                            {!isFirstStep && (
+                                <div className="flex items-start gap-4 mb-6">
+                                    <LiveSheet fill={sheetFill} current={sheetSection} className="w-28 shrink-0" />
+                                    <div className="pt-1 min-w-0">
+                                        <p className="font-display text-3xl font-semibold text-brand-700 tabular-nums leading-none">
+                                            {t('profileSetup.sheetPercent', { pct: sheetPct })}
+                                        </p>
+                                        <div className="mt-3 h-1 w-full bg-charcoal-200 rounded-full overflow-hidden">
+                                            <div className="h-full bg-accent-500 transition-[width] duration-500 ease-out" style={{ width: `${sheetPct}%` }} />
+                                        </div>
+                                        <p className="mt-3 text-sm text-brand-500 leading-snug">
+                                            {sheetPct >= 100 ? t('profileSetup.sheetCaptionDone') : t('profileSetup.sheetCaption')}
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* ABOVE the step nav, deliberately. This is the fastest route
                                 to a filled profile, so it sits at the top of the rail, right
@@ -1175,7 +1226,9 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                             to the import step at all once it had been skipped. Hidden on
                             the import step itself, where it would point at the current
                             page. */}
-                        <TutorialVideoCard className="lg:hidden mb-4" />
+                        {/* On the first screen the desk animation leads; the video
+                            guide moves below the step card there. */}
+                        {!isFirstStep && <TutorialVideoCard className="lg:hidden mb-4" />}
                         {!isFirstStep && (
                             <ImportResumeCard
                                 onImport={() => setCurrentStep(SetupStep.IMPORT_RESUME)}
@@ -1218,6 +1271,7 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                         <div className="bg-white border border-charcoal-200 rounded-2xl shadow-sm p-6 sm:p-8 lg:p-10">
                             {renderCurrentStep()}
                         </div>
+                        {isFirstStep && <TutorialVideoCard className="lg:hidden mt-4" />}
                     </main>
                 </div>
             </div>

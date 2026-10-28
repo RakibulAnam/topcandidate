@@ -146,10 +146,30 @@
 .demo-caret { animation: demoCaret 1s steps(1) infinite; }
 @keyframes demoCaret { 50% { opacity: 0; } }
 /* Bangla has no case, and letter-spacing pulls its conjuncts apart. */
-html[data-locale="bn"] .demo-eyebrow { text-transform: none; letter-spacing: 0; }
+html[data-locale="bn"] .demo-eyebrow,
+html[data-locale="bn"] .setup-eyebrow { text-transform: none; letter-spacing: 0; }
 @media (prefers-reduced-motion: reduce) {
   .demo-in, .demo-pop, .demo-select, .demo-fill, .demo-cursor { animation: none; }
   .demo-scan, .demo-caret { animation: none; display: none; }
+}
+
+/* ── Profile setup "live sheet" (components/profile/LiveSheet.tsx) ─────────
+   ls-draw:  a section's ink lines write themselves in when it gets content
+             (paths use pathLength=1, so one dash = the whole line).
+   ls-ghost: the section the user is on now breathes, so the sheet shows where
+             the next lines will go. */
+.ls-draw { stroke-dasharray: 1; animation: lsDraw 0.7s cubic-bezier(0.35, 0.1, 0.55, 1) both; }
+@keyframes lsDraw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+.ls-ghost { animation: lsGhost 1.8s ease-in-out infinite; }
+@keyframes lsGhost {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ls-draw, .ls-ghost { animation: none; }
 }
 
 /* ── Metric-matched font fallbacks ─────────────────────────────────────────
