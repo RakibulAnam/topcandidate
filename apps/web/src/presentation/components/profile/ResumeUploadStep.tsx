@@ -149,7 +149,7 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip, fullNam
         // The whole step is the drop target, so a PDF dragged anywhere over it
         // imports — there is no separate box to aim for.
         <div
-            className="relative max-w-xl mx-auto space-y-6"
+            className="relative space-y-6"
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -163,61 +163,78 @@ export const ResumeUploadStep: React.FC<Props> = ({ onExtracted, onSkip, fullNam
                 disabled={isProcessing}
             />
 
-            <ResumeWritingHero label={t('profileSetup.heroAlt')} />
+            {/* The primary button must be on screen without scrolling, down to a
+                360×640 phone. So: side by side from md (animation | message +
+                actions), and on phones a shorter animation frame (it crops only
+                empty desk) with the explanation moved under the buttons. */}
+            <div className="space-y-5 md:space-y-0 md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:items-center md:gap-8 lg:gap-10">
+                <ResumeWritingHero
+                    label={t('profileSetup.heroAlt')}
+                    className="aspect-[640/400] md:aspect-[640/440]"
+                />
 
-            <div className="text-center">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold mb-3 setup-eyebrow">
-                    {/* Up to 20% is only what sign-up supplied (name, email, phone). */}
-                    {percent > 20
-                        ? t('profileSetup.heroEyebrowResume', { pct: percent })
-                        : percent > 0
-                            ? t('profileSetup.heroEyebrowStarted', { pct: percent })
-                            : t('profileSetup.heroEyebrow')}
-                </p>
-                <h2 className="font-display text-[26px] sm:text-3xl font-semibold text-brand-700 leading-tight mb-3 text-balance">
-                    {firstName
-                        ? t('profileSetup.heroTitleNamed', { name: firstName })
-                        : t('profileSetup.heroTitle')}
-                </h2>
-                <p className="text-brand-500 leading-relaxed text-pretty">
-                    {t('profileSetup.heroBody')}
-                </p>
+                <div className="text-center md:text-left">
+                    <p className="text-[11px] uppercase tracking-[0.14em] sm:tracking-[0.22em] text-accent-600 font-semibold mb-2.5 setup-eyebrow">
+                        {/* Up to 20% is only what sign-up supplied (name, email, phone). */}
+                        {percent > 20
+                            ? t('profileSetup.heroEyebrowResume', { pct: percent })
+                            : percent > 0
+                                ? t('profileSetup.heroEyebrowStarted', { pct: percent })
+                                : t('profileSetup.heroEyebrow')}
+                    </p>
+                    <h2 className="font-display text-[24px] sm:text-[28px] lg:text-3xl font-semibold text-brand-700 leading-tight text-balance">
+                        {firstName
+                            ? t('profileSetup.heroTitleNamed', { name: firstName })
+                            : t('profileSetup.heroTitle')}
+                    </h2>
+                    <p className="hidden md:block mt-3 text-brand-500 leading-relaxed text-pretty">
+                        {t('profileSetup.heroBody')}
+                    </p>
+
+                    <div className="mt-5">
+                        {isProcessing ? (
+                            <div className="rounded-2xl border border-charcoal-200 bg-charcoal-50 p-5 flex items-center gap-4 text-left" role="status" aria-live="polite">
+                                <div className="w-12 h-12 shrink-0 bg-white rounded-full flex items-center justify-center">
+                                    <Loader2 className="w-6 h-6 text-brand-700 animate-spin" />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-semibold text-brand-700">Analyzing your resume</h3>
+                                    <p className="text-sm text-charcoal-500 mt-1">
+                                        Extracting your work history, skills, and education.
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-2.5">
+                                <button
+                                    type="button"
+                                    onClick={() => { track('resume_import_skipped'); onSkip(); }}
+                                    className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-5 min-h-12 bg-brand-700 text-charcoal-50 rounded-full font-semibold hover:bg-brand-800 transition-colors"
+                                >
+                                    <PenLine size={17} className="text-accent-400" />
+                                    {percent > 20 ? t('profileSetup.heroContinueCta') : t('profileSetup.heroStartCta')}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full inline-flex items-center justify-center gap-2 py-3 px-5 min-h-12 border border-charcoal-300 text-brand-700 bg-white rounded-full font-semibold text-sm hover:border-brand-700 hover:bg-charcoal-50 transition-colors"
+                                >
+                                    <Upload size={15} className="text-accent-600" />
+                                    {t('profileSetup.heroUploadCta')}
+                                </button>
+                                {/* Phones cannot drag files, so the drop hint is desktop-only. */}
+                                <p className="hidden md:block text-center text-xs text-charcoal-500">{t('profileSetup.heroUploadHint')}</p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* On phones the explanation follows the buttons, so it never
+                        pushes them below the fold. */}
+                    <p className="md:hidden mt-4 text-sm text-charcoal-500 leading-relaxed text-pretty">
+                        {t('profileSetup.heroBody')}
+                    </p>
+                </div>
             </div>
-
-            {isProcessing ? (
-                <div className="rounded-2xl border border-charcoal-200 bg-charcoal-50 p-6 flex items-center gap-4" role="status" aria-live="polite">
-                    <div className="w-12 h-12 shrink-0 bg-white rounded-full flex items-center justify-center">
-                        <Loader2 className="w-6 h-6 text-brand-700 animate-spin" />
-                    </div>
-                    <div>
-                        <h3 className="text-base font-semibold text-brand-700">Analyzing your resume</h3>
-                        <p className="text-sm text-charcoal-500 mt-1">
-                            Extracting your work history, skills, and education.
-                        </p>
-                    </div>
-                </div>
-            ) : (
-                <div className="space-y-3">
-                    <button
-                        type="button"
-                        onClick={() => { track('resume_import_skipped'); onSkip(); }}
-                        className="w-full inline-flex items-center justify-center gap-2 py-3.5 px-5 min-h-12 bg-brand-700 text-charcoal-50 rounded-full font-semibold hover:bg-brand-800 transition-colors"
-                    >
-                        <PenLine size={17} className="text-accent-400" />
-                        {percent > 20 ? t('profileSetup.heroContinueCta') : t('profileSetup.heroStartCta')}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="w-full inline-flex items-center justify-center gap-2 py-3 px-5 min-h-12 border border-charcoal-300 text-brand-700 bg-white rounded-full font-semibold text-sm hover:border-brand-700 hover:bg-charcoal-50 transition-colors"
-                    >
-                        <Upload size={15} className="text-accent-600" />
-                        {t('profileSetup.heroUploadCta')}
-                    </button>
-                    {/* Phones cannot drag files, so the drop hint is desktop-only. */}
-                    <p className="hidden md:block text-center text-xs text-charcoal-500">{t('profileSetup.heroUploadHint')}</p>
-                </div>
-            )}
 
             {isDragging && !isProcessing && (
                 <div className="pointer-events-none absolute inset-0 -m-3 rounded-3xl border-2 border-dashed border-accent-400 bg-accent-50/90 flex flex-col items-center justify-center gap-3">

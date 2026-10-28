@@ -55,6 +55,7 @@ const bezier = (x1, y1, x2, y2) => t => {
 };
 const settleSoft = bezier(0, 0.65, 0.51, 0.99);
 const travel = bezier(0.6, 0.05, 0.25, 1); // pen travel / hops
+const exitAccel = bezier(0.5, 0, 0.75, 0.3); // leaving the frame: slow start, fast exit
 const stroke = bezier(0.35, 0.1, 0.55, 1); // a written stroke: quick start, slight ease into the end
 
 // ---- lottie helpers ----
@@ -206,11 +207,21 @@ const PEN_REST_START = WRITE_END + 2;
 const PEN_REST_END = PEN_REST_START + 14;
 const CHIPS_START = WRITE_END + 3;
 const CHECK_START = PEN_REST_END - 4;
-// still hold on the finished sheet after the badge lands
-const OP = CHECK_START + 14 + 26;
+// The finished sheet, badge landed: what reduced-motion shows (marker below).
+const FINISHED = CHECK_START + 20;
+// Loop: hold on the finished sheet, then the pen lifts away and the sheet slides
+// off, leaving the empty desk that frame 0 starts on, so the restart is seamless.
+const HOLD_END = CHECK_START + 14 + 40;
+const PEN_EXIT_START = HOLD_END;
+const PEN_EXIT_END = PEN_EXIT_START + 14;
+const SHEET_EXIT_START = PEN_EXIT_START + 10; // pen is nearly gone; it rides on the sheet
+const SHEET_EXIT_END = SHEET_EXIT_START + 18;
+const OP = SHEET_EXIT_END + 10; // a beat of empty desk before the next sheet drops in
 
 // pen tip position per frame (paper-local), plus "lifted" amount 0..1
-const PEN_OFF = [250, 260]; // off the bottom-right of the desk
+// Off the bottom-right of the desk with the WHOLE pen clear, not just the nib
+// (the barrel points up-right, ~100px above and ~80px right of the tip).
+const PEN_OFF = [340, 330];
 const PEN_REST = [200, 40]; // lying beside the sheet when done
 const penAt = f => {
   if (f < WRITE_START) {
@@ -239,9 +250,17 @@ const penAt = f => {
     const last = strokes[strokes.length - 1];
     return { p: last.pts[last.pts.length - 1], lift: 0 };
   }
-  const u = settleSoft(Math.min(1, (f - PEN_REST_START) / (PEN_REST_END - PEN_REST_START)));
-  const a = strokes[strokes.length - 1].pts[1];
-  return { p: [a[0] + (PEN_REST[0] - a[0]) * u, a[1] + (PEN_REST[1] - a[1]) * u], lift: Math.sin(Math.PI * Math.min(1, u * 1.15)) * 0.9 };
+  if (f <= PEN_EXIT_START) {
+    const u = settleSoft(Math.min(1, (f - PEN_REST_START) / (PEN_REST_END - PEN_REST_START)));
+    const a = strokes[strokes.length - 1].pts[1];
+    return { p: [a[0] + (PEN_REST[0] - a[0]) * u, a[1] + (PEN_REST[1] - a[1]) * u], lift: Math.sin(Math.PI * Math.min(1, u * 1.15)) * 0.9 };
+  }
+  // picked up and carried off the bottom-right, the way it came in
+  const u = exitAccel(Math.min(1, (f - PEN_EXIT_START) / (PEN_EXIT_END - PEN_EXIT_START)));
+  return {
+    p: [PEN_REST[0] + (PEN_OFF[0] - PEN_REST[0]) * u, PEN_REST[1] + (PEN_OFF[1] - PEN_REST[1]) * u],
+    lift: Math.min(1, u * 3),
+  };
 };
 
 // ---- background: desk ----
@@ -301,15 +320,22 @@ push({ nm: 'Mug', shapes: mug, ks: { p: st([58, 70]) } });
 push({ nm: 'Sticky note', shapes: sticky, ks: { p: st([588, 92]), r: st(-9) } });
 
 // paper motion (shared by sheet + shadow)
+// Frame 0 and the last frame are both the empty desk (sheet fully off-canvas,
+// tilt included), so the loop restarts without a cut.
+const EXIT = ez(0.5, 0, 0.75, 0.3);
 const paperPos = keys([
-  [PAPER_IN, [PX + 70, PY - 330], ez(0.2, 0.75, 0.34, 0.94)],
+  [PAPER_IN, [PX + 70, PY - 480], ez(0.2, 0.75, 0.34, 0.94)],
   [PAPER_SETTLE - 6, [PX - 2, PY + 5], ez(0.3, 0, 0.5, 1)],
   [PAPER_SETTLE, [PX, PY]],
+  [SHEET_EXIT_START, [PX, PY], EXIT],
+  [SHEET_EXIT_END, [PX - 170, PY - 500]],
 ]);
 const paperRot = keys([
   [PAPER_IN, -14, ez(0.2, 0.75, 0.34, 0.94)],
   [PAPER_SETTLE - 6, -1.6, ez(0.3, 0, 0.5, 1)],
   [PAPER_SETTLE, -2.4],
+  [SHEET_EXIT_START, -2.4, EXIT],
+  [SHEET_EXIT_END, -13],
 ]);
 // shadow arrives a beat after the sheet and tightens as it lands (follow-through)
 push({
@@ -317,12 +343,21 @@ push({
   shapes: [group('shadow', [rect(0, 0, PW, PH, 2), fill(C.shadow)])],
   ks: {
     p: keys([
-      [PAPER_IN, [PX + 110, PY - 290], ez(0.2, 0.75, 0.34, 0.94)],
+      [PAPER_IN, [PX + 110, PY - 440], ez(0.2, 0.75, 0.34, 0.94)],
       [PAPER_SETTLE - 2, [PX + 6, PY + 9], ez(0.3, 0, 0.5, 1)],
       [PAPER_SETTLE + 4, [PX + 5, PY + 7]],
+      // leaves with the sheet, fading as it lifts off the desk
+      [SHEET_EXIT_START, [PX + 5, PY + 7], EXIT],
+      [SHEET_EXIT_END, [PX - 150, PY - 480]],
     ]),
     r: paperRot,
-    o: keys([[PAPER_IN, 0], [PAPER_SETTLE - 4, 7, ez(0.3, 0, 0.5, 1)], [PAPER_SETTLE + 4, 13]]),
+    o: keys([
+      [PAPER_IN, 0],
+      [PAPER_SETTLE - 4, 7, ez(0.3, 0, 0.5, 1)],
+      [PAPER_SETTLE + 4, 13],
+      [SHEET_EXIT_START, 13, EXIT],
+      [SHEET_EXIT_END, 6],
+    ]),
   },
 });
 const sheet = push({
@@ -456,7 +491,7 @@ const penS = [];
 const penR = [];
 const shadowP = [];
 const shadowO = [];
-for (let f = PEN_IN_START; f <= PEN_REST_END; f++) {
+for (let f = PEN_IN_START; f <= PEN_EXIT_END; f++) {
   const { p, lift } = penAt(f);
   penP.push([f, [+p[0].toFixed(2), +p[1].toFixed(2)]]);
   const sc = 100 + lift * 5;
@@ -465,6 +500,8 @@ for (let f = PEN_IN_START; f <= PEN_REST_END; f++) {
   const writing = f >= WRITE_START && f <= WRITE_END;
   let r = writing ? Math.sin(f * 0.9) * 1.6 : 0;
   if (f > PEN_REST_START) r += -18 * settleSoft(Math.min(1, (f - PEN_REST_START) / (PEN_REST_END - PEN_REST_START)));
+  // picked back up: the roll unwinds as it leaves
+  if (f > PEN_EXIT_START) r *= 1 - exitAccel(Math.min(1, (f - PEN_EXIT_START) / (PEN_EXIT_END - PEN_EXIT_START)));
   penR.push([f, +r.toFixed(2)]);
   shadowP.push([f, [+(4 + lift * 10).toFixed(2), +(6 + lift * 12).toFixed(2)]]);
   shadowO.push([f, +(18 - lift * 8).toFixed(2)]);
@@ -479,6 +516,9 @@ const penLayer = {
   ],
   ks: { p: keys(penP), s: keys(penS), r: keys(penR) },
   ip: PEN_IN_START,
+  // Gone once it has left: it is parented to the sheet, which would otherwise
+  // drag it back into frame as the sheet slides off.
+  op: PEN_EXIT_END + 1,
 };
 
 // ---- emit ----
@@ -505,7 +545,7 @@ for (const l of ordered) {
     ao: 0,
     shapes: l.shapes,
     ip: l.ip ?? 0,
-    op: OP,
+    op: l.op ?? OP,
     st: 0,
     bm: 0,
   };
@@ -524,9 +564,13 @@ const doc = {
   ddd: 0,
   assets: [],
   layers: out,
-  markers: [{ tm: WRITE_END, cm: 'written', dr: 0 }],
+  // `finished` is the frame ResumeWritingHero holds on under reduced motion.
+  markers: [
+    { tm: WRITE_END, cm: 'written', dr: 0 },
+    { tm: FINISHED, cm: 'finished', dr: 0 },
+  ],
 };
 
 const file = process.argv[2] ?? 'public/onboarding/resume-writing.json';
 writeFileSync(file, JSON.stringify(doc));
-console.log(`wrote ${file}: ${out.length} layers, write ${WRITE_START}-${WRITE_END}, rest ${PEN_REST_END}, check ${CHECK_START}, op ${OP}`);
+console.log(`wrote ${file}: ${out.length} layers, write ${WRITE_START}-${WRITE_END}, rest ${PEN_REST_END}, check ${CHECK_START}, finished ${FINISHED}, exit ${PEN_EXIT_START}-${SHEET_EXIT_END}, op ${OP}`);

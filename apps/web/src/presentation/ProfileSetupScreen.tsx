@@ -1268,7 +1268,8 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                                 </div>
                             </div>
                         )}
-                        <div className="bg-white border border-charcoal-200 rounded-2xl shadow-sm p-6 sm:p-8 lg:p-10">
+                        {/* Tighter on the first screen's phones so its buttons clear the fold. */}
+                        <div className={`bg-white border border-charcoal-200 rounded-2xl shadow-sm ${isFirstStep ? 'p-4 sm:p-6 lg:p-8' : 'p-6 sm:p-8 lg:p-10'}`}>
                             {renderCurrentStep()}
                         </div>
                         {isFirstStep && <TutorialVideoCard className="lg:hidden mt-4" />}

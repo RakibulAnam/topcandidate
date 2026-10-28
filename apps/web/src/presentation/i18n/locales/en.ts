@@ -902,7 +902,7 @@ export const en = {
     heroEyebrowStarted: '{pct}% done — your name is already on it',
     heroTitle: 'Complete your profile and get the best resume',
     heroTitleNamed: '{name}, complete your profile and get the best resume',
-    heroBody: "Everything you add here goes into every resume we make for you. Have a resume already? Upload the PDF and we'll fill it all in.",
+    heroBody: 'Everything you add here goes into every resume we make for you. Already have a resume? Upload it and we fill this in for you.',
     heroEyebrowResume: '{pct}% done — pick up where you left off',
     heroContinueCta: 'Continue my profile',
     heroStartCta: 'Start my profile',
