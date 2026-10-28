@@ -16,6 +16,7 @@ import {
   ProxyProfileNormalizer,
 } from '../ai/proxy/ProxyClients';
 import { CompositeResumeExporter } from '../export/CompositeResumeExporter';
+export { warmResumeExporters } from '../export/CompositeResumeExporter';
 import { ResumeService } from '../../application/services/ResumeService';
 import { SupabaseResumeRepository } from '../repositories/SupabaseResumeRepository';
 import { SupabaseProfileRepository } from '../repositories/SupabaseProfileRepository';

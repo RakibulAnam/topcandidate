@@ -104,7 +104,37 @@ const summaryCache = new Map<string, SummaryEntry>();
 // is usually a stored-row read — and only while the profile still matches: a
 // summary for an older profile is never shown, since that is not the one the
 // purchase would deliver.
-const lastSummary = new Map<string, { text: string; hash: string }>();
+//
+// Kept in localStorage too, so it is there on the FIRST render of every visit
+// — a fresh page load used to show "Writing your summary…" for the ~2s it took
+// to re-read the profile and ask the server for a summary it already had.
+// Cleared on sign-out (AuthContext), so a shared browser doesn't keep it.
+type LastSummary = { text: string; hash: string };
+const memorySummary = new Map<string, LastSummary>();
+export const SUMMARY_STORAGE_PREFIX = 'tc.resumeOffer.summary.';
+
+const lastSummary = {
+  get(userId: string): LastSummary | undefined {
+    const inMemory = memorySummary.get(userId);
+    if (inMemory) return inMemory;
+    try {
+      const raw = localStorage.getItem(SUMMARY_STORAGE_PREFIX + userId);
+      const parsed = raw ? JSON.parse(raw) as LastSummary : null;
+      if (parsed && typeof parsed.text === 'string' && typeof parsed.hash === 'string') {
+        memorySummary.set(userId, parsed);
+        return parsed;
+      }
+    } catch { /* storage blocked or corrupt — treat as none */ }
+    return undefined;
+  },
+  has(userId: string): boolean {
+    return !!this.get(userId);
+  },
+  set(userId: string, value: LastSummary): void {
+    memorySummary.set(userId, value);
+    try { localStorage.setItem(SUMMARY_STORAGE_PREFIX + userId, JSON.stringify(value)); } catch { /* quota / private mode */ }
+  },
+};
 
 function loadSummary(userId: string): SummaryEntry {
   let entry = summaryCache.get(userId);
@@ -134,6 +164,16 @@ function loadSummary(userId: string): SummaryEntry {
     entry = e;
   }
   return entry;
+}
+
+/**
+ * Start (or join) the summary request now and resolve when it settles — used
+ * by profile setup so the summary is written before the user reaches the
+ * dashboard. Never rejects: a failure just means the dashboard shows its
+ * placeholder and tries again.
+ */
+export function prepareMasterPreview(userId: string): Promise<boolean> {
+  return loadSummary(userId).promise.then((text) => !!text, () => false);
 }
 
 /** Drop the cached reads — call after the profile changes. A summary request

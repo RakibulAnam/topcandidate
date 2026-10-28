@@ -7,9 +7,9 @@
 // survives navigation between the three.
 //
 // Children reach the shared state via `useDashboardShell()`.
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { Suspense, createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Search, User, LogOut, Home, LayoutGrid, FileText, Receipt } from 'lucide-react';
+import { Search, User, LogOut, Home, LayoutGrid, FileText, Receipt, Loader2 } from 'lucide-react';
 import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { createResumeService, profileRepository } from '../../../infrastructure/config/dependencies';
 import { ResumeService } from '../../../application/services/ResumeService';
@@ -451,7 +451,15 @@ export const DashboardShell: React.FC<Props> = ({
         </header>
 
         <main className="mx-auto w-full max-w-[1240px] flex-1 px-[clamp(16px,4vw,32px)] pb-[clamp(48px,7vw,80px)] pt-[clamp(28px,5vw,48px)]">
-          {children}
+          {/* The screens inside the shell are lazy chunks: while one downloads,
+              only this area waits — the top bar and tab bar stay put. */}
+          <Suspense fallback={
+            <div className="flex justify-center py-24" role="status">
+              <Loader2 className="animate-spin text-brand-600" size={28} />
+            </div>
+          }>
+            {children}
+          </Suspense>
         </main>
 
         <footer className="border-t border-charcoal-200">

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Toaster, toast } from 'sonner';
 import { ResumeData, AppStep, inferUserType } from '../domain/entities';
-import { BuilderScreen } from './BuilderScreen';
 import { ResumeService } from '../application/services/ResumeService';
 import { createResumeService, profileRepository } from '../infrastructure/config/dependencies';
 import { AuthProvider, useAuth } from '../infrastructure/auth/AuthContext';
@@ -11,17 +10,9 @@ import { InAppBrowserBar } from './components/InAppBrowserBar';
 import { Loader2 } from 'lucide-react';
 
 import { Navbar } from './components/Layout/Navbar';
-import { DashboardScreen } from './DashboardScreen';
-import { ProfileScreen } from './ProfileScreen';
-import { ProfileSetupScreen } from './ProfileSetupScreen';
-import { DashboardShell } from './components/dashboard/DashboardShell';
-import { ApplicationsScreen } from './ApplicationsScreen';
-import { PurchaseHistoryScreen } from './PurchaseHistoryScreen';
-import { SummaryScreen } from './SummaryScreen';
 import { useBrowserNav, NavScreen, NavState } from './hooks/useBrowserNav';
 import { track } from '../infrastructure/analytics/track';
 import { LocaleProvider, useT } from './i18n/LocaleContext';
-import { SetNewPasswordScreen } from './SetNewPasswordScreen';
 import { TermsOfService } from './legal/TermsOfService';
 import { useDocumentMeta } from './seo';
 import { FeaturePage } from './marketing/FeaturePage';
@@ -31,6 +22,45 @@ import { supabase, initialAuthParams } from '../infrastructure/supabase/client';
 // the admin code (~100KB+ gzipped) doesn't ship with every customer page.
 const AdminScreen = lazy(() => import('./admin/AdminScreen').then(m => ({ default: m.AdminScreen })));
 
+// Every signed-in screen is its own chunk, so the landing page (prerendered,
+// and the first thing a new visitor on a slow connection sees) downloads only
+// what it shows. Landing, Login, Terms and the feature pages stay eager.
+//
+// On a flaky connection a chunk download can fail; `lazyScreen` retries it a
+// few times before giving up, and the last resort is one full reload (a new
+// deploy also changes chunk names, which a reload picks up).
+function lazyScreen<T extends React.ComponentType<any>>(load: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const mod = await load();
+        try { sessionStorage.removeItem('tc.chunkReload'); } catch { /* ignore */ }
+        return mod;
+      } catch (err) {
+        if (attempt < 3) { await new Promise((r) => setTimeout(r, 600 * (attempt + 1))); continue; }
+        try {
+          if (!sessionStorage.getItem('tc.chunkReload')) {
+            sessionStorage.setItem('tc.chunkReload', '1');
+            window.location.reload();
+            return new Promise<never>(() => {});
+          }
+        } catch { /* storage blocked — fall through */ }
+        throw err;
+      }
+    }
+  });
+}
+const BuilderScreen = lazyScreen(() => import('./BuilderScreen').then(m => ({ default: m.BuilderScreen })));
+const DashboardScreen = lazyScreen(() => import('./DashboardScreen').then(m => ({ default: m.DashboardScreen })));
+const ProfileScreen = lazyScreen(() => import('./ProfileScreen').then(m => ({ default: m.ProfileScreen })));
+const ProfileSetupScreen = lazyScreen(() => import('./ProfileSetupScreen').then(m => ({ default: m.ProfileSetupScreen })));
+const DashboardShell = lazyScreen(() => import('./components/dashboard/DashboardShell').then(m => ({ default: m.DashboardShell })));
+const ApplicationsScreen = lazyScreen(() => import('./ApplicationsScreen').then(m => ({ default: m.ApplicationsScreen })));
+const PurchaseHistoryScreen = lazyScreen(() => import('./PurchaseHistoryScreen').then(m => ({ default: m.PurchaseHistoryScreen })));
+const SummaryScreen = lazyScreen(() => import('./SummaryScreen').then(m => ({ default: m.SummaryScreen })));
+const SetNewPasswordScreen = lazyScreen(() => import('./SetNewPasswordScreen').then(m => ({ default: m.SetNewPasswordScreen })));
+
+
 // Path-based admin route. The admin SPA does NOT use Supabase auth — it
 // gates on a separate owner login (username + password → session token). We
 // intercept before any other routing so unauthenticated visitors land on the
@@ -38,6 +68,20 @@ const AdminScreen = lazy(() => import('./admin/AdminScreen').then(m => ({ defaul
 // landing page.
 const isAdminPath = (): boolean =>
   typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+
+// A returning signed-in visitor (session in storage) or one coming back from
+// Google sign-in is about to need the dashboard: start those downloads now, in
+// parallel with the session check, instead of after it.
+if (typeof window !== 'undefined') {
+  try {
+    const signedIn = !!initialAuthParams
+      || Object.keys(localStorage).some((k) => /^sb-.+-auth-token$/.test(k));
+    if (signedIn && !isAdminPath()) {
+      void import('./components/dashboard/DashboardShell');
+      void import('./DashboardScreen');
+    }
+  } catch { /* storage blocked — the screens load on demand */ }
+}
 
 const INITIAL_DATA: ResumeData = {
   userType: undefined,
@@ -70,8 +114,45 @@ const AUTHED_SCREENS: NavScreen[] = ['DASHBOARD', 'APPLICATIONS', 'PURCHASES', '
 // the session as a PKCE `?code=` or an implicit `#…&type=recovery` hash.
 const isRecoveryRedirect = (): boolean => !!initialAuthParams?.recovery;
 
+// A screen chunk that still can't be downloaded after lazyScreen's retries
+// and one reload would otherwise throw past every boundary and unmount the
+// whole app — a blank white page. Say what happened and offer a retry.
+type ChunkErrorBoundaryProps = { children: React.ReactNode; message: string; retry: string };
+class ChunkErrorBoundary extends React.Component<ChunkErrorBoundaryProps, { failed: boolean }> {
+  declare props: Readonly<ChunkErrorBoundaryProps>;
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err: unknown) { console.error('[app] screen failed to load', err); }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-charcoal-50 px-6">
+        <div className="max-w-sm text-center">
+          <p className="text-[15px] leading-relaxed text-charcoal-600">{this.props.message}</p>
+          <button
+            type="button"
+            onClick={() => {
+              try { sessionStorage.removeItem('tc.chunkReload'); } catch { /* ignore */ }
+              window.location.reload();
+            }}
+            className="mt-5 inline-flex items-center justify-center rounded-full bg-brand-700 px-6 py-3 text-sm font-semibold text-charcoal-50 hover:bg-brand-800"
+          >
+            {this.props.retry}
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+// Strings for the boundary above (it sits outside hooks).
+const ChunkBoundary = ({ children }: { children: React.ReactNode }) => {
+  const t = useT();
+  return <ChunkErrorBoundary message={t('common.loadFailed')} retry={t('common.tryAgain')}>{children}</ChunkErrorBoundary>;
+};
+
 const AppContent = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, signInFailed } = useAuth();
   const t = useT();
   const [checkingProfile, setCheckingProfile] = useState(true);
 
@@ -135,6 +216,15 @@ const AppContent = () => {
   // cancelled on Google's consent screen → `error=access_denied`). We read it
   // from the module-load snapshot, NOT window.location, because useBrowserNav
   // has already stripped the live URL by the time this effect runs.
+  // Google came back with a code but the session couldn't be established
+  // (network failed even after retries): say so, rather than leave them on
+  // the landing page wondering why they're not signed in.
+  useEffect(() => {
+    if (signInFailed === 'network') toast.error(t('login.googleNetworkFailed'), { duration: 8000 });
+    else if (signInFailed === 'error') toast.error(t('login.googleUnavailable'), { duration: 8000 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signInFailed]);
+
   useEffect(() => {
     if (initialAuthParams?.kind !== 'error') return;
     // Recovery-link errors (e.g. expired token) are surfaced by the reset
@@ -188,6 +278,24 @@ const AppContent = () => {
   // we'd only re-check profile completeness when the actual user identity
   // changes (e.g. sign-in or sign-out), never on a tab-focus token refresh.
   const userId = user?.id ?? null;
+
+  // Signed in: fetch the remaining screen chunks while the browser is idle,
+  // so the first tap on Applications / Profile / a new application doesn't
+  // wait on a download (and an open tab survives the next deploy renaming
+  // them). Dashboard chunks were already started at module load.
+  useEffect(() => {
+    if (!userId) return;
+    const load = () => {
+      void import('./SummaryScreen');
+      void import('./BuilderScreen');
+      void import('./ApplicationsScreen');
+      void import('./PurchaseHistoryScreen');
+      void import('./ProfileScreen');
+    };
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+    if (w.requestIdleCallback) w.requestIdleCallback(load);
+    else setTimeout(load, 2000);
+  }, [userId]);
 
   useEffect(() => {
     // Wait for auth to settle. While `loading` is true the session is still
@@ -610,7 +718,15 @@ export default function App() {
   return (
     <LocaleProvider>
       <AuthProvider>
-        <AppContent />
+        <ChunkBoundary>
+          <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-charcoal-50">
+              <Loader2 className="animate-spin text-brand-600" size={32} />
+            </div>
+          }>
+            <AppContent />
+          </Suspense>
+        </ChunkBoundary>
         <Toaster richColors position="top-center" />
       </AuthProvider>
     </LocaleProvider>

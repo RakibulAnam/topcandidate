@@ -73,9 +73,12 @@
   <!-- Brand fonts. Tailwind + global styles live in src/index.css (loaded by Vite). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..700;1,8..60,300..700&family=Merriweather:wght@300;400;700&family=Hind+Siliguri:wght@300;400;500;600;700&family=Tiro+Bangla:ital@0;1&display=swap"
-    rel="stylesheet">
+  <!-- Non-blocking: a slow or unreachable fonts.googleapis.com (it happens
+       on some networks here) must never hold the first paint. Text renders
+       at once in the metric-matched fallbacks (index.css, "… Fallback"
+       faces), and swaps when the web fonts land. -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..700;1,8..60,300..700&family=Merriweather:wght@300;400;700&family=Hind+Siliguri:wght@300;400;500;600;700&family=Tiro+Bangla:ital@0;1&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300..700;1,8..60,300..700&family=Merriweather:wght@300;400;700&family=Hind+Siliguri:wght@300;400;500;600;700&family=Tiro+Bangla:ital@0;1&display=swap"></noscript>
 </head>
 
 <body class="bg-charcoal-50 text-brand-700">
