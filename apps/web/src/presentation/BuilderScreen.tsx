@@ -93,8 +93,8 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
   // Has a master ("General") resume row. Pre-032 accounts can be locked and
   // still have one; they are never sold the ৳99 master resume.
   const [hasMaster, setHasMaster] = useState<boolean | null>(null);
-  // Account existed before migration 034: the master resume is ৳50, not ৳99.
-  const [legacyPricing, setLegacyPricing] = useState<boolean | null>(null);
+  // What this account pays for the master resume (৳99, ৳50 legacy, or an operator-set price). Null while loading.
+  const [masterPrice, setMasterPrice] = useState<number | null>(null);
   const [newPricing, setNewPricing] = useState<boolean | null>(null);
   // An empty profile (no experience or education) can't be built into a
   // master resume, so it must not be sold one. Cached, shared read.
@@ -292,7 +292,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
         setCredits(status.credits);
         setMasterUnlocked(status.masterUnlocked);
         setBoughtPack(status.boughtPack);
-        setLegacyPricing(status.legacyPricing);
+        setMasterPrice(status.masterPriceTaka);
         setNewPricing(status.newPricing);
       })
       .catch(err => console.warn('Could not load toolkit credits', err))
@@ -703,7 +703,7 @@ export const BuilderScreen: React.FC<BuilderScreenProps> = ({
       // resume (plan picker), the pack preselected — this is a credit gate.
       masterOffer={masterUnlocked === false && hasMaster === false && offerProfile !== null && !offerProfile.empty && offerSummary.status !== 'unbuildable'}
       initialPackage="five-pack"
-      legacyPricing={legacyPricing}
+      masterPrice={masterPrice}
       newPricing={newPricing}
     />
   );

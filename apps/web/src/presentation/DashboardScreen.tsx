@@ -59,7 +59,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
   const t = useT();
   const { locale } = useLocale();
   const rel = useRelativeTime();
-  const { credits, generalResume, openPurchase, openMasterPurchase, loadingShell, masterUnlocked, boughtPack, legacyPricing, masterOffer, masterOfferPending, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
+  const { credits, generalResume, openPurchase, openMasterPurchase, loadingShell, masterUnlocked, boughtPack, masterPrice, masterOffer, masterOfferPending, onFreeCredit, buildingMaster, buildMaster } = useDashboardShell();
 
   const [company, setCompany] = useState('');
   const [title, setTitle] = useState('');
@@ -384,7 +384,7 @@ export const DashboardScreen = ({ onStartApplication, onOpenResume, onEditProfil
       {masterPromoted && masterBanner}
 
       {offerShown && (
-        <ResumeOfferPreview legacyPricing={legacyPricing} onGetResume={() => openMasterPurchase('dashboard_resume_preview')} onEditProfile={onEditProfile} />
+        <ResumeOfferPreview masterPrice={masterPrice} onGetResume={() => openMasterPurchase('dashboard_resume_preview')} onEditProfile={onEditProfile} />
       )}
       {resumeOfferPending && <ResumeOfferSkeleton />}
 

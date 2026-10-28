@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import { taka } from './adminApi';
 import {
-  Button, DataTable, PageHeader, ReasonModal, StatusPill, TimeCell, withToast,
+  Button, DataTable, PageHeader, ReasonModal, StatusPill, TimeCell, toastOk,
 } from './ui';
 
 interface OrphanRow { id: string; payment_reference: string; sender_msisdn: string | null; amount_taka: number; raw_body: string | null; sms_timestamp: string; created_at: string }
@@ -33,11 +33,10 @@ export const OrphansTab: React.FC<{ api: AdminApi }> = ({ api }) => {
     if (!action) return;
     setBusy(true);
     try {
-      if (action.kind === 'match') {
-        await withToast(api.call('match-orphan', { method: 'POST', body: { smsId: action.smsId, purchaseId: action.purchaseId, reason } }), { success: 'SMS matched to pending purchase.' });
-      } else {
-        await withToast(api.call('orphan-mark-ignored', { method: 'POST', body: { smsId: action.smsId, reason } }), { success: 'SMS marked ignored.' });
-      }
+      const ok = action.kind === 'match'
+        ? await toastOk(api.call('match-orphan', { method: 'POST', body: { smsId: action.smsId, purchaseId: action.purchaseId, reason } }), { success: 'SMS matched to pending purchase.' })
+        : await toastOk(api.call('orphan-mark-ignored', { method: 'POST', body: { smsId: action.smsId, reason } }), { success: 'SMS marked ignored.' });
+      if (!ok) return;
       setAction(null);
       refresh();
     } finally {
@@ -62,7 +61,8 @@ export const OrphansTab: React.FC<{ api: AdminApi }> = ({ api }) => {
           { key: 'amount', header: 'Amount', width: 'w-24', align: 'right', render: (r) => <span className="whitespace-nowrap">{taka(r.amount_taka)}</span> },
           { key: 'match', header: 'Match to pending', render: (r) => (
             <select
-              defaultValue=""
+              value={action?.kind === 'match' && action.smsId === r.id ? action.purchaseId : ''}
+              aria-label={`Match ${r.payment_reference} to a pending purchase`}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => { e.stopPropagation(); if (e.target.value) setAction({ kind: 'match', smsId: r.id, purchaseId: e.target.value }); }}
               className="h-7 px-2 rounded-md border border-charcoal-300 text-sm bg-white"

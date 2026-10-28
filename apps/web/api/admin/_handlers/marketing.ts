@@ -6,6 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
@@ -36,23 +37,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sinceIso = sinceFor(range)?.toISOString();
 
   // Profiles in range (acquisition by utm_source; also maps source per user).
-  let profilesQ = supabase.from('profiles').select('id, utm_source, created_at').limit(50000);
+  let profilesQ = supabase.from('profiles').select('id, utm_source, created_at').order('id');
   if (sinceIso) profilesQ = profilesQ.gte('created_at', sinceIso);
 
   // Completed purchases in range (channel revenue, joined by user's utm_source).
-  let purchasesQ = supabase.from('purchases').select('user_id, amount_taka, created_at').eq('status', 'completed').limit(20000);
+  let purchasesQ = supabase.from('purchases').select('user_id, amount_taka, created_at').eq('status', 'completed').eq('is_test', false).order('id');
   if (sinceIso) purchasesQ = purchasesQ.gte('created_at', sinceIso);
 
   // Funnel events in range.
-  let eventsQ = supabase.from('analytics_events').select('event, user_id, anon_id, created_at').in('event', FUNNEL_STEPS as unknown as string[]).limit(100000);
+  let eventsQ = supabase.from('analytics_events').select('event, user_id, anon_id, created_at').in('event', FUNNEL_STEPS as unknown as string[]).order('id');
   if (sinceIso) eventsQ = eventsQ.gte('created_at', sinceIso);
 
   // Spend rows in range.
-  let spendQ = supabase.from('marketing_spend').select('id, spend_date, channel, campaign, amount_taka, clicks, impressions, notes, created_at').order('spend_date', { ascending: false }).limit(5000);
+  let spendQ = supabase.from('marketing_spend').select('id, spend_date, channel, campaign, amount_taka, clicks, impressions, notes, created_at').order('spend_date', { ascending: false }).order('id');
   // marketing_spend is dated by spend_date (a date col); filter on it when ranged.
   if (sinceIso) spendQ = spendQ.gte('spend_date', sinceIso.slice(0, 10));
 
-  const [profilesRes, purchasesRes, eventsRes, spendRes] = await Promise.all([profilesQ, purchasesQ, eventsQ, spendQ]);
+  // All completed payments (any date), to find users whose only payments are
+  // operator-marked tests (migration 035) — their purchase_confirmed event is
+  // dropped from the funnel below.
+  const testPurchasesQ = supabase.from('purchases').select('user_id, is_test').eq('status', 'completed').order('id');
+
+  const [profilesRes, purchasesRes, eventsRes, spendRes, testPurchasesRes] = await Promise.all([fetchAll(profilesQ), fetchAll(purchasesQ), fetchAll(eventsQ), fetchAll(spendQ), fetchAll(testPurchasesQ)]);
 
   // analytics_events may be empty/absent — tolerate. Others are core.
   const firstErr = profilesRes.error || purchasesRes.error || spendRes.error;
@@ -80,9 +86,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .sort((a, b) => b.signups - a.signups);
 
   // Funnel: distinct coalesce(user_id::text, anon_id) per event.
+  if (testPurchasesRes.error) console.error('[admin/marketing] test purchases read (tolerated):', testPurchasesRes.error.message);
+  const allPaid = testPurchasesRes.data ?? [];
+  const realPayers = new Set(allPaid.filter((r) => !r.is_test).map((r) => r.user_id));
+  const testOnlyPayers = new Set(allPaid.filter((r) => r.is_test && !realPayers.has(r.user_id)).map((r) => r.user_id));
   const distinctByEvent: Record<string, Set<string>> = {};
   for (const step of FUNNEL_STEPS) distinctByEvent[step] = new Set();
   for (const e of eventsRes.data ?? []) {
+    if (e.event === 'purchase_confirmed' && e.user_id && testOnlyPayers.has(e.user_id)) continue;
     const key = e.user_id ?? e.anon_id;
     if (e.event && distinctByEvent[e.event] && key) distinctByEvent[e.event].add(String(key));
   }
@@ -142,8 +153,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       channel: s.channel,
       campaign: s.campaign ?? null,
       amountTaka: s.amount_taka ?? 0,
-      clicks: s.clicks ?? 0,
-      impressions: s.impressions ?? 0,
+      clicks: s.clicks ?? null,
+      impressions: s.impressions ?? null,
       notes: s.notes ?? null,
     }));
 

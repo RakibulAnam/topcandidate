@@ -5,6 +5,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { startOfDhakaToday } from '../_lib/dhaka.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
@@ -19,8 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const startOfDay = new Date();
-  startOfDay.setUTCHours(0, 0, 0, 0);
+  const startOfDay = startOfDhakaToday();
 
   const [pending, completedToday, openDisputes, expired24h, orphans, oldestPending] =
     await Promise.all([
@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase
         .from('purchases')
         .select('amount_taka', { count: 'exact' })
-        .eq('status', 'completed')
+        .eq('status', 'completed').eq('is_test', false)
         .gte('created_at', startOfDay.toISOString()),
       supabase.from('purchase_disputes').select('id', { count: 'exact', head: true }).eq('status', 'open'),
       supabase
@@ -48,6 +48,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .limit(1)
         .maybeSingle(),
     ]);
+
+  const firstErr = pending.error || completedToday.error || openDisputes.error || expired24h.error || orphans.error || oldestPending.error;
+  if (firstErr) {
+    console.error('[admin/dashboard] query failed:', firstErr.message);
+    res.status(500).json({ error: `Dashboard query failed: ${firstErr.message}` });
+    return;
+  }
 
   const completedAmount = (completedToday.data ?? []).reduce(
     (sum, r) => sum + (r.amount_taka ?? 0),

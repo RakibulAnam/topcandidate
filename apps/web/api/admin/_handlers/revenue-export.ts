@@ -6,6 +6,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
@@ -36,12 +37,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let q = supabase
     .from('purchases')
     .select('created_at, payment_reference, amount_taka, credits_granted, user_id')
-    .eq('status', 'completed')
+    .eq('status', 'completed').eq('is_test', false)
     .order('created_at', { ascending: false })
-    .limit(20000);
+    .order('id');
   if (sinceIso) q = q.gte('created_at', sinceIso);
 
-  const { data, error } = await q;
+  const { data, error } = await fetchAll(q);
   if (error) {
     console.error('[admin/revenue-export] failed:', error.message);
     res.status(500).json({ error: 'Query failed.' });

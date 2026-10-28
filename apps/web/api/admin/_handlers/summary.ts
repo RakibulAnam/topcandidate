@@ -16,6 +16,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
 
 type Range = 'day' | 'week' | 'month' | 'all';
 
@@ -49,12 +50,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sinceIso = since?.toISOString();
 
   // Completed rows (for lifetime + in-range earnings). Select only what we sum.
-  const completedQ = supabase.from('purchases').select('amount_taka, created_at').eq('status', 'completed');
+  const completedQ = supabase.from('purchases').select('amount_taka, created_at').eq('status', 'completed').eq('is_test', false).order('id');
   // Failure rows in range (status + created_at; tally by status below).
   let failuresQ = supabase
     .from('purchases')
     .select('status, created_at')
-    .in('status', FAILURE_STATUSES as unknown as string[]);
+    .eq('is_test', false)
+    .in('status', FAILURE_STATUSES as unknown as string[])
+    .order('id');
   if (sinceIso) failuresQ = failuresQ.gte('created_at', sinceIso);
 
   // Counts via head:true (no rows transferred).
@@ -66,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (sinceIso) disputesInRangeQ = disputesInRangeQ.gte('created_at', sinceIso);
 
   const [completed, failures, totalUsers, newUsers, openDisputes, disputesInRange] = await Promise.all([
-    completedQ, failuresQ, totalUsersQ, newUsersQ, openDisputesQ, disputesInRangeQ,
+    fetchAll(completedQ), fetchAll(failuresQ), totalUsersQ, newUsersQ, openDisputesQ, disputesInRangeQ,
   ]);
 
   const firstErr = completed.error || failures.error || totalUsers.error || newUsers.error || openDisputes.error || disputesInRange.error;

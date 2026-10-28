@@ -75,7 +75,7 @@ export const MarketingTab: React.FC<{ api: AdminApi }> = ({ api }) => {
       <div className="mt-6">
         <Section title="Signups by source">
           <Card>
-            {data ? (
+            {err ? <p className="text-[12px] text-charcoal-500">Unavailable — see the error above.</p> : data ? (
               <HBarChart data={data.acquisition.map((a) => ({ label: a.source, value: a.signups }))} formatValue={(n) => String(n)} />
             ) : <Skeleton className="h-32 w-full" />}
           </Card>
@@ -95,6 +95,8 @@ export const MarketingTab: React.FC<{ api: AdminApi }> = ({ api }) => {
             ]}
             rows={data?.channels ?? null}
             loading={loading}
+            error={err}
+            onRetry={refresh}
             keyForRow={(r) => r.channel}
             empty={{ title: 'No channel data yet', description: 'Log ad spend and acquire users to see channel economics.' }}
           />
@@ -117,6 +119,8 @@ export const MarketingTab: React.FC<{ api: AdminApi }> = ({ api }) => {
             ]}
             rows={data?.spendRows ?? null}
             loading={loading}
+            error={err}
+            onRetry={refresh}
             keyForRow={(r) => r.id}
             empty={{ title: 'No spend logged', description: 'Use the form above to record ad spend per channel and campaign.' }}
           />
@@ -129,7 +133,8 @@ export const MarketingTab: React.FC<{ api: AdminApi }> = ({ api }) => {
 // ─── log spend form ───────────────────────────────────────────────────────
 
 const SpendForm: React.FC<{ api: AdminApi; onSaved: () => void }> = ({ api, onSaved }) => {
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const [spendDate, setSpendDate] = useState(today);
   const [channel, setChannel] = useState('');
   const [campaign, setCampaign] = useState('');
@@ -141,7 +146,9 @@ const SpendForm: React.FC<{ api: AdminApi; onSaved: () => void }> = ({ api, onSa
   const [busy, setBusy] = useState(false);
 
   const amountNum = Number(amount);
-  const ok = spendDate && channel.trim() && amountNum > 0 && reason.trim();
+  const amountOk = amount.trim() !== '' && Number.isInteger(amountNum) && amountNum > 0;
+  const amountErr = amount.trim() !== '' && !amountOk ? 'Whole taka only (1 or more).' : null;
+  const ok = spendDate && channel.trim() && amountOk && reason.trim();
 
   const submit = async () => {
     if (!ok) return;
@@ -181,7 +188,7 @@ const SpendForm: React.FC<{ api: AdminApi; onSaved: () => void }> = ({ api, onSa
         <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Date</span><input type="date" value={spendDate} onChange={(e) => setSpendDate(e.target.value)} className={inputCls} /></label>
         <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Channel</span><input type="text" value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="facebook" className={inputCls} /></label>
         <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Campaign</span><input type="text" value={campaign} onChange={(e) => setCampaign(e.target.value)} placeholder="optional" className={inputCls} /></label>
-        <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Amount (৳)</span><input type="number" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" className={inputCls} /></label>
+        <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Amount (৳)</span><input type="number" min={1} step={1} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" aria-invalid={amountErr != null} className={[inputCls, amountErr ? 'border-red-400' : ''].join(' ')} />{amountErr && <span className="text-[11px] text-red-700">{amountErr}</span>}</label>
         <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Clicks</span><input type="number" min={0} value={clicks} onChange={(e) => setClicks(e.target.value)} placeholder="optional" className={inputCls} /></label>
         <label className="flex flex-col gap-1"><span className="text-[11px] font-semibold text-charcoal-600">Impressions</span><input type="number" min={0} value={impressions} onChange={(e) => setImpressions(e.target.value)} placeholder="optional" className={inputCls} /></label>
         <label className="flex flex-col gap-1 col-span-2"><span className="text-[11px] font-semibold text-charcoal-600">Notes</span><input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="optional" className={inputCls} /></label>

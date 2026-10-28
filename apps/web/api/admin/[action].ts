@@ -60,6 +60,11 @@ import marketing from './_handlers/marketing.js';
 import marketingSpend from './_handlers/marketing-spend.js';
 import systemHealth from './_handlers/system-health.js';
 import jobApplications from './_handlers/job-applications.js';
+// Test-account tooling (migration 035)
+import grantMasterResume from './_handlers/grant-master-resume.js';
+import deleteUser from './_handlers/delete-user.js';
+import markTestPurchase from './_handlers/mark-test-purchase.js';
+import setMasterPrice from './_handlers/set-master-price.js';
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
@@ -105,6 +110,11 @@ const HANDLERS: Record<string, Handler> = {
   'audit-log': auditLog,
   'settings': settings,
   'action-queue': actionQueue,
+  // Test-account tooling
+  'grant-master-resume': grantMasterResume,
+  'delete-user': deleteUser,
+  'mark-test-purchase': markTestPurchase,
+  'set-master-price': setMasterPrice,
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

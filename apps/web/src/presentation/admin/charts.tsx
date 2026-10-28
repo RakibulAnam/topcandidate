@@ -94,12 +94,16 @@ export const TimeSeriesChart: React.FC<{
 };
 
 // ─── Vertical bar chart ──────────────────────────────────────────────────
+const shortDateLabel = (l: string) => (/^\d{4}-\d{2}-\d{2}/.test(l) ? l.slice(5, 10) : l);
+
 export const BarChart: React.FC<{
   data: { label: string; value: number }[];
   color?: string;
   height?: number;
   formatValue?: (n: number) => string;
-}> = ({ data, color = 'var(--color-brand-700)', height = 200, formatValue = niceNum }) => {
+  /** Axis label text; defaults to "MM-DD" for YYYY-MM-DD labels, else the label as-is. */
+  formatLabel?: (label: string) => string;
+}> = ({ data, color = 'var(--color-brand-700)', height = 200, formatValue = niceNum, formatLabel = shortDateLabel }) => {
   if (!data.length) return <EmptyChart height={height} />;
   const w = 600, h = height, padL = 40, padB = 24, padT = 10, padR = 8;
   const innerW = w - padL - padR, innerH = h - padB - padT;
@@ -121,7 +125,7 @@ export const BarChart: React.FC<{
             <rect x={bx} y={by} width={bw * 0.7} height={Math.max(bh, 0)} rx="2" fill={color} />
             <title>{`${d.label}: ${formatValue(d.value)}`}</title>
             {(i % labelEvery === 0 || i === data.length - 1) && (
-              <text x={padL + i * bw + bw / 2} y={h - 8} textAnchor="middle" fontSize="9.5" fill={MUTED}>{d.label.slice(5)}</text>
+              <text x={padL + i * bw + bw / 2} y={h - 8} textAnchor="middle" fontSize="9.5" fill={MUTED}>{formatLabel(d.label)}</text>
             )}
           </g>
         );

@@ -5,13 +5,13 @@
 // and a state-driven action panel (only the right actions for the row's
 // current state are offered).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import { ageMin, taka } from './adminApi';
 import {
   Button, Card, DataTable, EmptyState, ErrorState, FilterChip, JsonDiff,
   KeyValue, PageHeader, ReasonModal, SearchInput, Section, Skeleton,
-  StatusPill, TimeCell, useDebounced, withToast, type ButtonProps,
+  StatusPill, TimeCell, toastOk, useDebounced, type ButtonProps,
 } from './ui';
 
 interface PurchaseRow {
@@ -24,6 +24,7 @@ interface PurchaseRow {
   sender_msisdn: string | null;
   status: string;
   credits_granted: number;
+  is_test: boolean;
   created_at: string;
 }
 
@@ -37,25 +38,30 @@ export const PurchasesTab: React.FC<{ api: AdminApi; initialPurchase?: { id?: st
   const debouncedQ = useDebounced(q, 250);
   const [statuses, setStatuses] = useState<Set<Status>>(() => new Set(ALL_STATUSES.filter(s => s !== 'completed') as Status[]));
   const [age, setAge] = useState<'24h' | '7d' | '30d' | 'all'>('30d');
-  const [page, setPage] = useState(0);
+  // Page is keyed to the filters so a filter change lands on page 0 in the same render (no stale-page fetch).
+  const statusKey = Array.from(statuses).join(',');
+  const filterKey = `${debouncedQ}|${age}|${statusKey}`;
+  const [pageState, setPageState] = useState({ key: filterKey, page: 0 });
+  const page = pageState.key === filterKey ? pageState.page : 0;
+  const setPage = (p: number) => setPageState({ key: filterKey, page: p });
   const [data, setData] = useState<PurchasesResp | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id?: string; trxId?: string } | null>(initialPurchase ?? null);
-
-  useEffect(() => { setPage(0); }, [debouncedQ, age, statuses]);
+  const reqId = useRef(0);
+  const noStatus = statuses.size === 0;
 
   const refresh = useCallback(() => {
-    setLoading(true);
+    const id = ++reqId.current;
     setErr(null);
-    api.call<PurchasesResp>('purchases', { query: {
-      q: debouncedQ, age, page,
-      status: Array.from(statuses).join(','),
-    } })
-      .then(setData)
-      .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, [api, debouncedQ, age, page, statuses]);
+    // An empty status filter would make the server fall back to its default statuses.
+    if (!statusKey) { setLoading(false); return; }
+    setLoading(true);
+    api.call<PurchasesResp>('purchases', { query: { q: debouncedQ, age, page, status: statusKey } })
+      .then((r) => { if (id === reqId.current) setData(r); })
+      .catch((e: unknown) => { if (id === reqId.current) setErr(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (id === reqId.current) setLoading(false); });
+  }, [api, debouncedQ, age, page, statusKey]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -67,7 +73,7 @@ export const PurchasesTab: React.FC<{ api: AdminApi; initialPurchase?: { id?: st
   }, [initialPurchase, onClearInitial]);
 
   if (selected) {
-    return <PurchaseDetail api={api} sel={selected} onBack={() => setSelected(null)} onOpenUser={onOpenUser} />;
+    return <PurchaseDetail api={api} sel={selected} onBack={() => { setSelected(null); refresh(); }} onOpenUser={onOpenUser} />;
   }
 
   const toggleStatus = (s: Status) => {
@@ -111,18 +117,20 @@ export const PurchasesTab: React.FC<{ api: AdminApi; initialPurchase?: { id?: st
         </div>
       </div>
 
-      <DataTable<PurchaseRow>
+      {noStatus ? (
+        <Card><EmptyState title="No statuses selected" description="Pick at least one status chip above to list purchases." /></Card>
+      ) : <DataTable<PurchaseRow>
         columns={[
           { key: 'age', header: 'Age', width: 'w-20', render: (r) => <span className="text-charcoal-600">{ageMin(r.created_at)}</span> },
           { key: 'trx', header: 'TrxID', render: (r) => <span className="font-mono text-[12px] break-all">{r.payment_reference}</span> },
-          { key: 'customer', header: 'Customer', render: (r) => <span className="font-mono text-[12px] break-all">{r.email ?? r.user_id.slice(0, 8)}…</span> },
+          { key: 'customer', header: 'Customer', render: (r) => <span className="font-mono text-[12px] break-all">{r.email || `${r.user_id.slice(0, 8)}…`}</span> },
           { key: 'amount', header: 'Amount', width: 'w-32', align: 'right', render: (r) => (
             <div className="whitespace-nowrap">
               {taka(r.amount_taka)}
               {r.observed_amount_taka != null && r.observed_amount_taka !== r.amount_taka && <span className="block text-[11px] text-accent-600">obs {taka(r.observed_amount_taka)}</span>}
             </div>
           ) },
-          { key: 'status', header: 'Status', width: 'w-44', render: (r) => <StatusPill status={r.status} /> },
+          { key: 'status', header: 'Status', width: 'w-44', render: (r) => <span className="inline-flex flex-wrap gap-1"><StatusPill status={r.status} />{r.is_test && <StatusPill status="test" tone="pending" label="test" />}</span> },
         ]}
         rows={data?.rows ?? null}
         loading={loading}
@@ -134,9 +142,9 @@ export const PurchasesTab: React.FC<{ api: AdminApi; initialPurchase?: { id?: st
           title: q ? `No purchases match "${q}"` : 'No purchases yet',
           description: q ? 'Try a different TrxID prefix or email substring, or widen the status filter.' : 'When customers buy credit packs, they\'ll appear here.',
         }}
-      />
+      />}
 
-      {data && <FooterPagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
+      {data && !noStatus && <FooterPagination page={data.page} pageSize={data.pageSize} total={data.total} onChange={setPage} />}
     </div>
   );
 };
@@ -160,7 +168,7 @@ const FooterPagination: React.FC<{ page: number; pageSize: number; total: number
 // ─── purchase detail ────────────────────────────────────────────────────
 
 interface PurchaseDetailResp {
-  purchase: { id: string; user_id: string; payment_reference: string; amount_taka: number; observed_amount_taka: number | null; sender_msisdn: string | null; status: string; credits_granted: number; created_at: string };
+  purchase: { id: string; user_id: string; payment_reference: string; amount_taka: number; observed_amount_taka: number | null; sender_msisdn: string | null; status: string; credits_granted: number; is_test: boolean; created_at: string };
   customer: { id: string; email: string; full_name: string | null; toolkit_credits: number; flagged_at: string | null } | null;
   stateChanges: Array<{ id: string; from_status: string | null; to_status: string; actor: string; reason: string | null; created_at: string }>;
   topups: Array<{ id: string; payment_reference: string; sender_msisdn: string | null; amount_taka: number; created_at: string }>;
@@ -169,7 +177,7 @@ interface PurchaseDetailResp {
   audit: Array<{ id: string; action: string; before_state: unknown; after_state: unknown; reason: string | null; created_at: string }>;
 }
 
-type Action = 'confirm' | 'refund' | 'expire' | 'reopen' | 'grant-override' | 'note';
+type Action = 'confirm' | 'refund' | 'expire' | 'reopen' | 'grant-override' | 'mark-test' | 'unmark-test' | 'note';
 
 const ACTION_META: Record<Action, { title: string; subtitle?: string; toast: string; confirmVariant?: ButtonProps['variant'] }> = {
   'confirm':        { title: 'Confirm purchase', toast: 'Purchase confirmed.', confirmVariant: 'primary' },
@@ -177,6 +185,8 @@ const ACTION_META: Record<Action, { title: string; subtitle?: string; toast: str
   'expire':         { title: 'Force expire', subtitle: 'Marks the row terminal. Use when the customer says "ignore that one, I\'ll resubmit".', toast: 'Purchase expired.', confirmVariant: 'danger' },
   'reopen':         { title: 'Reopen purchase', subtitle: 'Flips back to pending and resets the 24h TTL clock.', toast: 'Purchase reopened.', confirmVariant: 'primary' },
   'grant-override': { title: 'Grant pack anyway', subtitle: 'Grants the full credit pack despite the underpayment / mismatch / expiry.', toast: 'Override granted.', confirmVariant: 'primary' },
+  'mark-test':      { title: 'Mark as test payment', subtitle: 'The payment still works for the user, but is left out of revenue and paying-user numbers.', toast: 'Marked as test payment.' },
+  'unmark-test':    { title: 'Count as real payment', subtitle: 'The payment counts in revenue and paying-user numbers again.', toast: 'Counted as a real payment again.' },
   'note':           { title: 'Add note', subtitle: 'Audit-only — does not change the purchase state.', toast: 'Note added.' },
 };
 
@@ -210,6 +220,7 @@ const PurchaseDetail: React.FC<{ api: AdminApi; sel: { id?: string; trxId?: stri
     if (s === 'msisdn_mismatch_review') out.push('confirm', 'expire');
     if (s === 'completed') out.push('refund');
     if (s === 'expired' || s === 'failed') out.push('reopen', 'grant-override');
+    out.push(data.purchase.is_test ? 'unmark-test' : 'mark-test');
     out.push('note');
     return out;
   }, [data]);
@@ -232,10 +243,12 @@ const PurchaseDetail: React.FC<{ api: AdminApi; sel: { id?: string; trxId?: stri
         promise = api.call('reopen-purchase', { method: 'POST', body: { purchaseId: id, reason } });
       } else if (action === 'grant-override') {
         promise = api.call('grant-override', { method: 'POST', body: { purchaseId: id, reason } });
+      } else if (action === 'mark-test' || action === 'unmark-test') {
+        promise = api.call('mark-test-purchase', { method: 'POST', body: { purchaseId: id, isTest: action === 'mark-test', reason } });
       } else if (action === 'note') {
         promise = api.call('purchase-note', { method: 'POST', body: { purchaseId: id, note: reason } });
       }
-      if (promise) await withToast(promise, { success: meta.toast });
+      if (!promise || !(await toastOk(promise, { success: meta.toast }))) return;
       setAction(null);
       refresh();
     } finally {
@@ -268,7 +281,7 @@ const PurchaseDetail: React.FC<{ api: AdminApi; sel: { id?: string; trxId?: stri
       <Card className="mb-5">
         <div className="flex items-start justify-between flex-wrap gap-5">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap"><StatusPill status={p.status} /><span className="font-mono text-sm text-charcoal-500">{p.payment_reference}</span></div>
+            <div className="flex items-center gap-2 flex-wrap"><StatusPill status={p.status} />{p.is_test && <StatusPill status="test" tone="pending" label="test payment" />}<span className="font-mono text-sm text-charcoal-500">{p.payment_reference}</span></div>
             <h2 className="font-display text-3xl font-semibold text-brand-700 mt-2">{taka(p.amount_taka)}</h2>
             {p.observed_amount_taka != null && p.observed_amount_taka !== p.amount_taka && <div className="text-sm text-accent-700 mt-0.5">Observed: {taka(p.observed_amount_taka)}</div>}
             {data.customer && (

@@ -43,17 +43,25 @@ export class AdminApi {
     }
     if (opts.raw) return res as unknown as T;
     const text = await res.text();
-    const data = text ? (JSON.parse(text) as unknown) : null;
-    if (!res.ok) {
-      const err = (data as { error?: string })?.error ?? `HTTP ${res.status}`;
-      throw new Error(err);
+    let data: unknown = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      if (res.ok) throw new Error(`Bad response from ${action} (HTTP ${res.status}).`);
     }
+    if (!res.ok) throw new Error(errorOf(data, res.status));
     return data as T;
   }
 
   /** Download a file (parser-export). Bypasses JSON parsing. */
   async download(action: string, query?: Record<string, string>): Promise<void> {
     const res = await this.call<Response>(action, { raw: true, query });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let data: unknown = null;
+      try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON error body */ }
+      throw new Error(errorOf(data, res.status));
+    }
     const blob = await res.blob();
     const cd = res.headers.get('Content-Disposition') ?? '';
     const m = cd.match(/filename="([^"]+)"/);
@@ -68,6 +76,11 @@ export class AdminApi {
     URL.revokeObjectURL(url);
   }
 }
+
+const errorOf = (data: unknown, status: number): string => {
+  const e = (data as { error?: unknown } | null)?.error;
+  return typeof e === 'string' && e ? e : `HTTP ${status}`;
+};
 
 /** ৳200 — BDT prefix, no decimals. */
 export const taka = (n: number | null | undefined): string =>

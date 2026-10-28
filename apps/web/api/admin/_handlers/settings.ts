@@ -4,7 +4,7 @@
 // Sensitive env values are NEVER returned — only "present" / "missing".
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAdmin, adminSupabase, recordAuditAction } from '../_lib/adminAuth.js';
+import { requireAdmin, adminSupabase, requireReason, recordAuditAction } from '../_lib/adminAuth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!requireAdmin(req, res)) return;
@@ -67,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       targetId: null,
       before: null,
       after: { expired_count: data },
-      reason: 'manual operator trigger',
+      reason: requireReason(req.body, res, true) || 'manual operator trigger',
     });
     res.status(200).json({ success: true, expiredCount: data });
     return;

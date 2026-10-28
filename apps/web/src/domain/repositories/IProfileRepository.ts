@@ -11,6 +11,10 @@ export interface CreditStatus {
     /** Account existed before migration 034: master resume ৳50 (not ৳99) and
      *  the one-time welcome credit still applies. */
     legacyPricing: boolean;
+    /** What initiate_purchase charges this account for the master resume:
+     *  the operator-set price (profiles.master_price_taka, migration 035) if
+     *  any, else ৳50 (legacyPricing) or ৳99. */
+    masterPriceTaka: number;
     /** Migration 034 is live (its legacy_pricing column exists): the pack is
      *  ৳199. False = still on 033 pricing (pack ৳200, master ৳50 for all). */
     newPricing: boolean;

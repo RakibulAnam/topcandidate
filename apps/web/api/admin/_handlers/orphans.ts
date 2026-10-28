@@ -36,12 +36,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Also surface the current pending rows so the operator can match without
   // a second round-trip.
-  const { data: pending } = await supabase
+  const { data: pending, error: pendingErr } = await supabase
     .from('purchases')
     .select('id, user_id, payment_reference, amount_taka, observed_amount_taka, status, created_at')
     .in('status', ['pending', 'underpaid'])
     .order('created_at', { ascending: true })
     .limit(50);
+  if (pendingErr) {
+    console.error('[admin/orphans] pending query failed:', pendingErr.message);
+    res.status(500).json({ error: `Supabase: ${pendingErr.message}` });
+    return;
+  }
 
   res.status(200).json({ rows: data ?? [], pending: pending ?? [] });
 }

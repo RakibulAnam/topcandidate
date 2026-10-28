@@ -42,6 +42,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     supabase.from('unmatched_inbound_sms').select('id, payment_reference, sender_msisdn, amount_taka, created_at').is('matched_to_purchase_id', null).is('reviewed_at', null).not('payment_reference', 'like', 'PARSE_FAIL_%').order('created_at', { ascending: true }).limit(50),
   ]);
 
+  const firstErr = pending.error || mismatch.error || underpaid.error || expired.error || disputes.error || orphans.error;
+  if (firstErr) {
+    console.error('[admin/action-queue] query failed:', firstErr.message);
+    res.status(500).json({ error: `Action queue query failed: ${firstErr.message}` });
+    return;
+  }
+
   // Look up emails for the user-bearing rows.
   const userIds = new Set<string>();
   for (const r of pending.data ?? []) userIds.add(r.user_id);

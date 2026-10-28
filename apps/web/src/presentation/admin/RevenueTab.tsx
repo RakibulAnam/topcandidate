@@ -74,7 +74,7 @@ export const RevenueTab: React.FC<{ api: AdminApi }> = ({ api }) => {
       <div className="mt-6">
         <Section title="Daily revenue">
           <Card>
-            {data ? (
+            {err ? <p className="text-[12px] text-charcoal-500">Unavailable — see the error above.</p> : data ? (
               <TimeSeriesChart data={data.dailyRevenue.map((d) => ({ day: d.day, value: d.revenue_taka }))} formatValue={taka} />
             ) : <Skeleton className="h-48 w-full" />}
           </Card>
@@ -84,7 +84,7 @@ export const RevenueTab: React.FC<{ api: AdminApi }> = ({ api }) => {
       <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Section title="By status">
           <Card>
-            {data ? (
+            {err ? <p className="text-[12px] text-charcoal-500">Unavailable — see the error above.</p> : data ? (
               <HBarChart
                 data={data.statusBreakdown.map((s) => ({ label: s.status, value: s.count, sub: taka(s.taka) }))}
                 formatValue={(n) => String(n)}
@@ -95,7 +95,7 @@ export const RevenueTab: React.FC<{ api: AdminApi }> = ({ api }) => {
 
         <Section title="Credit liability">
           <Card>
-            {data ? (
+            {err ? <p className="text-[12px] text-charcoal-500">Unavailable — see the error above.</p> : data ? (
               <div className="space-y-3">
                 <div>
                   <div className="text-[10.5px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">Outstanding liability</div>

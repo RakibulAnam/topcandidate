@@ -24,7 +24,7 @@ import { useAuth } from '../../../infrastructure/auth/AuthContext';
 import { useLocale, useT } from '../../i18n/LocaleContext';
 import { track } from '../../../infrastructure/analytics/track';
 import { sessionFlag, setSessionFlag } from './bannerSession';
-import { masterPriceLabel } from '../../pricing';
+import { masterPriceLabel, showMasterAnchor } from '../../pricing';
 import { invalidateMasterPreview, useResumeOfferProfile, useResumeOfferSummary } from './resumeOfferData';
 
 const SEEN_KEY = 'tc.resumeOffer.seen';
@@ -38,11 +38,11 @@ interface Props {
   onGetResume: () => void;
   /** The build refuses this profile (random text): send them to fix it. */
   onEditProfile: () => void;
-  /** Account existed before migration 034: priced ৳50, not ৳99. */
-  legacyPricing: boolean | null;
+  /** Master-resume price for this account (CreditStatus.masterPriceTaka). */
+  masterPrice: number | null;
 }
 
-export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile, legacyPricing }) => {
+export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile, masterPrice }) => {
   const t = useT();
   const { locale } = useLocale();
   const { user } = useAuth();
@@ -110,9 +110,9 @@ export const ResumeOfferPreview: React.FC<Props> = ({ onGetResume, onEditProfile
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
           {!unbuildable && (
           <p className="flex items-baseline gap-2 whitespace-nowrap">
-            <span className="sr-only">{t('resumeOffer.priceLabel', { price: masterPriceLabel(t, legacyPricing) })}</span>
-            <s aria-hidden="true" className="text-[17px] font-semibold text-charcoal-400 decoration-accent-600 decoration-2">{t('resumeOffer.wasPrice')}</s>
-            <span aria-hidden="true" className="font-display text-[34px] font-bold leading-none text-brand-700">{masterPriceLabel(t, legacyPricing)}</span>
+            <span className="sr-only">{showMasterAnchor(masterPrice) ? t('resumeOffer.priceLabel', { price: masterPriceLabel(t, masterPrice) }) : masterPriceLabel(t, masterPrice)}</span>
+            {showMasterAnchor(masterPrice) && <s aria-hidden="true" className="text-[17px] font-semibold text-charcoal-400 decoration-accent-600 decoration-2">{t('resumeOffer.wasPrice')}</s>}
+            <span aria-hidden="true" className="font-display text-[34px] font-bold leading-none text-brand-700">{masterPriceLabel(t, masterPrice)}</span>
           </p>
           )}
           <button

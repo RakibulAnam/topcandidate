@@ -1,7 +1,7 @@
 // Dashboard — business summary (range-filtered) + operational tiles + queue.
 // Everything polls every 30s. The summary re-fetches when the range changes.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import { ageMin, taka } from './adminApi';
 import {
@@ -91,24 +91,30 @@ export const DashboardTab: React.FC<{
   const [queueLoading, setQueueLoading] = useState(true);
   const [queueErr, setQueueErr] = useState<string | null>(null);
 
+  const reqId = useRef(0);
+
   const refresh = useCallback(() => {
+    // Range switches and the 30s poll overlap — only the latest round may write state.
+    const id = ++reqId.current;
+    const live = () => id === reqId.current;
+    const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
     setSummaryErr(null);
     setStatsErr(null);
     setQueueErr(null);
     setQueueLoading(true);
     void api.call<SummaryData>('summary', { query: { range } })
-      .then(setSummary)
-      .catch((e: unknown) => setSummaryErr(e instanceof Error ? e.message : String(e)));
+      .then((r) => { if (live()) setSummary(r); })
+      .catch((e: unknown) => { if (live()) setSummaryErr(msg(e)); });
     void api.call<DashboardStats>('dashboard')
-      .then(setStats)
-      .catch((e: unknown) => setStatsErr(e instanceof Error ? e.message : String(e)));
+      .then((r) => { if (live()) setStats(r); })
+      .catch((e: unknown) => { if (live()) setStatsErr(msg(e)); });
     void api.call<{ items: QueueItem[] }>('action-queue')
-      .then((r) => setQueue(r.items))
-      .catch((e: unknown) => setQueueErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => setQueueLoading(false));
+      .then((r) => { if (live()) setQueue(r.items); })
+      .catch((e: unknown) => { if (live()) setQueueErr(msg(e)); })
+      .finally(() => { if (live()) setQueueLoading(false); });
     void api.call<{ dailyRevenue: { day: string; revenue_taka: number }[] }>('revenue-analytics', { query: { range: 'month' } })
-      .then((r) => setRevTrend(r.dailyRevenue))
-      .catch(() => setRevTrend([]));
+      .then((r) => { if (live()) setRevTrend(r.dailyRevenue); })
+      .catch(() => { if (live()) setRevTrend([]); });
   }, [api, range]);
 
   useEffect(() => {
@@ -224,7 +230,7 @@ const RangeToggle: React.FC<{ value: Range; onChange: (r: Range) => void }> = ({
   </div>
 );
 
-const SummaryCards: React.FC<{ summary: SummaryData | null; error: string | null; range: Range; onRetry: () => void }> = ({ summary, error, range, onRetry }) => {
+const SummaryCards: React.FC<{ summary: SummaryData | null; error: string | null; range: Range; onRetry: () => void }> = ({ summary, error, range: selectedRange, onRetry }) => {
   if (error) return <ErrorState error={error} onRetry={onRetry} />;
   if (!summary) {
     return (
@@ -236,6 +242,8 @@ const SummaryCards: React.FC<{ summary: SummaryData | null; error: string | null
     );
   }
 
+  // Label from the range the numbers were computed for, not the toggle (which may be ahead of the data).
+  const range: Range = summary.range in RANGE_LABEL ? summary.range : selectedRange;
   const periodWord = RANGE_LABEL[range].toLowerCase();
   const failParts = Object.entries(summary.failureBreakdown)
     .filter(([, n]) => n > 0)

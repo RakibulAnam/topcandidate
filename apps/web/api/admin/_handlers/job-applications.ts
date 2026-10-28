@@ -13,6 +13,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
 
 type Range = 'week' | 'month' | 'all';
 
@@ -54,10 +55,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .select('id, user_id, title, company, created_at, job_company:data->targetJob->>company, job_title:data->targetJob->>title, job_description:data->targetJob->>description')
     .neq('title', GENERAL_RESUME_TITLE)
     .order('created_at', { ascending: false })
-    .limit(2000);
+    .order('id');
   if (sinceIso) q = q.gte('created_at', sinceIso);
 
-  const { data, error } = await q;
+  const { data, error } = await fetchAll(q, 2000);
   if (error) {
     console.error('[admin/job-applications] query failed:', error.message);
     res.status(500).json({ error: 'Job applications query failed.' });
@@ -68,14 +69,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Who built them, and whether they have ever paid.
   const userIds = [...new Set(rows.map((r) => r.user_id))];
   // Kit numbers are lifetime ("their 4th kit"), so they're counted over ALL of
-  // each user's kits, not just the ones inside the selected range.
-  const [profilesRes, paidRes, allKitsRes] = userIds.length
+  // each user's kits, not just the ones inside the selected range. Read whole
+  // (small) tables and filter here: an `.in()` of up to 2000 UUIDs would
+  // overflow the GET URL.
+  const wanted = new Set(userIds);
+  const [profilesAll, paidAll, kitsAll] = userIds.length
     ? await Promise.all([
-        supabase.from('profiles').select('id, email, full_name').in('id', userIds),
-        supabase.from('purchases').select('user_id').eq('status', 'completed').in('user_id', userIds),
-        supabase.from('generated_resumes').select('id, user_id, created_at').in('user_id', userIds).neq('title', GENERAL_RESUME_TITLE).order('created_at', { ascending: true }).limit(20000),
+        fetchAll(supabase.from('profiles').select('id, email, full_name').order('id')),
+        fetchAll(supabase.from('purchases').select('user_id').eq('status', 'completed').eq('is_test', false).order('id')),
+        fetchAll(supabase.from('generated_resumes').select('id, user_id, created_at').neq('title', GENERAL_RESUME_TITLE).order('created_at', { ascending: true }).order('id')),
       ])
     : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+  const keep = <R,>(r: { data: R[]; error: { message: string } | null }, uid: (row: R) => string) =>
+    ({ data: r.data.filter((row) => wanted.has(uid(row))), error: r.error });
+  const profilesRes = keep(profilesAll, (r: { id: string }) => r.id);
+  const paidRes = keep(paidAll, (r: { user_id: string }) => r.user_id);
+  const allKitsRes = keep(kitsAll, (r: { user_id: string }) => r.user_id);
   if (profilesRes.error || paidRes.error || allKitsRes.error) {
     console.error('[admin/job-applications] lookup failed:', (profilesRes.error || paidRes.error || allKitsRes.error)?.message);
     res.status(500).json({ error: 'Job applications lookup failed.' });

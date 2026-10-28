@@ -71,6 +71,9 @@ export const en = {
     masterEyebrow: 'Master resume',
     masterPrice: '৳99',
     masterPriceLegacy: '৳50',
+    // Operator-set per-account price (migration 035); {price} is formatted with numberLocale.
+    masterPriceCustom: '৳{price}',
+    numberLocale: 'en-US',
     masterWasPrice: '৳200',
     masterName: 'Your master resume',
     masterPerUnit: 'One-time · built from your profile',

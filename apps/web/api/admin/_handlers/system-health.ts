@@ -7,6 +7,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
 
 const HOUR_MS = 3600_000;
 
@@ -25,10 +26,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          browserRes, ipSignalRes, freeCallsRes, payersRes] =
     await Promise.all([
       // AI calls in last 24h (full telemetry for rollups).
-      supabase.from('ai_call_log').select('provider, cost_usd, status, latency_ms').gte('created_at', iso24h).limit(50000),
+      fetchAll(supabase.from('ai_call_log').select('provider, cost_usd, status, latency_ms').gte('created_at', iso24h).order('id')),
       // Cost only, 7d / 30d.
-      supabase.from('ai_call_log').select('cost_usd').gte('created_at', iso7d).limit(100000),
-      supabase.from('ai_call_log').select('cost_usd').gte('created_at', iso30d).limit(200000),
+      fetchAll(supabase.from('ai_call_log').select('cost_usd').gte('created_at', iso7d).order('id')),
+      fetchAll(supabase.from('ai_call_log').select('cost_usd').gte('created_at', iso30d).order('id')),
       // Payments pipeline.
       supabase.from('purchases').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from('purchases').select('created_at').eq('status', 'pending').order('created_at', { ascending: true }).limit(1).maybeSingle(),
@@ -38,20 +39,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase.from('purchase_state_changes').select('id', { count: 'exact', head: true }).eq('to_status', 'refunded').gte('created_at', iso7d),
       // Admin login attempts, 24h (migration 026). One fetch, rolled up below —
       // cheaper than five counts, and the table is pruned to 90 days.
-      supabase.from('admin_login_attempts').select('ip, outcome, created_at').gte('created_at', iso24h).order('created_at', { ascending: false }).limit(5000),
+      fetchAll(supabase.from('admin_login_attempts').select('ip, outcome, created_at').gte('created_at', iso24h).order('created_at', { ascending: false }).order('id')),
       // Abuse signals. One browser (anon_id, localStorage) seen on several
       // accounts, and one network origin (migration 027) seen on several
       // accounts — the two cheap tells for someone farming free generations
       // with throwaway emails.
-      supabase.from('analytics_events').select('anon_id, user_id').not('user_id', 'is', null).not('anon_id', 'is', null).limit(50000),
-      supabase.from('account_ip_signals').select('ip_hash, user_id').limit(50000),
+      fetchAll(supabase.from('analytics_events').select('anon_id, user_id').not('user_id', 'is', null).not('anon_id', 'is', null).order('id')),
+      fetchAll(supabase.from('account_ip_signals').select('ip_hash, user_id').order('user_id').order('ip_hash')),
       // Free-tier spend by accounts that have never completed a purchase — the
       // number that decides whether any of this is worth acting on. Since
       // migration 034 the only free generation is the dashboard resume
       // preview (master_preview); optimize + toolkit stay listed for legacy
       // welcome-credit kits, optimize_general for pre-032 history.
-      supabase.from('ai_call_log').select('user_id, cost_usd').in('kind', ['optimize', 'toolkit', 'toolkit_item', 'optimize_general', 'master_preview', 'normalize', 'extract_resume']).gte('created_at', iso30d).limit(50000),
-      supabase.from('purchases').select('user_id').eq('status', 'completed').limit(50000),
+      fetchAll(supabase.from('ai_call_log').select('user_id, cost_usd').in('kind', ['optimize', 'toolkit', 'toolkit_item', 'optimize_general', 'master_preview', 'normalize', 'extract_resume']).gte('created_at', iso30d).order('id')),
+      fetchAll(supabase.from('purchases').select('user_id').eq('status', 'completed').eq('is_test', false).order('id')),
     ]);
 
   // Tolerate per-query errors (empty/missing tables) — log and treat as zero.
@@ -107,7 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const oldestPendingAt = oldestPendingRes.data?.created_at ?? null;
   const oldestPendingMinutes = oldestPendingAt
     ? Math.max(0, Math.round((now - new Date(oldestPendingAt).getTime()) / 60000))
-    : 0;
+    : null;
 
   // --- Admin access (24h) ---
   // `locked` mirrors the ladder's first rung: 5+ failures from one IP inside the

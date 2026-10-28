@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { AdminApi } from './adminApi';
 import {
-  Button, DataTable, FilterChip, PageHeader, ReasonModal, StatusPill, TimeCell, withToast,
+  Button, DataTable, FilterChip, PageHeader, ReasonModal, StatusPill, TimeCell, toastOk,
 } from './ui';
 
 interface DisputeRow { id: string; user_id: string; payment_reference: string; notes: string | null; status: string; operator_note: string | null; created_at: string; resolved_at: string | null }
@@ -31,8 +31,9 @@ export const DisputesTab: React.FC<{ api: AdminApi; onOpenPurchase: (trxId: stri
     if (!acting) return;
     setBusy(true);
     try {
-      await withToast(api.call('resolve-dispute', { method: 'POST', body: { disputeId: acting.row.id, resolution: acting.resolution, operatorNote: note } }),
+      const ok = await toastOk(api.call('resolve-dispute', { method: 'POST', body: { disputeId: acting.row.id, resolution: acting.resolution, operatorNote: note } }),
         { success: acting.resolution === 'resolved' ? 'Dispute resolved.' : 'Dispute rejected.' });
+      if (!ok) return;
       setActing(null);
       refresh();
     } finally {
