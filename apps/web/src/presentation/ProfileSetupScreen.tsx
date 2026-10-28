@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../infrastructure/auth/AuthContext';
 import { profileRepository } from '../infrastructure/config/dependencies';
+import { prepareMasterPreview } from './components/dashboard/resumeOfferData';
 import { needsPolish, polishInBackground } from './components/profile/polish';
 import { ResumeService } from '../application/services/ResumeService';
 import { toast } from 'sonner';
@@ -177,6 +178,9 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
     // user who has them. We do not know what is stored, so we must not write.
     const [prefillFailed, setPrefillFailed] = useState(false);
     const [isGeneratingResume, setIsGeneratingResume] = useState(false);
+    // Writing the dashboard resume preview's summary before the user lands
+    // there, so the dashboard opens with it instead of a loader.
+    const [isPreparingPreview, setIsPreparingPreview] = useState(false);
     const [generationFailed, setGenerationFailed] = useState(false);
     const [generationError, setGenerationError] = useState<string | null>(null);
     // Shown at finish when the user skipped BOTH education and experience — no
@@ -814,6 +818,24 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
                     ? await profileRepository.claimWelcomeCredit().catch(() => null)
                     : null;
                 toast.success(granted !== null ? t('profileSetup.welcomeCreditToast') : t('profileSetup.profileDoneToast'));
+                // Locked: the dashboard leads with their resume preview. Write
+                // its summary now, behind a short "preparing" screen, so it is
+                // already there when they arrive. Capped: a slow build finishes
+                // on the dashboard instead of holding them here.
+                // Not for an account that already has a General Resume (a
+                // pre-032 one): the dashboard shows it no preview, so the
+                // build would be wasted. Unknown (no service / read failed)
+                // skips too — the dashboard prepares it on arrival anyway.
+                const hasMaster = resumeService && user
+                    ? await resumeService.hasGeneralResume(user.id).catch(() => true)
+                    : true;
+                if (user && status && !status.masterUnlocked && !hasMaster) {
+                    setIsPreparingPreview(true);
+                    await Promise.race([
+                        prepareMasterPreview(user.id),
+                        new Promise((r) => setTimeout(r, 60_000)),
+                    ]);
+                }
                 onComplete();
             } catch (error) {
                 console.error('Error completing profile:', error);
@@ -843,6 +865,31 @@ export const ProfileSetupScreen: React.FC<Props> = ({ onComplete, resumeService 
         return (
             <div className="min-h-screen bg-charcoal-50 flex items-center justify-center">
                 <Loader2 className="animate-spin text-brand-700" size={32} />
+            </div>
+        );
+    }
+
+    // -------------------- Preparing the dashboard resume preview --------------------
+    if (isPreparingPreview) {
+        return (
+            <div className="min-h-screen bg-charcoal-50 flex items-center justify-center px-4" role="status" aria-live="polite">
+                <div className="max-w-md text-center">
+                    <div className="relative mx-auto w-20 h-20 mb-8">
+                        <div className="absolute inset-0 border-4 border-charcoal-200 border-t-brand-700 rounded-full animate-spin" />
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <Sparkles size={24} className="text-accent-500 animate-pulse" />
+                        </div>
+                    </div>
+                    <p className="text-[11px] uppercase tracking-[0.22em] text-accent-600 font-semibold mb-3">
+                        {t('profileSetup.preparingEyebrow')}
+                    </p>
+                    <h2 className="font-display text-3xl font-semibold text-brand-700 leading-tight mb-3">
+                        {t('profileSetup.preparingTitle')}
+                    </h2>
+                    <p className="text-brand-500 leading-relaxed">
+                        {t('profileSetup.preparingBody')}
+                    </p>
+                </div>
             </div>
         );
     }

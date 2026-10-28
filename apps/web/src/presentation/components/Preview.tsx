@@ -6,6 +6,7 @@
 // structurally ATS-safe regardless of which template the user picks.
 
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { warmResumeExporters } from '../../infrastructure/config/dependencies';
 import { toast } from 'sonner';
 import { ResumeData, ToolkitItem, awardDetailText } from '../../domain/entities/Resume';
 import {
@@ -272,6 +273,8 @@ export const Preview: React.FC<PreviewProps> = ({
   const t = useT();
   const [isExporting, setIsExporting] = useState(false);
   const [activeTab, setActiveTab] = useState<PreviewTab>('resume');
+  // Download buttons are on this screen: fetch the PDF/Word code now.
+  useEffect(() => { warmResumeExporters(); }, []);
   const resumeKind = isGeneralResume ? 'master' : 'tailored';
   // One event per tab the user actually looks at (the first, 'resume', marks
   // the Preview being opened at all).

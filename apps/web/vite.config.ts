@@ -28,6 +28,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // Vite's dynamic-import helper (and Rollup's CJS interop) must not
+          // land inside a lazy vendor group: whatever chunk holds them is
+          // pulled into the entry. It sat in vendor-export once, which put the
+          // whole PDF/Word library (~265 KB gz) on every landing-page load.
+          if (id.includes('vite/preload-helper') || id.includes('commonjsHelpers')) return 'runtime';
           if (id.includes('node_modules')) {
             if (id.includes('react') || id.includes('scheduler')) return 'vendor-react';
             if (id.includes('@supabase')) return 'vendor-supabase';
@@ -37,7 +42,12 @@ export default defineConfig({
             // NOTE: don't include `disposable-email-domains` here — it's
             // dynamically imported by emailValidator.ts and we want it to stay
             // a lazy chunk (2.3 MB of JSON loaded only on signup).
-            if (id.includes('libphonenumber-js') || id.includes('validator')) return 'vendor-forms';
+            // Separate groups: the landing page's login form needs the tiny
+            // email check, while the ~40 KB phone library is only used by
+            // signed-in screens (lazy). One shared group made every visitor
+            // download the phone library.
+            if (id.includes('libphonenumber-js')) return 'vendor-phone';
+            if (id.includes('validator')) return 'vendor-validator';
             if (id.includes('fuse.js')) return 'vendor-search';
           }
         },

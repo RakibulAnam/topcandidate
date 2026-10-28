@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase, initialAuthParams } from '../supabase/client';
+import { supabase, initialAuthParams, supabaseStorageKey } from '../supabase/client';
 import { resetOpenPurchase } from '../api/openPurchaseStore';
 import { track, getFirstTouch } from '../analytics/track';
 
@@ -52,6 +52,11 @@ interface AuthContextType {
     loading: boolean;
     /** The auth provider for the current session — 'email', 'google', … (null when signed out). */
     provider: string | null;
+    /** Google sign-in came back but the session could not be established:
+     *  'network' = the connection failed even after retries; 'error' = any
+     *  other failure (expired/used code, sign-in started in another browser).
+     *  The UI says so instead of silently showing the landing page. */
+    signInFailed: 'network' | 'error' | null;
     signIn: (email: string, password: string) => Promise<void>;
     signUp: (input: AuthSignUpInput) => Promise<SignUpResult>;
     /** Start the Google OAuth redirect flow. Rejects with 'already_signed_in' when a user is already signed in. */
@@ -83,6 +88,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return true; // Fallback to safe default
     });
 
+    const [signInFailed, setSignInFailed] = useState<'network' | 'error' | null>(null);
+    // True once init() below has finished (callback consumed + session read).
+    const initDone = useRef(false);
+
     useEffect(() => {
         let cancelled = false;
 
@@ -97,9 +106,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (initialAuthParams?.kind === 'code') {
                     // OAuth (PKCE): trade the authorization code for a session.
                     // The code_verifier is in localStorage from signInWithOAuth.
-                    const { error } = await supabase.auth.exchangeCodeForSession(initialAuthParams.code);
+                    //
+                    // Retried ONLY on a network failure (AuthRetryableFetchError
+                    // — the request never got a response), up to 3 attempts.
+                    // auth-js deletes the stored code_verifier on ANY failure,
+                    // so it is saved first and put back before each retry;
+                    // without that, attempt 2 always failed with "verifier
+                    // missing". A server-side rejection (expired / used code)
+                    // is never retried.
+                    const verifierKey = `${supabaseStorageKey}-code-verifier`;
+                    let savedVerifier: string | null = null;
+                    try { savedVerifier = localStorage.getItem(verifierKey); } catch { /* storage blocked */ }
+                    const code = initialAuthParams.code;
+                    let error: { message: string; name?: string } | null = null;
+                    let networkFailure = false;
+                    const exchange = async () => {
+                        for (let attempt = 0; attempt < 3; attempt++) {
+                            if (attempt > 0 && savedVerifier) {
+                                try { localStorage.setItem(verifierKey, savedVerifier); } catch { /* storage blocked */ }
+                            }
+                            try {
+                                ({ error } = await supabase.auth.exchangeCodeForSession(code));
+                            } catch (thrown) {
+                                error = { message: thrown instanceof Error ? thrown.message : String(thrown), name: 'AuthRetryableFetchError' };
+                            }
+                            networkFailure = error?.name === 'AuthRetryableFetchError';
+                            if (!networkFailure || !savedVerifier || cancelled) break;
+                            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+                        }
+                    };
+                    // Ceiling: auth requests have no per-request time limit
+                    // (see client.ts), so a connection that stalls outright
+                    // would leave the spinner up forever. After 90s, stop
+                    // waiting: say the connection was too slow and end
+                    // `loading`. If the exchange does finish later, SIGNED_IN
+                    // still reaches the listener and routes them in. (Not
+                    // reading getSession here: it queues behind the stalled
+                    // exchange on auth-js's lock.)
+                    const outcome = await Promise.race([
+                        exchange().then(() => 'done' as const),
+                        new Promise<'stalled'>((r) => setTimeout(() => r('stalled'), 90_000)),
+                    ]);
+                    if (outcome === 'stalled') {
+                        console.warn('[auth] code exchange still pending after 90s');
+                        initDone.current = true;
+                        if (!cancelled) {
+                            if (!initialAuthParams.recovery) setSignInFailed('network');
+                            setLoading(false);
+                        }
+                        return;
+                    }
                     if (error) {
-                        console.warn('[auth] code exchange failed:', error.message);
+                        console.warn('[auth] code exchange failed:', error.name, error.message);
+                        if (!cancelled && !initialAuthParams.recovery) setSignInFailed(networkFailure ? 'network' : 'error');
                     } else if (!initialAuthParams.recovery) {
                         // Recovery codes also arrive as ?code= — only the genuine
                         // Google sign-in should log a signin_completed event.
@@ -130,6 +189,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             } catch (err) {
                 console.warn('Auth initialization error:', err);
             } finally {
+                initDone.current = true;
                 if (!cancelled) setLoading(false);
             }
         };
@@ -165,7 +225,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return newSession;
             });
 
-            setLoading(false);
+            // Not while init() is still consuming a sign-in callback: Supabase
+            // reports "no session" (INITIAL_SESSION) before the code exchange
+            // finishes, and ending `loading` then rendered the landing page
+            // in the middle of a Google sign-in — on a slow network, for long
+            // enough to look like being sent back. A real session ends it.
+            if (initDone.current || newSession) setLoading(false);
         });
 
         return () => { cancelled = true; subscription.unsubscribe(); };
@@ -262,6 +327,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
             localStorage.removeItem('resume_draft');
             localStorage.removeItem('topcandidate.pendingPurchase');
+            // The dashboard resume preview's remembered summary
+            // (presentation/components/dashboard/resumeOfferData.ts).
+            Object.keys(localStorage)
+                .filter((k) => k.startsWith('tc.resumeOffer.summary.'))
+                .forEach((k) => localStorage.removeItem(k));
             window.dispatchEvent(new Event('topcandidate:pending-purchase-changed'));
         } catch { /* ignore — quota or private mode */ }
         // The open-purchase cache is a MODULE-level store, so it outlives the
@@ -275,7 +345,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const provider = (user?.app_metadata?.provider as string | undefined) ?? null;
 
     return (
-        <AuthContext.Provider value={{ user, session, loading, provider, signIn, signUp, signInWithGoogle, requestPasswordReset, updatePassword, signOut }}>
+        <AuthContext.Provider value={{ user, session, loading, provider, signInFailed, signIn, signUp, signInWithGoogle, requestPasswordReset, updatePassword, signOut }}>
             {children}
         </AuthContext.Provider>
     );

@@ -26,7 +26,34 @@ const key = supabaseAnonKey || 'placeholder';
 //    could read it → no session → user bounced to the landing page.
 //  - persistSession / autoRefreshToken: keep the session in localStorage and
 //    refresh it transparently.
+// Data requests (/rest/v1/) get a time limit. On some networks here a request
+// to supabase.co can stall without ever failing; with no limit the app sits
+// on a spinner forever. A timed-out request rejects like any network error,
+// so callers' fallbacks run. Realtime uses a WebSocket, not fetch.
+//
+// Auth requests (/auth/v1/) are deliberately NOT limited: a sign-in code
+// exchange or token refresh that reached the server but is slow to answer has
+// already used the code / rotated the refresh token, so aborting it client-side
+// would turn a slow success into a failed sign-in — or, for a refresh, a forced
+// logout when the old token is later rejected as already used.
+const REQUEST_TIMEOUT_MS = 30_000;
+const fetchWithTimeout: typeof fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes('/auth/v1/')) return fetch(input, init);
+    const timeout = AbortSignal.timeout?.(REQUEST_TIMEOUT_MS);
+    if (!timeout) return fetch(input, init);
+    const signal = init?.signal && 'any' in AbortSignal
+        ? (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any([init.signal, timeout])
+        : init?.signal ?? timeout;
+    return fetch(input, { ...init, signal });
+};
+
+// auth-js's default storage key (`sb-<project-ref>-auth-token`), named here so
+// AuthContext can protect the PKCE code verifier stored beside it.
+export const supabaseStorageKey = `sb-${new URL(url).hostname.split('.')[0]}-auth-token`;
+
 export const supabase = createClient(url, key, {
+    global: { fetch: fetchWithTimeout },
     auth: {
         flowType: 'pkce',
         detectSessionInUrl: false,
