@@ -59,10 +59,13 @@
 // TWO PACKAGES (migration 033): 'five-pack' (5 credits, ৳199 since 034) and
 // 'master-resume' (the master resume alone, ৳99 since migration 034, shown
 // against a struck-through ৳200; the pack is shown against ৳500). While
-// `masterOffer` is set (never bought, no master resume) every open shows a
-// plan picker with both, preselected by the opener — except the dashboard
-// resume preview, whose click already chose the ৳99 resume. Every price,
-// label and confirmation line is derived from the package.
+// `masterOffer` is set (never bought, no master resume) EVERY open — the
+// dashboard resume preview included (ADR-0011) — shows the plan chooser with
+// both, preselected by the opener (`initialPackage`). The pack is the card
+// marked "Best value": it includes the master resume plus a full kit for 5
+// jobs. On desktop the chooser replaces the price hero in the left panel
+// (left = what you buy, right = how you pay); on a phone it heads the sheet.
+// Every price, label and confirmation line is derived from the package.
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -286,9 +289,10 @@ export const PurchaseModal: React.FC<Props> = ({
   const priceTaka = legacyAmount ?? packagePriceTaka(pkg, masterPrice, newPricing);
   const masterPriceText = masterPriceLabel(t, masterPrice);
   const packPrice = packPriceLabel(t, newPricing);
-  // Both packages are offered whenever the master resume is for sale, except
-  // from the dashboard resume preview: that tap was already the choice.
-  const pickerAllowed = masterOffer && source !== 'dashboard_resume_preview';
+  // Both packages are offered whenever the master resume is for sale, from
+  // every surface (ADR-0011). Without the offer only the pack can be bought
+  // (an unlocked account can't buy the master resume again).
+  const pickerAllowed = masterOffer;
 
   // Reopened while still holding a purchase the server no longer counts as
   // open: if that row really is over (expired / voided / refunded), the old
@@ -894,54 +898,114 @@ export const PurchaseModal: React.FC<Props> = ({
     ? null
     : isMasterPkg ? (showMasterAnchor(masterPrice) ? t('purchaseModal.masterWasPrice') : null) : t('purchaseModal.packWasPrice');
 
-  // ৳199 pack vs ৳99 master resume. Two radio cards above the payment steps;
-  // switching re-prices the whole sheet in place. Hidden once a TrxID is on
-  // record (e.g. back on the form after "check and try again"): that
-  // purchase's package is fixed server-side, so switching here would only make
-  // the copy disagree with it.
-  const planPicker = pickerAllowed && !trackedTxn && !trackedPkg && !inFlightPkg && (
-    <section className="mb-6">
-      <StepLabel n={1} label={t('purchaseModal.planPickerLabel')} />
-      <div className="mt-3.5 grid grid-cols-2 gap-2" role="radiogroup" aria-label={t('purchaseModal.planPickerLabel')}>
-        {([
-          { id: 'five-pack', title: t('purchaseModal.planPackTitle'), sub: t('purchaseModal.planPackSub'), was: t('purchaseModal.packWasPrice'), price: packPrice },
-          { id: 'master-resume', title: t('purchaseModal.planMasterTitle'), sub: t('purchaseModal.planMasterSub'), was: showMasterAnchor(masterPrice) ? t('purchaseModal.masterWasPrice') : null, price: masterPriceText },
-        ] as const).map((o) => {
-          const on = pkg === o.id;
-          return (
-            <button
-              key={o.id}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              disabled={busy}
-              onClick={() => { if (!on) { track('purchase_plan_switched', { to: o.id, source }); setPkgChoice(o.id); } }}
-              className="flex flex-col rounded-2xl border-2 px-3 pb-3 pt-3.5 text-left transition-colors disabled:opacity-60"
-              style={{ borderColor: on ? BKASH : '#EAE6DA', backgroundColor: on ? `${BKASH}0A` : '#fff' }}
+  // ৳199 pack vs ৳99 master resume. Switching re-prices the whole sheet in
+  // place. Hidden once a TrxID is on record (e.g. back on the form after
+  // "check and try again"): that purchase's package is fixed server-side, so
+  // switching here would only make the copy disagree with it.
+  const showPicker = pickerAllowed && !trackedTxn && !trackedPkg && !inFlightPkg;
+  // What the pack costs on top of the resume alone — the honest case for it.
+  const packExtraTaka = packPriceTaka(newPricing) - masterPriceTaka(masterPrice);
+  const choosePlan = (id: PackageId) => {
+    if (pkg === id) return;
+    track('purchase_plan_switched', { to: id, source });
+    setPkgChoice(id);
+  };
+  // Rendered twice (desktop left panel / phone sheet head, one of them
+  // display:none), so each copy gets its own radio-group name.
+  const renderPlanChooser = (instance: 'desk' | 'mob') => {
+    const packOn = pkg === 'five-pack';
+    const card = (on: boolean) =>
+      'relative block cursor-pointer rounded-2xl border-2 text-left transition-colors motion-reduce:transition-none '
+      + 'has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 '
+      + 'has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-[#E2136E]/25 '
+      + (on ? '' : 'hover:border-[#CFCBBC]');
+    const cardStyle = (on: boolean): React.CSSProperties => ({
+      borderColor: on ? BKASH : '#EAE6DA',
+      backgroundColor: on ? '#FFF7FA' : '#fff',
+    });
+    const dot = (on: boolean) => (
+      <span
+        className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border-2"
+        style={{ borderColor: on ? BKASH : '#CFCBBC' }}
+        aria-hidden
+      >
+        {on && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: BKASH }} />}
+      </span>
+    );
+    return (
+      <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
+        <legend className="font-display text-[19px] font-semibold leading-tight tracking-tight text-[#0F1B2D]">
+          {t('purchaseModal.chooserTitle')}
+        </legend>
+
+        <div className="mt-6 space-y-3">
+          {/* The pack — the one this sheet wants you to pick. */}
+          <label className={`${card(packOn)} px-4 pb-4 pt-5`} style={cardStyle(packOn)}>
+            <input
+              type="radio"
+              name={`pm-plan-${instance}`}
+              value="five-pack"
+              checked={packOn}
+              onChange={() => choosePlan('five-pack')}
+              className="sr-only"
+            />
+            <span
+              className="absolute -top-3 left-4 rounded-full px-2.5 py-1 text-[11.5px] font-bold leading-none text-white"
+              style={{ backgroundColor: BKASH }}
             >
-              <span className="flex items-start justify-between gap-2">
-                <span className="text-[13px] font-bold leading-snug text-[#0F1B2D]">{o.title}</span>
-                <span
-                  className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2"
-                  style={{ borderColor: on ? BKASH : '#CFCBBC' }}
-                  aria-hidden
-                >
-                  {on && <span className="h-2 w-2 rounded-full" style={{ backgroundColor: BKASH }} />}
-                </span>
+              {t('purchaseModal.bestValue')}
+            </span>
+            <span className="flex items-start gap-3">
+              {dot(packOn)}
+              <span className="min-w-0 flex-1 text-[15px] font-bold leading-snug text-[#0F1B2D]">
+                {t('purchaseModal.planPackTitle')}
               </span>
-              <span className="mt-0.5 text-[11.5px] leading-snug text-[#6B6759]">{o.sub}</span>
-              <span className="mt-1.5 flex items-baseline gap-1.5">
-                {o.was && <s className="text-[13px] font-semibold text-[#9F998A]">{o.was}</s>}
-                <span className="font-display text-[22px] font-bold leading-none text-[#0F1B2D]">{o.price}</span>
+              <span className="shrink-0 text-right leading-none">
+                <s className="block text-[12.5px] font-semibold text-[#9F998A]">{t('purchaseModal.packWasPrice')}</s>
+                <span className="mt-1 block font-display text-[30px] font-semibold tracking-tight text-[#0F1B2D]">{packPrice}</span>
               </span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-  // The plan picker, when shown, is step 1 and pushes the payment steps down.
-  const stepOffset = planPicker ? 1 : 0;
+            </span>
+            <ul className="mt-3 space-y-1.5 pl-[30px]">
+              {[t('purchaseModal.planPackIncludesMaster'), t('purchaseModal.planPackIncludesKits')].map((line) => (
+                <li key={line} className="flex items-start gap-2 text-[12.5px] leading-snug text-[#3D3A33]">
+                  <Check size={13} strokeWidth={3} className="mt-[3px] shrink-0 text-emerald-600" />
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+            {packExtraTaka > 0 && (
+              <span className="mt-3 block pl-[30px] text-[12.5px] font-semibold text-emerald-700">
+                {t('purchaseModal.planPackExtra', { amount: `৳${packExtraTaka.toLocaleString(t('purchaseModal.numberLocale'))}` })}
+              </span>
+            )}
+          </label>
+
+          {/* The master resume on its own. */}
+          <label className={`${card(!packOn)} px-4 py-3.5`} style={cardStyle(!packOn)}>
+            <input
+              type="radio"
+              name={`pm-plan-${instance}`}
+              value="master-resume"
+              checked={!packOn}
+              onChange={() => choosePlan('master-resume')}
+              className="sr-only"
+            />
+            <span className="flex items-start gap-3">
+              {dot(!packOn)}
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-bold leading-snug text-[#0F1B2D]">{t('purchaseModal.planMasterTitle')}</span>
+                <span className="mt-0.5 block text-[12px] leading-snug text-[#6B6759]">{t('purchaseModal.planMasterSub')}</span>
+              </span>
+              <span className="flex shrink-0 items-baseline gap-1.5 leading-none">
+                {showMasterAnchor(masterPrice) && <s className="text-[12.5px] font-semibold text-[#9F998A]">{t('purchaseModal.masterWasPrice')}</s>}
+                <span className="font-display text-[22px] font-semibold tracking-tight text-[#0F1B2D]">{masterPriceText}</span>
+              </span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+    );
+  };
   const pkgName = isMasterPkg ? t('purchaseModal.masterName') : t('purchaseModal.packName');
   const pkgPerUnit = isMasterPkg ? t('purchaseModal.masterPerUnit') : t('purchaseModal.packPerUnit');
   const trustLine = isMasterPkg ? t('purchaseModal.masterTrustLine') : t('purchaseModal.trustLine');
@@ -1343,7 +1407,9 @@ export const PurchaseModal: React.FC<Props> = ({
                 <X size={18} />
               </button>
             </div>
-            {/* price disclosure */}
+            {/* price disclosure — the chooser shows the prices instead when it's up */}
+            {showPicker ? <div className="pb-2" /> : (
+            <>
             <button
               type="button"
               onClick={() => setFeaturesOpen((v) => !v)}
@@ -1384,6 +1450,8 @@ export const PurchaseModal: React.FC<Props> = ({
                 ))}
               </ul>
             </div>
+            </>
+            )}
           </div>
 
           {/* Desktop hero panel */}
@@ -1401,6 +1469,11 @@ export const PurchaseModal: React.FC<Props> = ({
               </span>
             </div>
 
+            {showPicker ? (
+              // Left = what you buy: the plan chooser replaces the price hero.
+              <div className="mt-10">{renderPlanChooser('desk')}</div>
+            ) : (
+            <>
             {/* Hero — price + what */}
             <div className="mt-10">
               <div className="text-[10.5px] uppercase tracking-[0.22em] text-[#6B6759] font-bold">
@@ -1433,6 +1506,8 @@ export const PurchaseModal: React.FC<Props> = ({
                 </li>
               ))}
             </ul>
+            </>
+            )}
 
             {/* Trust line at the bottom of the panel */}
             <div className="mt-auto pt-6 flex items-start gap-2 text-[11.5px] text-[#6B6759] leading-relaxed">
@@ -1475,11 +1550,12 @@ export const PurchaseModal: React.FC<Props> = ({
           <>
           {/* Scrollable middle */}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-2 md:px-9 md:pt-0">
-            {planPicker}
+            {/* Phone: the plan chooser heads the sheet (desktop: left panel). */}
+            {showPicker && <div className="mb-7 mt-3 md:hidden">{renderPlanChooser('mob')}</div>}
 
             {/* Step 1 — Send money */}
             <section>
-              <StepLabel n={1 + stepOffset} label={t('purchaseModal.step1Label')} />
+              <StepLabel n={1} label={t('purchaseModal.step1Label')} />
               <div
                 className="mt-2.5 flex flex-col gap-2.5 rounded-2xl border-2 bg-white px-4 py-3.5 sm:flex-row sm:items-center sm:gap-3"
                 style={{ borderColor: '#EAE6DA' }}
@@ -1540,7 +1616,7 @@ export const PurchaseModal: React.FC<Props> = ({
                 and the hint's #6B6759 — because #10B981 and the old #9F998A were
                 2.5:1 and 2.8:1 on white, too faint for 11px digits. */}
             <section className="mt-6">
-              <StepLabel n={2 + stepOffset} label={t('purchaseModal.step2Label')} />
+              <StepLabel n={2} label={t('purchaseModal.step2Label')} />
               {/* Where the TrxID is — a picture beats "10-character code" for a
                   customer looking at an SMS full of numbers. Tight crops of a
                   real SMS (highlighted) and the app receipt (circled). */}

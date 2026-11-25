@@ -1,7 +1,7 @@
 # ADR-0009: One resume-preview offer at ৳99, no welcome credit for new accounts
 
 - **Date:** 2026-10-27
-- **Status:** Accepted. Amends ADR-0005 (retires the welcome credit) and ADR-0006 (price and surfaces).
+- **Status:** Accepted. Amends ADR-0005 (retires the welcome credit) and ADR-0006 (price and surfaces). §5's resume-preview exception reversed by ADR-0011.
 
 ## Context
 

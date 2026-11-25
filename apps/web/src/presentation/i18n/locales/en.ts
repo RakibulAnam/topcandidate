@@ -98,9 +98,14 @@ export const en = {
     packPriceOld: '৳200',
     packWasPrice: '৳500',
     packPerUnit: 'About ৳40 per generation',
-    planPickerLabel: 'Choose',
+    // Plan chooser (ADR-0011): both plans on every open, the pack marked best value.
+    chooserTitle: 'Choose your plan',
+    bestValue: 'Best value',
     planPackTitle: '5 job kits + master resume',
-    planPackSub: 'About ৳40 a kit · master resume free',
+    planPackIncludesMaster: 'Your master resume is included',
+    planPackIncludesKits: 'A full kit for 5 jobs: tailored resume, cover letter, outreach email, LinkedIn note and interview prep',
+    // {amount} = pack price minus this account's master-resume price, e.g. ৳100.
+    planPackExtra: 'Only {amount} more than the master resume alone',
     planMasterTitle: 'Master resume only',
     planMasterSub: 'For jobs with no job post',
     packDetail: 'Includes a tailored resume + full toolkit (cover letter, outreach, LinkedIn note, interview Q&A) for each.',
