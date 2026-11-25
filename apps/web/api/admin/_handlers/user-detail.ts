@@ -7,6 +7,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { summarizePurchases } from '../_lib/purchaseSummary.js';
 
 const toList = (v: unknown): string[] => {
   if (Array.isArray(v)) return v.map(String).map((s) => s.trim()).filter(Boolean);
@@ -38,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [profile, purchases, resumes, aiCalls, notes, audit, funnel, events, experiences, educations, skills, projects] = await Promise.all([
     supabase.from('profiles').select('id, email, full_name, phone, location, linkedin, github, website, user_type, toolkit_credits, flagged_at, master_resume_unlocked_at, legacy_pricing, master_price_taka, created_at').eq('id', id).maybeSingle(),
     supabase.from('purchases').select('id, payment_reference, amount_taka, observed_amount_taka, status, credits_granted, is_test, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
-    supabase.from('generated_resumes').select('id, title, company, job_title:data->targetJob->>title, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(20),
+    supabase.from('generated_resumes').select('id, title, company, generation_type, job_title:data->targetJob->>title, created_at, updated_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
     supabase.from('ai_call_log').select('id', { count: 'exact', head: true }).eq('user_id', id).gte('created_at', since30d),
     supabase.from('profile_notes').select('id, note, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
     supabase.from('admin_audit_log').select('id, action, target_kind, target_id, before_state, after_state, reason, created_at').eq('target_kind', 'user').eq('target_id', id).order('created_at', { ascending: false }).limit(50),
@@ -78,10 +79,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : { data: [] };
   const allAudit = [...(audit.data ?? []), ...(purchaseAudit ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 
-  // Lifetime paid sum (completed, test payments excluded)
-  const lifetimePaid = (purchases.data ?? [])
-    .filter((p) => p.status === 'completed' && !p.is_test)
-    .reduce((sum, p) => sum + (p.amount_taka ?? 0), 0);
+  // Lifetime paid = money actually received (the observed bKash amount, not
+  // the package price), completed and non-test only; plus what was bought and
+  // the latest purchase. See _lib/purchaseSummary.ts.
+  const summary = summarizePurchases(purchases.data ?? []);
 
   // True login email from auth.users (profiles.email can drift).
   let loginEmail: string | null = null;
@@ -94,7 +95,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     profile: profile.data,
     loginEmail,
     emailMismatch,
-    lifetimePaid,
+    lifetimePaid: summary.paidTaka,
+    purchaseSummary: summary,
     purchases: purchases.data ?? [],
     resumes: resumes.data ?? [],
     aiCalls30d: aiCalls.count ?? 0,

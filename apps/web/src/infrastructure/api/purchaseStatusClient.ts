@@ -22,6 +22,9 @@ export interface PurchaseStatusResponse {
   status: PurchaseStatus;
   amountTaka: number;
   observedAmountTaka: number | null;
+  /** Credits on the row: 0 = master-resume package, 5 = the pack (incl. a
+   *  master-resume payment that covered the pack, migration 036). */
+  creditsGranted: number;
   missing: number | null;
   message: string;
 }

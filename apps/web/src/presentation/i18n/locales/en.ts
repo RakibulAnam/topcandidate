@@ -85,6 +85,9 @@ export const en = {
     masterConfirmedHeading: 'Master resume unlocked!',
     masterConfirmedSub: 'It\'s built from your profile. Find it under Master Resume.',
     masterConfirmedToast: 'Master resume unlocked.',
+    // A master-resume payment that covered the ৳199 pack is settled as the pack (migration 036).
+    upgradedConfirmedHeading: 'You got the full pack!',
+    upgradedConfirmedSub: 'You sent enough for the pack, so {credits} job kits are in your account and your master resume is unlocked.',
     masterVerifyStep3: 'Unlocking your master resume',
     alreadyUnlocked: 'Your master resume is already unlocked.',
     subtitle: 'Each tailored application — resume, cover letter, outreach email, LinkedIn note, and interview prep — uses one generation.',
