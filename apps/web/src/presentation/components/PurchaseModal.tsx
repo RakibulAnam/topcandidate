@@ -473,11 +473,14 @@ export const PurchaseModal: React.FC<Props> = ({
     let active = true;
     let done = false;
 
-    const settle = (status: PurchaseStatus, observed: number | null, expected: number) => {
+    const settle = (status: PurchaseStatus, observed: number | null, expected: number, credits: number | null = null) => {
       if (!active || done) return;
       done = true;
       if (status === 'completed') {
-        track('purchase_confirmed', { status, via: 'verify_window' });
+        track('purchase_confirmed', { status, via: 'verify_window', creditsGranted: credits });
+        // A ৳99 master-resume payment that covered the pack settles as the
+        // pack (migration 036); the confirmation must then say credits.
+        setCreditsGranted(credits);
         setPhase('confirmed');
         // Closing is owned by the dedicated 'confirmed' effect below. Doing it
         // here with an `active`-guarded timer could never fire: setting the
@@ -504,7 +507,7 @@ export const PurchaseModal: React.FC<Props> = ({
         const st = await fetchPurchaseStatus(trackedTxn);
         if (!active || done) return;
         if (TERMINAL_STATUSES.includes(st.status)) {
-          settle(st.status, st.observedAmountTaka, st.amountTaka);
+          settle(st.status, st.observedAmountTaka, st.amountTaka, st.creditsGranted ?? null);
         }
       } catch {
         // Transient 404 while the row propagates, or a network blip. The next
@@ -778,7 +781,7 @@ export const PurchaseModal: React.FC<Props> = ({
         // The credits are already in the account at this point, so say that.
         // `successToast` ("will land within a few minutes") is the wrong tense
         // here — it belonged to the old flow where submitting only queued.
-        toast.success(isMasterPkg
+        toast.success(isMasterPkg && !(result.creditsGranted && result.creditsGranted > 0)
           ? t('purchaseModal.masterConfirmedToast')
           : t('purchaseModal.confirmedToast', { credits: result.creditsGranted ?? 5 }));
         // Hold the green check briefly, then refresh credits + close — see the
@@ -945,7 +948,9 @@ export const PurchaseModal: React.FC<Props> = ({
 
 
   // Success takeover — reused for the mobile full-sheet overlay and the
-  // desktop right-panel overlay.
+  // desktop right-panel overlay. A master-resume payment that covered the
+  // pack was settled as the pack (migration 036): say so, credits included.
+  const upgradedToPack = isMasterPkg && creditsGranted != null && creditsGranted > 0;
   const confirmedContent = (
     <div className="flex flex-col items-center justify-center gap-3 px-6 text-center">
       <div
@@ -955,10 +960,14 @@ export const PurchaseModal: React.FC<Props> = ({
         <Check size={32} strokeWidth={3} className="text-white" />
       </div>
       <div className="font-display text-2xl font-semibold text-[#0F1B2D]">
-        {isMasterPkg ? t('purchaseModal.masterConfirmedHeading') : t('purchaseModal.confirmedHeading')}
+        {upgradedToPack
+          ? t('purchaseModal.upgradedConfirmedHeading')
+          : isMasterPkg ? t('purchaseModal.masterConfirmedHeading') : t('purchaseModal.confirmedHeading')}
       </div>
       <div className="max-w-xs text-sm text-[#6B6759]">
-        {isMasterPkg ? t('purchaseModal.masterConfirmedSub') : t('purchaseModal.confirmedSub')}
+        {upgradedToPack
+          ? t('purchaseModal.upgradedConfirmedSub', { credits: creditsGranted })
+          : isMasterPkg ? t('purchaseModal.masterConfirmedSub') : t('purchaseModal.confirmedSub')}
       </div>
     </div>
   );

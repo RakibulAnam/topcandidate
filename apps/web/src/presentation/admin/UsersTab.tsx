@@ -20,6 +20,22 @@ import {
   JsonDiff, KeyValue, PageHeader, ReasonModal, SearchInput, Section, Skeleton,
   StatusPill, TimeCell, focusRing, toastOk, toastSuccess, useDebounced,
 } from './ui';
+import { ResumeViewer, isMasterResume } from './ResumeViewer';
+
+/** api/admin/_lib/purchaseSummary.ts — what a user paid and bought. */
+interface PurchaseSummary {
+  /** Money received (observed bKash amount), completed non-test purchases. */
+  paidTaka: number;
+  packs: number;
+  masters: number;
+  last: null | { created_at: string; status: string; package: 'five-pack' | 'master-resume'; priceTaka: number; receivedTaka: number | null; is_test: boolean };
+}
+
+/** A row with credits is the pack; a 0-credit row is the master-resume package. */
+const packageLabel = (credits: number): string => (credits > 0 ? `Pack · ${credits} kits` : 'Master resume');
+
+const boughtText = (s: PurchaseSummary): string =>
+  [s.packs > 0 && `Pack ×${s.packs}`, s.masters > 0 && `Master resume ×${s.masters}`].filter(Boolean).join(' · ');
 
 interface UserRow {
   id: string;
@@ -49,6 +65,7 @@ interface UserRow {
   master_price_taka?: number | null;
   master_offer_taka?: number;
   master_resume_unlocked_at?: string | null;
+  purchaseSummary?: PurchaseSummary;
 }
 
 type Offer = 'legacy' | 'standard' | 'custom' | 'unlocked';
@@ -222,6 +239,7 @@ export const UsersTab: React.FC<{ api: AdminApi; initialUserId?: string | null; 
             const o = offerOf(u);
             return <span className="text-[12px]"><span className="font-semibold text-brand-700">{taka(o.taka)}</span> <span className="text-charcoal-500">{o.source}</span></span>;
           } },
+          { key: 'paid', header: 'Paid', width: 'w-40', render: (u) => <PaidCell s={u.purchaseSummary} /> },
           { key: 'credits', header: 'Credits', width: 'w-20', align: 'right', render: (u) => <span className={u.toolkit_credits < 0 ? 'text-red-700 font-semibold' : ''}>{u.toolkit_credits}</span> },
           { key: 'source', header: 'Source', width: 'w-28', render: (u) => <span className="text-[12px] text-charcoal-600 break-all">{sourceOf(u.utm_source, u.signup_referrer)}</span> },
           { key: 'active', header: 'Last active', width: 'w-32', render: (u) => <span className="text-[12px]"><Ago iso={u.last_active_at} /></span> },
@@ -339,8 +357,9 @@ interface UserDetailResp {
   loginEmail: string | null;
   emailMismatch: boolean;
   lifetimePaid: number;
+  purchaseSummary?: PurchaseSummary;
   purchases: Array<{ id: string; payment_reference: string; amount_taka: number; observed_amount_taka: number | null; status: string; credits_granted: number; is_test: boolean; created_at: string }>;
-  resumes: Array<{ id: string; title: string; company: string | null; job_title: string | null; created_at: string }>;
+  resumes: Array<{ id: string; title: string; company: string | null; generation_type?: string | null; job_title: string | null; created_at: string; updated_at?: string | null }>;
   aiCalls30d: number;
   funnel: null | {
     stage: Stage; onboarding_complete: boolean; user_type: string | null; location: string | null;
@@ -369,6 +388,7 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void; 
   const [tab, setTab] = useState<DetailTab>('activity');
   const [modal, setModal] = useState<UserModal | null>(null);
   const [busy, setBusy] = useState(false);
+  const [viewResume, setViewResume] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setLoading(true);
@@ -458,7 +478,15 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void; 
             <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
               <KeyValue label="Joined">{new Date(data.profile.created_at).toLocaleDateString()}</KeyValue>
               <KeyValue label="Last active"><Ago iso={data.funnel?.last_active_at} /></KeyValue>
-              <KeyValue label="Lifetime paid">{taka(data.lifetimePaid)}</KeyValue>
+              <KeyValue label="Lifetime paid">
+                <span title="Money received by bKash across completed purchases (test payments excluded)">{taka(data.lifetimePaid)}</span>
+                {data.purchaseSummary && boughtText(data.purchaseSummary) && (
+                  <span className="block text-[11px] text-charcoal-500">{boughtText(data.purchaseSummary)}</span>
+                )}
+              </KeyValue>
+              <KeyValue label="Last purchase">
+                {data.purchaseSummary?.last ? <LastPurchase last={data.purchaseSummary.last} /> : <span className="text-charcoal-400">—</span>}
+              </KeyValue>
               <KeyValue label="AI calls (30d)">{data.aiCalls30d}</KeyValue>
               <KeyValue label="Type">{data.funnel?.user_type ?? <span className="text-charcoal-400">—</span>}</KeyValue>
               <KeyValue label="Location">{data.funnel?.location || <span className="text-charcoal-400">—</span>}</KeyValue>
@@ -542,10 +570,12 @@ const UserDetail: React.FC<{ api: AdminApi; userId: string; onBack: () => void; 
       <Card padded={false}>
         {tab === 'activity' && <ActivityList rows={data.events} />}
         {tab === 'purchases' && <PurchaseTable rows={data.purchases} onToggleTest={(p) => setModal({ kind: 'test', purchaseId: p.id, isTest: !p.is_test })} />}
-        {tab === 'resumes' && <ResumeTable rows={data.resumes} />}
+        {tab === 'resumes' && <ResumeTable rows={data.resumes} onView={setViewResume} />}
         {tab === 'audit' && <AuditList rows={data.audit} />}
         {tab === 'notes' && <NotesList rows={data.notes} />}
       </Card>
+
+      {viewResume && <ResumeViewer api={api} resumeId={viewResume} onClose={() => setViewResume(null)} />}
 
       <ReasonModal
         open={modal !== null}
@@ -844,6 +874,35 @@ const ActivityList: React.FC<{ rows: UserDetailResp['events'] }> = ({ rows }) =>
 };
 
 
+const LastPurchase: React.FC<{ last: NonNullable<PurchaseSummary['last']> }> = ({ last }) => (
+  <div className="text-[12px] leading-tight">
+    <div>{last.package === 'five-pack' ? 'Pack' : 'Master resume'} · {taka(last.receivedTaka ?? last.priceTaka)}</div>
+    <div className="mt-0.5 flex items-center gap-1.5 flex-wrap text-charcoal-500">
+      {last.status !== 'completed' && <StatusPill status={last.status} />}
+      {last.is_test && <StatusPill status="test" tone="pending" label="test" />}
+      <Ago iso={last.created_at} />
+    </div>
+  </div>
+);
+
+const PaidCell: React.FC<{ s?: PurchaseSummary }> = ({ s }) => {
+  if (!s || (!s.last && s.paidTaka === 0)) return <span className="text-charcoal-400">—</span>;
+  const bought = boughtText(s);
+  return (
+    <div className="text-[12px] leading-tight">
+      {s.paidTaka > 0 ? <div className="font-semibold text-brand-700">{taka(s.paidTaka)}</div> : <div className="text-charcoal-400">৳0</div>}
+      {bought && <div className="text-charcoal-600">{bought}</div>}
+      {s.last && (
+        <div className="mt-0.5 flex items-center gap-1 flex-wrap text-charcoal-500">
+          {s.last.status !== 'completed' && <StatusPill status={s.last.status} />}
+          {s.last.is_test && <StatusPill status="test" tone="pending" label="test" />}
+          <span>last <Ago iso={s.last.created_at} /></span>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases']; onToggleTest: (p: UserDetailResp['purchases'][number]) => void }> = ({ rows, onToggleTest }) => {
   if (rows.length === 0) return <EmptyState title="No purchases yet" description="When the customer pays via bKash, their purchases will appear here." />;
   return (
@@ -852,8 +911,10 @@ const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases']; onToggleTest:
         <thead className="text-[11px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">
           <tr>
             <th className="text-left px-4 py-3">TrxID</th>
+            <th className="text-left px-4 py-3">Package</th>
             <th className="text-left px-4 py-3">Status</th>
-            <th className="text-right px-4 py-3">Amount</th>
+            <th className="text-right px-4 py-3">Price</th>
+            <th className="text-right px-4 py-3">Received</th>
             <th className="text-right px-4 py-3">Credits</th>
             <th className="text-left px-4 py-3">Created</th>
             <th className="px-4 py-3"><span className="sr-only">Test payment</span></th>
@@ -863,8 +924,17 @@ const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases']; onToggleTest:
           {rows.map((p) => (
             <tr key={p.id} className="border-t border-charcoal-100">
               <td className="px-4 py-2.5 font-mono text-[12px] break-all">{p.payment_reference}</td>
+              <td className="px-4 py-2.5 whitespace-nowrap">{packageLabel(p.credits_granted)}</td>
               <td className="px-4 py-2.5"><StatusPill status={p.status} />{p.is_test && <span className="ml-1.5"><StatusPill status="test" tone="pending" label="test" /></span>}</td>
-              <td className="px-4 py-2.5 text-right whitespace-nowrap">{taka(p.amount_taka)}{p.observed_amount_taka != null && p.observed_amount_taka !== p.amount_taka && <span className="block text-[11px] text-accent-600">obs {taka(p.observed_amount_taka)}</span>}</td>
+              <td className="px-4 py-2.5 text-right whitespace-nowrap">{taka(p.amount_taka)}</td>
+              <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                {p.observed_amount_taka == null ? <span className="text-charcoal-400">—</span> : taka(p.observed_amount_taka)}
+                {p.observed_amount_taka != null && p.observed_amount_taka !== p.amount_taka && (
+                  <span className={`block text-[11px] ${p.observed_amount_taka > p.amount_taka ? 'text-accent-600' : 'text-red-700'}`}>
+                    {p.observed_amount_taka > p.amount_taka ? '+' : '−'}{taka(Math.abs(p.observed_amount_taka - p.amount_taka))}
+                  </span>
+                )}
+              </td>
               <td className="px-4 py-2.5 text-right">{p.credits_granted}</td>
               <td className="px-4 py-2.5"><TimeCell iso={p.created_at} /></td>
               <td className="px-4 py-2.5 text-right">
@@ -878,21 +948,25 @@ const PurchaseTable: React.FC<{ rows: UserDetailResp['purchases']; onToggleTest:
   );
 };
 
-const ResumeTable: React.FC<{ rows: UserDetailResp['resumes'] }> = ({ rows }) => {
+const ResumeTable: React.FC<{ rows: UserDetailResp['resumes']; onView: (id: string) => void }> = ({ rows, onView }) => {
   if (rows.length === 0) return <EmptyState title="No generated resumes" description="Read-only context — the customer hasn't generated anything yet." />;
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
         <thead className="text-[11px] uppercase tracking-[0.18em] text-charcoal-500 font-bold">
-          <tr><th className="text-left px-4 py-3">Title</th><th className="text-left px-4 py-3">Target role</th><th className="text-left px-4 py-3">Company</th><th className="text-left px-4 py-3">Created</th></tr>
+          <tr><th className="text-left px-4 py-3">Title</th><th className="text-left px-4 py-3">Type</th><th className="text-left px-4 py-3">Target role</th><th className="text-left px-4 py-3">Company</th><th className="text-left px-4 py-3">Created</th><th className="px-4 py-3"><span className="sr-only">View</span></th></tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} className="border-t border-charcoal-100">
+            <tr key={r.id} className="border-t border-charcoal-100 cursor-pointer hover:bg-charcoal-50" onClick={() => onView(r.id)}>
               <td className="px-4 py-2.5">{r.title}</td>
+              <td className="px-4 py-2.5 whitespace-nowrap">{isMasterResume(r) ? 'Master' : 'Tailored'}</td>
               <td className="px-4 py-2.5">{r.job_title || <span className="text-charcoal-400">—</span>}</td>
               <td className="px-4 py-2.5">{r.company || <span className="text-charcoal-400">—</span>}</td>
               <td className="px-4 py-2.5"><TimeCell iso={r.created_at} /></td>
+              <td className="px-4 py-2.5 text-right">
+                <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); onView(r.id); }}>View</Button>
+              </td>
             </tr>
           ))}
         </tbody>

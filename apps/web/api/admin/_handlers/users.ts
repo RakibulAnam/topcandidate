@@ -12,6 +12,8 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { requireAdmin, adminSupabase } from '../_lib/adminAuth.js';
+import { fetchAll } from '../_lib/fetchAll.js';
+import { summarizePurchases, type PurchaseRowLike } from '../_lib/purchaseSummary.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
@@ -113,10 +115,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (emailErr) console.warn('[admin/users] auth-email lookup failed:', emailErr.message);
     for (const e of (emails as { id: string; email: string }[] | null) ?? []) emailMap.set(e.id, e.email);
   }
+  // What each user on this page paid and bought (money received, packs,
+  // latest purchase). One read for the whole page; fetchAll because
+  // PostgREST caps a response at 1000 rows.
+  const byUser = new Map<string, (PurchaseRowLike & { user_id: string })[]>();
+  if (rows.length > 0) {
+    const { data: purchases, error: purchaseErr } = await fetchAll<PurchaseRowLike & { user_id: string }>(
+      supabase
+        .from('purchases')
+        .select('id, user_id, status, is_test, amount_taka, observed_amount_taka, credits_granted, created_at')
+        .in('user_id', rows.map((r) => r.id))
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true }),
+    );
+    if (purchaseErr) {
+      // Showing "never paid" for a paying customer would be worse than failing.
+      res.status(500).json({ error: `Supabase: ${purchaseErr.message}`, code: purchaseErr.code ?? null, hint: purchaseErr.hint ?? null });
+      return;
+    }
+    for (const p of purchases) {
+      const list = byUser.get(p.user_id);
+      if (list) list.push(p); else byUser.set(p.user_id, [p]);
+    }
+  }
+
   const enriched = rows.map((r) => {
     const loginEmail = emailMap.get(r.id) ?? null;
     return {
       ...r,
+      purchaseSummary: summarizePurchases(byUser.get(r.id) ?? []),
       loginEmail,
       emailMismatch: Boolean(loginEmail && r.email && loginEmail.toLowerCase() !== String(r.email).toLowerCase()),
     };

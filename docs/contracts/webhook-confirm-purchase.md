@@ -143,6 +143,9 @@ on POST /api/confirm-purchase:
        404 no_pending_purchase
      - found AND claimed_msisdn != senderMsisdn (both non-null) → 409 msisdn_mismatch
      - found AND amountTaka < pending.amount_taka → 409 underpaid; row flipped to 'underpaid'
+     - found AND it is a master-resume row (0 credits) AND amountTaka ≥ ৳199
+       → the row becomes the five-pack (5 credits, ৳199) before the checks
+         below; the 200 reports creditsGranted = 5 (migration 036, ADR-0010)
      - found AND amountTaka > pending.amount_taka → 200 + log surplus to purchase_overpayments
   5. Grant credits, flip status to 'completed', record observed amount + state-change audit row.
   6. Return 200 with { success: true, userId, creditsGranted, newBalance }.

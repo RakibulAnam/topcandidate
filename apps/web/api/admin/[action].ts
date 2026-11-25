@@ -65,6 +65,8 @@ import grantMasterResume from './_handlers/grant-master-resume.js';
 import deleteUser from './_handlers/delete-user.js';
 import markTestPurchase from './_handlers/mark-test-purchase.js';
 import setMasterPrice from './_handlers/set-master-price.js';
+// Read-only resume viewer (User Detail → resumes)
+import resumeDetail from './_handlers/resume-detail.js';
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void> | void;
 
@@ -115,6 +117,7 @@ const HANDLERS: Record<string, Handler> = {
   'delete-user': deleteUser,
   'mark-test-purchase': markTestPurchase,
   'set-master-price': setMasterPrice,
+  'resume-detail': resumeDetail,
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

@@ -94,6 +94,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     status: data.status,
     amountTaka: expected,
     observedAmountTaka: observed,
+    // 0 = the master-resume package. A master-resume row paid at or above the
+    // pack price is settled as the pack (migration 036) and reads 5 here, so
+    // the sheet can tell the customer credits were added.
+    creditsGranted: data.credits_granted,
     missing,
     message,
   });
